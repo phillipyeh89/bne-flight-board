@@ -57,11 +57,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 快取設定為 1200 秒 (20分鐘)
 @st.cache_data(ttl=1200)
 def fetch_flight_data(from_time, to_time):
     url = f"https://aerodatabox.p.rapidapi.com/flights/airports/icao/YBBN/{from_time}/{to_time}"
-    # 關閉 Codeshare，排除聯營航班
     querystring = {"direction": "Arrival", "withCancelled": "false", "withCodeshared": "false"}
     headers = {
         "X-RapidAPI-Key": st.secrets["X_RAPIDAPI_KEY"],
@@ -100,8 +98,10 @@ processed_flights = []
 for f in flights:
     flight_num = f.get('number', 'N/A')
     
+    # 強化地名抓取邏輯：優先抓城市名稱 (Singapore)，若無則抓縮寫、全名或 IATA 代碼
     dep = f.get('departure', {})
-    origin = dep.get('airport', {}).get('shortName') or dep.get('airport', {}).get('name') or dep.get('airport', {}).get('iata') or 'Unknown'
+    airport_info = dep.get('airport', {})
+    origin = airport_info.get('municipalityName') or airport_info.get('shortName') or airport_info.get('name') or airport_info.get('iata') or 'Unknown'
     
     time_candidates = []
     for node_name in ['arrival', 'movement', 'departure']:
@@ -132,13 +132,14 @@ for f in flights:
     gate = arr_node.get('gate', 'TBA')
     terminal = str(arr_node.get('terminal', '')).strip().upper()
     
-    # 保留過濾國內線的邏輯，但不再把 Terminal 加進顯示字串中
     if terminal == 'D' or terminal == 'DOM':
         continue
         
     status = f.get('status', '').lower()
-    is_landed = status in ['landed', 'arrived']
     time_diff_minutes = int((dt - now_aest).total_seconds() / 60)
+    
+    # 雙重判定：API 狀態顯示降落，或者「預計抵達時間已經小於等於0」都視為降落
+    is_landed = status in ['landed', 'arrived'] or time_diff_minutes <= 0
     
     css_class = "status-normal"
     tags = []
@@ -149,7 +150,6 @@ for f in flights:
     if is_landed:
         css_class = "status-landed"
         landed_mins = max(0, -time_diff_minutes)
-        # 更新已降落的文字顯示
         time_display = f"Landed {landed_mins} 分鐘 ago ({dt.strftime('%H:%M')})"
     else:
         minutes_left = max(0, time_diff_minutes)
@@ -164,7 +164,7 @@ for f in flights:
     processed_flights.append({
         'num': flight_num,
         'origin': origin,
-        'gate': gate,  # 只顯示 Gate，拿掉 TI /
+        'gate': gate,
         'display': time_display,
         'is_landed': is_landed,
         'css': css_class,
