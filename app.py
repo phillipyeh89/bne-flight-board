@@ -187,20 +187,23 @@ if len(processed_flights) == 0:
 # 排序邏輯
 processed_flights.sort(key=lambda x: (1 if x['is_landed'] else 0, -x['dt'].timestamp() if x['is_landed'] else x['dt'].timestamp()))
 
+# 渲染卡片 (已修正 Markdown 縮排誤判問題)
 for pf in processed_flights:
     tag_html = "".join([f'<div class="label-tag">{tag}</div>' for tag in pf['tags']])
-    st.markdown(f"""
-    <div class="flight-card {pf['css']}">
-        {tag_html}
-        <div style="display: flex; justify-content: space-between; align-items: flex-end;">
-            <div>
-                <div style="font-size: 1.3em; opacity: 0.95;">{pf['num']} • {pf['origin']}</div>
-                <div class="time-text">{pf['display']}</div>
-            </div>
-            <div style="text-align: right;">
-                <div style="font-size: 1em; opacity: 0.8; margin-bottom: -5px;">Gate</div>
-                <div class="gate-text">{pf['gate']}</div>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    
+    card_html = f"""
+<div class="flight-card {pf['css']}">
+{tag_html}
+<div style="display: flex; justify-content: space-between; align-items: flex-end;">
+<div>
+<div style="font-size: 1.3em; opacity: 0.95;">{pf['num']} • {pf['origin']}</div>
+<div class="time-text">{pf['display']}</div>
+</div>
+<div style="text-align: right;">
+<div style="font-size: 1em; opacity: 0.8; margin-bottom: -5px;">Gate</div>
+<div class="gate-text">{pf['gate']}</div>
+</div>
+</div>
+</div>
+"""
+    st.markdown(card_html, unsafe_allow_html=True)
