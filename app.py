@@ -23,7 +23,6 @@ IMAGE_WORKERS      = 8
 DOMESTIC_TERMINALS = ('D', 'DOM', 'D-ANC', 'GAT', 'TBA')
 SMALL_AIRCRAFT_FILTER = ('BEECH', 'FAIRCHILD', 'CESSNA', 'PIPER', 'PILATUS', 'KING AIR', 'METROLINER')
 
-# 城市別名對照表
 CITY_MAP = {
     "Lapu-Lapu City": "Cebu",
     "Denpasar-Bali Island": "Bali",
@@ -33,20 +32,31 @@ CITY_MAP = {
 
 UI_REFRESH_SEC     = 60 
 API_DATA_TTL_SEC   = 1200 
+STALE_DATA_THRESHOLD_MIN = 40  # 超過 40 分鐘即視為過期資料
 
 # ─────────────────────────────────────────────
-# Page Config & CSS
+# Page Config & CSS (With Blink Animation)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Flight Board", page_icon="✈️", layout="centered")
 st.markdown(f"""
 <meta http-equiv="refresh" content="{UI_REFRESH_SEC}">
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=JetBrains+Mono:wght@600&display=swap');
+    
     #MainMenu {{visibility: hidden;}}
     header {{visibility: hidden;}}
     .block-container {{padding-top: 2rem; font-family: 'Inter', sans-serif;}}
     div, span, label {{ font-family: 'Inter', sans-serif; }}
     .mono {{ font-family: 'JetBrains Mono', monospace; letter-spacing: -0.5px; }}
+
+    /* 閃爍動畫設定 */
+    @keyframes blink {{ 50% {{ opacity: 0; }} }}
+    .stale-warning {{
+        color: #EF4444 !important;
+        font-weight: 700 !important;
+        animation: blink 1s linear infinite;
+    }}
+
     .avatar-btn {{
         cursor: pointer; margin-right: 18px; flex-shrink: 0;
         display: block; transition: transform 0.2s ease, box-shadow 0.2s ease;
@@ -191,7 +201,6 @@ def render_flight_card(pf: dict, index: int):
             act_html = f'<span class="mono" style="color:#F8FAFC;font-weight:bold;background:rgba(248,250,252,0.1);padding:2px 6px;border-radius:4px;border:1px solid rgba(248,250,252,0.3);">Est {pf["actual_time"]}</span>{next_day_tag}'
         else: act_html = f'{next_day_tag}'
 
-    # 組合城市名與 IATA Code
     origin_display = f"{pf['origin']} <span class='mono' style='font-size:0.85em; opacity:0.8;'>({pf['iata']})</span>" if pf['iata'] else pf['origin']
 
     card_html = f"""<div style="background-color:{pf['bg_color']};border-left:6px solid {border_col};border-radius:8px;padding:16px 20px;margin-bottom:12px;display:flex;align-items:center;color:white;box-shadow:0 4px 6px rgba(0,0,0,0.15);">
@@ -220,8 +229,20 @@ col1, col2 = st.columns([2, 1])
 with col1: st.title("✈️ Arrivals")
 with col2:
     st.markdown(f'<div style="font-size:0.85em;color:#94A3B8;text-align:center;margin-top:10px;">🕒 Live: {now_aest.strftime("%H:%M:%S")}</div>', unsafe_allow_html=True)
+    
+    # --- 數據過期警示邏輯 ---
     api_t = st.session_state.get('api_last_hit')
-    st.markdown(f'<div style="font-size:0.7em;color:#64748B;text-align:center;">API: {api_t.strftime("%H:%M") if api_t else "--:--"}</div>', unsafe_allow_html=True)
+    if api_t:
+        diff_mins = (now_aest - api_t).total_seconds() / 60
+        if diff_mins > STALE_DATA_THRESHOLD_MIN:
+            # 超過 40 分鐘，顯示紅色閃爍警示
+            api_disp = f'<span class="stale-warning">API: {api_t.strftime("%H:%M")} (STALE)</span>'
+        else:
+            api_disp = f'API: {api_t.strftime("%H:%M")}'
+    else:
+        api_disp = "API: --:--"
+    
+    st.markdown(f'<div style="font-size:0.7em;color:#64748B;text-align:center;">{api_disp}</div>', unsafe_allow_html=True)
 
 flights = fetch_flight_data(from_t, to_t)
 if not flights:
@@ -235,11 +256,8 @@ for f in flights:
     dep, mv = f.get("departure", {}), f.get("movement", {})
     ai = dep.get("airport") or mv.get("airport") or {}
     
-    # 城市名處理
     raw_city = ai.get("municipalityName") or ai.get("name") or ai.get("iata") or "Unknown"
     city = CITY_MAP.get(raw_city, raw_city)
-    
-    # 機場代碼 (IATA)
     iata_code = ai.get("iata", "")
     
     country = str(ai.get("countryCode", "")).strip().lower()
