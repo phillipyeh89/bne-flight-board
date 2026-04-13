@@ -183,17 +183,20 @@ def render_flight_card(pf: dict, index: int):
     sch_str = f'<span class="mono">Sch {pf["sch_display"]}</span> • ' if pf["sch_display"] else ""
     next_day_tag = ' <small style="opacity:0.6;">(Next Day)</small>' if pf["is_next_day"] else ''
 
-    # 💡 新邏輯：只有當「尚未降落」、「未取消」且「預估時間完全等於表定時間（代表沒有雷達動態更新）」時，才顯示警告
+    # 💡 V7.12 修正：從檢查數字改為檢查「時間來源標籤」
+    # 如果 time_type 只能拿到 scheduled，代表雷達沒有更新預估時間
     check_board_tag = ""
-    if not pf["is_landed"] and not pf["is_canceled"] and pf["actual_time"] == pf["sch_display"]:
+    if not pf["is_landed"] and not pf["is_canceled"] and pf["time_type"] == "scheduled":
         check_board_tag = ' <span style="color:#FBBF24; font-size:0.85em; margin-left:6px; font-weight:700;">⚠️ Check Board</span>'
 
     if pf["is_landed"] or pf["time_type"] == "actual":
         act_html = f'<span class="mono" style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 6px;border-radius:4px;border:1px solid rgba(14,165,233,0.3);">Act {pf["actual_time"]}</span>{next_day_tag}'
     elif pf["time_type"] == "revised":
         act_html = f'<span class="mono" style="color:#E2E8F0;font-weight:bold;background:rgba(226,232,240,0.15);padding:2px 6px;border-radius:4px;border:1px solid rgba(226,232,240,0.3);">Est {pf["actual_time"]}</span>{next_day_tag}{check_board_tag}'
-    else:
-        act_html = f'{next_day_tag}{check_board_tag}'
+    else: # pf["time_type"] == "scheduled"
+        act_html = f'<span class="mono" style="color:#94A3B8;font-weight:bold;background:rgba(148,163,184,0.15);padding:2px 6px;border-radius:4px;border:1px solid rgba(148,163,184,0.3);">Sch {pf["actual_time"]}</span>{next_day_tag}{check_board_tag}'
+        # 若只有 scheduled，連前面原本顯示的 "Sch xx:xx • " 都不需要重複顯示，讓版面更乾淨
+        sch_str = "" 
 
     origin_display = f"{pf['origin']} <span class='mono' style='font-size:0.85em; opacity:0.8;'>({pf['iata']})</span>" if pf['iata'] else pf['origin']
 
@@ -241,10 +244,10 @@ with st.expander("ℹ️ 系統運作說明與常見問題 (System Info)"):
     * 系統只會透過「實體機身編號 (Registration Number)」來抓取精確的飛機照片。
     * 若飛機仍在遙遠航程中，航空公司有時尚未指派或回傳確切的機身編號，系統為了防呆會顯示預設 ✈️ 圖示。通常在降落前 1-2 小時會自動補齊。
 
-    **3. 時間標籤 (Act vs Est vs ⚠️ Check Board)**
-    * <span class="mono" style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 4px;border-radius:4px;">Act</span> **(天藍色)**：Actual。飛機已實際降落，或進入雷達密集區鎖定了極高準確度的降落時間。
-    * <span class="mono" style="color:#E2E8F0;font-weight:bold;background:rgba(226,232,240,0.15);padding:2px 4px;border-radius:4px;">Est</span> **(冷灰色)**：Estimated。已獲取雷達動態更新的預估抵達時間。
-    * **⚠️ Check Board**：當預估時間(Est)與表定時間(Sch)完全相同，代表系統尚未抓取到雷達即時動態。此時請抬頭核對機場實體螢幕，以防漏接旅客。
+    **3. 時間標籤狀態說明**
+    * <span class="mono" style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 4px;border-radius:4px;">Act</span> **(天藍色)**：飛機已實際降落。
+    * <span class="mono" style="color:#E2E8F0;font-weight:bold;background:rgba(226,232,240,0.15);padding:2px 4px;border-radius:4px;">Est</span> **(冷灰色)**：雷達已掌握即時動態，並計算出精準預估時間。就算航班表現完美、沒有延遲，只要有雷達追蹤就會顯示此標籤。
+    * <span class="mono" style="color:#94A3B8;font-weight:bold;background:rgba(148,163,184,0.15);padding:2px 4px;border-radius:4px;">Sch</span> **(暗灰色)** + **⚠️ Check Board**：雷達尚未收到該航班動態，僅能提供原本的表定時間。此時請務必抬頭核對機場實體螢幕，以免錯估客流時間。
     
     **4. 隱藏航班與過濾器**
     * 系統已啟動「免稅店專屬國際線過濾器」，自動排除了國內航廈 (Domestic)、小型私人飛機與非載客航班。
