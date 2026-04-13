@@ -4,8 +4,13 @@ import pandas as pd
 from datetime import datetime, timedelta
 import pytz
 
+# 設定頁面與手機直式螢幕最佳化
 st.set_page_config(page_title="BNE 航班看板", page_icon="✈️", layout="centered")
 
+# 自動更新機制：每 20 分鐘 (1200秒) 自動重整
+st.markdown('<meta http-equiv="refresh" content="1200">', unsafe_allow_html=True)
+
+# 注入自訂 CSS
 st.markdown("""
 <style>
     .flight-card {
@@ -88,24 +93,15 @@ if not flights:
     st.info("目前視窗內無航班資料。")
     st.stop()
 
-# ==========================================
-# 🛠️ 抓漏神器：直接把 API 回傳的第一手資料印出來
-# ==========================================
-with st.expander("🛠️ 除錯模式：若地名顯示 No Data，請點此展開並截圖給我"):
-    # 找一下 SQ265 或直接顯示前 3 筆
-    debug_data = [f for f in flights if "SQ" in f.get("number", "")]
-    if not debug_data:
-        debug_data = flights[:3]
-    st.json(debug_data)
-# ==========================================
-
 processed_flights = []
 
 for f in flights:
     flight_num = f.get('number', 'N/A')
     
+    # 完美修復版：同時搜尋 departure 與 movement 節點
     dep = f.get('departure') or {}
-    airport_info = dep.get('airport') or {}
+    movement = f.get('movement') or {}
+    airport_info = dep.get('airport') or movement.get('airport') or {}
     
     city = airport_info.get('municipalityName')
     name = airport_info.get('name')
@@ -116,7 +112,7 @@ for f in flights:
     elif name: origin = name
     elif iata: origin = iata
     elif icao: origin = icao
-    else: origin = "No Data"
+    else: origin = "Unknown"
     
     time_candidates = []
     for node_name in ['arrival', 'movement', 'departure']:
