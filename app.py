@@ -139,10 +139,19 @@ for f in flights:
     elif icao: origin = icao
     else: origin = "Unknown"
     
-    # === 抓取機型 (Aircraft Type) ===
+    # === 抓取機型與註冊編號 (Aircraft Type & Registration) ===
     aircraft_node = f.get('aircraft') or {}
     aircraft_model = aircraft_node.get('model', '')
-    aircraft_display = f'<div style="font-size: 0.85em; opacity: 0.6; margin-top: 4px; font-weight: 500;">✈️ {aircraft_model}</div>' if aircraft_model else ''
+    aircraft_reg = aircraft_node.get('reg', '')
+    
+    ac_display_parts = []
+    if aircraft_model:
+        ac_display_parts.append(aircraft_model)
+    if aircraft_reg:
+        ac_display_parts.append(f"({aircraft_reg})")
+        
+    ac_text = " ".join(ac_display_parts)
+    aircraft_display = f'<div style="font-size: 0.85em; opacity: 0.6; margin-top: 4px; font-weight: 500;">✈️ {ac_text}</div>' if ac_text else ''
     
     time_candidates = []
     scheduled_time_raw = None
@@ -239,7 +248,6 @@ for f in flights:
 
     if is_landed:
         landed_mins = max(0, -time_diff_minutes)
-        # 修改為 60 分鐘內保持綠色置頂
         if landed_mins <= 60:
             css_class = "status-landed-new"
         else:
@@ -273,7 +281,6 @@ for f in flights:
 
 def custom_sort(pf):
     if pf['is_landed']:
-        # 修改排序邏輯，60 分鐘內的班次置頂
         if pf['landed_mins'] <= 60:
             return (0, -pf['dt'].timestamp())
         else:
