@@ -4,55 +4,73 @@ import pandas as pd
 from datetime import datetime, timedelta
 import pytz
 
-# 設定頁面與手機直式螢幕最佳化
-st.set_page_config(page_title="BNE 航班看板", page_icon="✈️", layout="centered")
+# 設定頁面與手機直式螢幕最佳化 (English Title)
+st.set_page_config(page_title="BNE Flight Board", page_icon="✈️", layout="centered")
 
 # 自動更新機制：每 20 分鐘 (1200秒) 自動重整
 st.markdown('<meta http-equiv="refresh" content="1200">', unsafe_allow_html=True)
 
-# 注入自訂 CSS
+# 注入高質感漸層 CSS
 st.markdown("""
 <style>
     .flight-card {
-        padding: 18px;
+        padding: 16px 20px;
         margin-bottom: 15px;
         border-radius: 12px;
-        color: white;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-        font-family: 'sans-serif';
+        color: #F8FAFC;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        border: 1px solid rgba(255, 255, 255, 0.05);
     }
     .gate-text {
-        font-size: 2.3em;
-        font-weight: 900;
-        line-height: 1.1;
+        font-size: 2.5em;
+        font-weight: 800;
+        line-height: 1;
+        letter-spacing: -0.02em;
     }
     .time-text {
-        font-size: 1.8em;
-        font-weight: bold;
-        margin-top: 5px;
+        font-size: 1.6em;
+        font-weight: 700;
+        margin-top: 6px;
+        letter-spacing: -0.01em;
     }
     .label-tag {
-        background-color: rgba(255, 255, 255, 0.25);
-        padding: 4px 8px;
-        border-radius: 4px;
-        font-size: 0.9em;
-        font-weight: bold;
-        margin-bottom: 8px;
+        background-color: rgba(255, 255, 255, 0.2);
+        padding: 4px 10px;
+        border-radius: 6px;
+        font-size: 0.85em;
+        font-weight: 600;
+        margin-bottom: 12px;
         display: inline-block;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
     }
-    .status-normal { background-color: #2E2E2E; }
-    .status-landed { background-color: #616161; color: #E0E0E0; opacity: 0.8; }
-    .status-orange { background-color: #F57C00; }
-    .status-red { background-color: #D32F2F; }
     
-    @keyframes flashAlert {
-        0% { background-color: #8E24AA; box-shadow: 0 0 10px #8E24AA; }
-        50% { background-color: #D500F9; box-shadow: 0 0 25px #D500F9; }
-        100% { background-color: #8E24AA; box-shadow: 0 0 10px #8E24AA; }
+    /* Modern Color Palette */
+    .status-normal { background: linear-gradient(135deg, #334155, #1E293B); } /* Slate */
+    .status-soon { background: linear-gradient(135deg, #D97706, #B45309); } /* Amber */
+    .status-urgent { background: linear-gradient(135deg, #E11D48, #BE123C); } /* Rose Red */
+    .status-landed-new { background: linear-gradient(135deg, #059669, #047857); } /* Emerald Green */
+    
+    /* Archived/Old Landed Flights */
+    .status-landed-old { 
+        background: #0F172A; 
+        color: #64748B; 
+        border: 1px dashed #334155; 
+        box-shadow: none; 
+    }
+    .status-landed-old .time-text, .status-landed-old .gate-text { opacity: 0.6; }
+
+    /* Pulsing effect for Early Prep */
+    @keyframes pulse-purple {
+        0% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.5); }
+        70% { box-shadow: 0 0 0 10px rgba(139, 92, 246, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0); }
     }
     .status-purple {
-        animation: flashAlert 1.5s infinite;
-        border: 2px solid #EA80FC;
+        background: linear-gradient(135deg, #8B5CF6, #6D28D9);
+        animation: pulse-purple 2s infinite;
+        border: 1px solid #A78BFA;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -70,7 +88,7 @@ def fetch_flight_data(from_time, to_time):
         response.raise_for_status()
         return response.json().get('arrivals', [])
     except Exception as e:
-        st.error(f"API 請求失敗：{e}")
+        st.error(f"API Request Failed: {e}")
         return []
 
 aest = pytz.timezone('Australia/Brisbane')
@@ -81,16 +99,16 @@ to_time = (now_aest + timedelta(hours=10)).strftime("%Y-%m-%dT%H:%M")
 
 col1, col2 = st.columns([2, 1])
 with col1:
-    st.title("✈️ BNE 航班看板")
+    st.title("✈️ Arrivals Board")
 with col2:
-    if st.button("🔄 手動更新", use_container_width=True):
+    if st.button("🔄 Refresh", use_container_width=True):
         fetch_flight_data.clear()
         st.rerun()
 
 flights = fetch_flight_data(from_time, to_time)
 
 if not flights:
-    st.info("目前視窗內無航班資料。")
+    st.info("No flight data available in the current window.")
     st.stop()
 
 processed_flights = []
@@ -164,7 +182,7 @@ for f in flights:
             s_dt = pd.to_datetime(scheduled_time_raw).to_pydatetime()
             if s_dt.tzinfo is None: s_dt = aest.localize(s_dt)
             else: s_dt = s_dt.astimezone(aest)
-            sch_display = f'<span style="font-size: 0.75em; opacity: 0.7; margin-left: 8px;">(表定 {s_dt.strftime("%H:%M")})</span>'
+            sch_display = f'<span style="font-size: 0.75em; opacity: 0.7; margin-left: 8px;">(Sch {s_dt.strftime("%H:%M")})</span>'
         except:
             pass
 
@@ -187,21 +205,26 @@ for f in flights:
     is_early_prep = (dt.hour == 2 and dt.minute >= 30) or (dt.hour == 3) or (dt.hour == 4 and dt.minute <= 10)
     
     if is_early_prep:
-        tags.append("⏰ 需提早準備開店")
+        tags.append("⏰ Early Prep Required")
 
     if is_landed:
-        css_class = "status-landed"
         landed_mins = max(0, -time_diff_minutes)
-        time_display = f"Landed {landed_mins} 分鐘 ago ({dt.strftime('%H:%M')})"
+        if landed_mins <= 40:
+            css_class = "status-landed-new"
+        else:
+            css_class = "status-landed-old"
+            
+        time_display = f"Landed {landed_mins}m ago ({dt.strftime('%H:%M')})"
     else:
         minutes_left = max(0, time_diff_minutes)
         if is_early_prep:
             css_class = "status-purple"
         elif minutes_left < 25:
-            css_class = "status-red"
+            css_class = "status-urgent"
         elif minutes_left <= 60:
-            css_class = "status-orange"
-        time_display = f"倒數 {minutes_left} 分鐘 ({dt.strftime('%H:%M')})"
+            css_class = "status-soon"
+            
+        time_display = f"In {minutes_left}m ({dt.strftime('%H:%M')})"
             
     processed_flights.append({
         'num': flight_num,
@@ -216,17 +239,13 @@ for f in flights:
         'dt': dt
     })
 
-# === 客流黃金時間排序邏輯 ===
 def custom_sort(pf):
     if pf['is_landed']:
         if pf['landed_mins'] <= 40:
-            # 優先級 0：置頂 (剛降落 40 分鐘內)。最新的排最上面
             return (0, -pf['dt'].timestamp())
         else:
-            # 優先級 2：墊底 (降落超過 40 分鐘)。最新的排最上面
             return (2, -pf['dt'].timestamp())
     else:
-        # 優先級 1：中間 (未降落的航班)。倒數最少的排最上面
         return (1, pf['dt'].timestamp())
 
 processed_flights.sort(key=custom_sort)
