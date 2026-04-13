@@ -7,16 +7,35 @@ import pytz
 # 設定頁面與手機直式螢幕最佳化
 st.set_page_config(page_title="BNE Flight Board", page_icon="✈️", layout="centered")
 
-# ==========================================
-# 🛑 取消了自動重整機制，改為純手動控制
-# ==========================================
+# 取消了自動重整機制，改為純手動控制
 
-# 注入高質感漸層 CSS (包含飛機照片與離櫃空檔橫幅設計)
+# 注入高質感漸層 CSS (包含飛機照片、離櫃空檔橫幅、客製化按鈕)
 st.markdown("""
 <style>
+    /* 客製化 Streamlit 按鈕設計 */
+    .stButton > button {
+        background: linear-gradient(135deg, #3B82F6, #2563EB) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        letter-spacing: 0.05em !important;
+        padding: 0.5rem 1rem !important;
+        transition: all 0.3s ease !important;
+        box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.4) !important;
+    }
+    .stButton > button:hover {
+        background: linear-gradient(135deg, #60A5FA, #3B82F6) !important;
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 8px -1px rgba(37, 99, 235, 0.5) !important;
+    }
+    .stButton > button:active {
+        transform: translateY(0) !important;
+    }
+
     .flight-card {
-        padding: 16px 20px;
-        margin-bottom: 15px;
+        padding: 18px 22px;
+        margin-bottom: 16px;
         border-radius: 12px;
         color: #F8FAFC;
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
@@ -24,15 +43,15 @@ st.markdown("""
         border: 1px solid rgba(255, 255, 255, 0.05);
     }
     .gate-text {
-        font-size: 2.5em;
+        font-size: 2.8em;
         font-weight: 800;
         line-height: 1;
         letter-spacing: -0.02em;
     }
     .time-text {
-        font-size: 1.5em;
+        font-size: 1.6em;
         font-weight: 700;
-        margin-top: 4px;
+        margin-top: 6px;
         letter-spacing: -0.01em;
     }
     .label-tag {
@@ -41,7 +60,7 @@ st.markdown("""
         border-radius: 6px;
         font-size: 0.85em;
         font-weight: 600;
-        margin-bottom: 12px;
+        margin-bottom: 14px;
         display: inline-block;
         letter-spacing: 0.02em;
         text-transform: uppercase;
@@ -94,7 +113,7 @@ st.markdown("""
     
     /* 更新時間標籤設計 */
     .update-time {
-        font-size: 0.8em;
+        font-size: 0.85em;
         color: #94A3B8;
         text-align: center;
         margin-bottom: 8px;
@@ -103,12 +122,11 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 為了記錄最後更新時間，我們使用 Session State
+# 記錄最後更新時間
 if 'last_update_time' not in st.session_state:
     st.session_state.last_update_time = None
 
 # === 外掛：飛機真實照片抓取器 (Planespotters.net API) ===
-# 加上 24 小時快取保護，避免網頁載入過慢
 @st.cache_data(ttl=86400, show_spinner=False)
 def fetch_aircraft_image(reg):
     if not reg:
@@ -125,7 +143,6 @@ def fetch_aircraft_image(reg):
         pass
     return ""
 
-# 調整 TTL，讓手動重整能夠強制抓取最新資料
 @st.cache_data(ttl=60) 
 def fetch_flight_data(from_time, to_time):
     url = f"https://aerodatabox.p.rapidapi.com/flights/airports/icao/YBBN/{from_time}/{to_time}"
@@ -137,10 +154,7 @@ def fetch_flight_data(from_time, to_time):
     try:
         response = requests.get(url, headers=headers, params=querystring, timeout=10)
         response.raise_for_status()
-        
-        # 成功抓取後，更新最後更新時間
         st.session_state.last_update_time = datetime.now(pytz.timezone('Australia/Brisbane'))
-        
         return response.json().get('arrivals', [])
     except Exception as e:
         st.error(f"API Request Failed: {e}")
@@ -156,7 +170,6 @@ col1, col2 = st.columns([2, 1])
 with col1:
     st.title("✈️ Arrivals Board")
 with col2:
-    # 顯示最後更新時間
     update_display = st.session_state.last_update_time.strftime('%H:%M') if st.session_state.last_update_time else "Just Now"
     st.markdown(f'<div class="update-time">🕒 Last Updated: {update_display}</div>', unsafe_allow_html=True)
     
@@ -203,7 +216,7 @@ for f in flights:
     aircraft_model = aircraft_node.get('model', '')
     aircraft_reg = aircraft_node.get('reg', '')
     
-    # 這裡呼叫我們外掛的照片 API
+    # 呼叫 API 抓圖
     image_url = fetch_aircraft_image(aircraft_reg)
     
     ac_display_parts = []
@@ -211,11 +224,11 @@ for f in flights:
     if aircraft_reg: ac_display_parts.append(f"({aircraft_reg})")
     ac_text = " ".join(ac_display_parts)
     
-    # 取消 HTML 縮排，防止被解析成 Code Block
+    # === 放大的飛機照片設計 (100px) ===
     if image_url:
-        image_html = f'<div style="width: 70px; height: 70px; border-radius: 8px; overflow: hidden; flex-shrink: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.2);"><img src="{image_url}" style="width: 100%; height: 100%; object-fit: cover;" /></div>'
+        image_html = f'<div style="width: 100px; height: 100px; border-radius: 10px; overflow: hidden; flex-shrink: 0; box-shadow: 0 4px 8px rgba(0,0,0,0.3);"><img src="{image_url}" style="width: 100%; height: 100%; object-fit: cover;" /></div>'
     else:
-        image_html = '<div style="width: 70px; height: 70px; border-radius: 8px; background: rgba(255,255,255,0.08); display: flex; align-items: center; justify-content: center; flex-shrink: 0; opacity: 0.5;"><span style="font-size: 2em;">✈️</span></div>'
+        image_html = '<div style="width: 100px; height: 100px; border-radius: 10px; background: rgba(255,255,255,0.08); display: flex; align-items: center; justify-content: center; flex-shrink: 0; opacity: 0.5;"><span style="font-size: 2.5em;">✈️</span></div>'
 
     aircraft_display = f'<div style="font-size: 0.85em; opacity: 0.7; font-weight: 500;">{ac_text}</div>' if ac_text else ''
     
@@ -365,7 +378,6 @@ for t_start, t_end in gaps:
     status_text = f"🟢 ACTIVE OFF-FLOOR TIME ({gap_display} left)" if is_active else f"🔄 {gap_display} OFF-FLOOR WINDOW (Break / Duties)"
     css_ext = "" if is_active else "future"
     
-    # 取消 HTML 縮排
     gap_html = f'<div class="gap-card {css_ext}">{status_text} <span style="opacity:0.6; margin-left:8px;">({display_start.strftime("%H:%M")} - {t_end.strftime("%H:%M")})</span></div>'
     
     processed_flights.append({
@@ -395,20 +407,20 @@ for pf in processed_flights:
         
     tag_html = "".join([f'<div class="label-tag">{tag}</div>' for tag in pf['tags']])
     
-    # 強制所有 HTML 標籤靠左對齊，防範 Streamlit Markdown 排版陷阱
+    # 搭配 100px 圖片重新調整版面：放大航班號、時間、Gate
     card_html = f"""<div class="flight-card {pf['css']}">
 {tag_html}
 <div style="display: flex; justify-content: space-between; align-items: center;">
-<div style="display: flex; gap: 15px; align-items: center;">
+<div style="display: flex; gap: 18px; align-items: center;">
 {pf['image_html']}
 <div style="display: flex; flex-direction: column; justify-content: center;">
-<div style="font-size: 1.2em; opacity: 0.95; font-weight: 600;">{pf['num']} • {pf['origin']} {pf['sch_display']}</div>
+<div style="font-size: 1.4em; opacity: 0.95; font-weight: 700; margin-bottom: 2px;">{pf['num']} • {pf['origin']} {pf['sch_display']}</div>
 {pf['aircraft_display']}
 <div class="time-text">{pf['display']}</div>
 </div>
 </div>
 <div style="text-align: right; padding-left: 10px;">
-<div style="font-size: 0.8em; opacity: 0.7; margin-bottom: -2px;">Gate</div>
+<div style="font-size: 0.9em; opacity: 0.7; margin-bottom: -2px;">Gate</div>
 <div class="gate-text">{pf['gate']}</div>
 </div>
 </div>
