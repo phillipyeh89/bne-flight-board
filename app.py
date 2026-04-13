@@ -120,7 +120,6 @@ for f in flights:
         node = f.get(node_name, {})
         if not isinstance(node, dict): continue
         
-        # 抓取 Scheduled Time (表定時間) 供後續顯示
         if not scheduled_time_raw:
             s_obj = node.get('scheduledTime')
             if isinstance(s_obj, dict) and s_obj.get('local'):
@@ -138,7 +137,6 @@ for f in flights:
             if t_val:
                 time_candidates.append(t_val)
                 
-    # 最外層防呆抓取 Scheduled
     if not scheduled_time_raw and f.get('scheduledTimeLocal'):
         scheduled_time_raw = f.get('scheduledTimeLocal')
                 
@@ -160,7 +158,6 @@ for f in flights:
     except:
         continue
 
-    # 處理表定時間 (Scheduled Time) 的格式化
     sch_display = ""
     if scheduled_time_raw:
         try:
@@ -185,8 +182,8 @@ for f in flights:
     
     css_class = "status-normal"
     tags = []
+    landed_mins = 0
     
-    # === 嚴格過濾早班時段：限定 02:30 AM 到 04:10 AM 降落的航班 ===
     is_early_prep = (dt.hour == 2 and dt.minute >= 30) or (dt.hour == 3) or (dt.hour == 4 and dt.minute <= 10)
     
     if is_early_prep:
@@ -213,12 +210,26 @@ for f in flights:
         'gate': gate,
         'display': time_display,
         'is_landed': is_landed,
+        'landed_mins': landed_mins,
         'css': css_class,
         'tags': tags,
         'dt': dt
     })
 
-processed_flights.sort(key=lambda x: (1 if x['is_landed'] else 0, -x['dt'].timestamp() if x['is_landed'] else x['dt'].timestamp()))
+# === 客流黃金時間排序邏輯 ===
+def custom_sort(pf):
+    if pf['is_landed']:
+        if pf['landed_mins'] <= 40:
+            # 優先級 0：置頂 (剛降落 40 分鐘內)。最新的排最上面
+            return (0, -pf['dt'].timestamp())
+        else:
+            # 優先級 2：墊底 (降落超過 40 分鐘)。最新的排最上面
+            return (2, -pf['dt'].timestamp())
+    else:
+        # 優先級 1：中間 (未降落的航班)。倒數最少的排最上面
+        return (1, pf['dt'].timestamp())
+
+processed_flights.sort(key=custom_sort)
 
 for pf in processed_flights:
     tag_html = "".join([f'<div class="label-tag">{tag}</div>' for tag in pf['tags']])
