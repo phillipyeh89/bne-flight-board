@@ -169,19 +169,11 @@ for f in flights:
     if aircraft_reg: ac_display_parts.append(f"({aircraft_reg})")
     ac_text = " ".join(ac_display_parts)
     
-    # 生成照片的 HTML (70x70 圓角縮圖)
+    # 這裡拔除了 HTML 縮排，避免 Streamlit Markdown 解析錯誤
     if image_url:
-        image_html = f'''
-        <div style="width: 70px; height: 70px; border-radius: 8px; overflow: hidden; flex-shrink: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
-            <img src="{image_url}" style="width: 100%; height: 100%; object-fit: cover;" />
-        </div>
-        '''
+        image_html = f'<div style="width: 70px; height: 70px; border-radius: 8px; overflow: hidden; flex-shrink: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.2);"><img src="{image_url}" style="width: 100%; height: 100%; object-fit: cover;" /></div>'
     else:
-        image_html = f'''
-        <div style="width: 70px; height: 70px; border-radius: 8px; background: rgba(255,255,255,0.08); display: flex; align-items: center; justify-content: center; flex-shrink: 0; opacity: 0.5;">
-            <span style="font-size: 2em;">✈️</span>
-        </div>
-        '''
+        image_html = '<div style="width: 70px; height: 70px; border-radius: 8px; background: rgba(255,255,255,0.08); display: flex; align-items: center; justify-content: center; flex-shrink: 0; opacity: 0.5;"><span style="font-size: 2em;">✈️</span></div>'
 
     aircraft_display = f'<div style="font-size: 0.85em; opacity: 0.7; font-weight: 500;">{ac_text}</div>' if ac_text else ''
     
@@ -295,7 +287,7 @@ for f in flights:
         'dt': dt
     })
 
-# === 離櫃空檔偵測系統 (真實相鄰航班計算) ===
+# === 離櫃空檔偵測系統 ===
 future_flights = [pf for pf in processed_flights if not pf['is_landed']]
 future_flights.sort(key=lambda x: x['dt'])
 
@@ -331,11 +323,8 @@ for t_start, t_end in gaps:
     status_text = f"🟢 ACTIVE OFF-FLOOR TIME ({gap_display} left)" if is_active else f"🔄 {gap_display} OFF-FLOOR WINDOW (Break / Duties)"
     css_ext = "" if is_active else "future"
     
-    gap_html = f'''
-    <div class="gap-card {css_ext}">
-        {status_text} <span style="opacity:0.6; margin-left:8px;">({display_start.strftime('%H:%M')} - {t_end.strftime('%H:%M')})</span>
-    </div>
-    '''
+    # 這裡也移除了縮排
+    gap_html = f'<div class="gap-card {css_ext}">{status_text} <span style="opacity:0.6; margin-left:8px;">({display_start.strftime("%H:%M")} - {t_end.strftime("%H:%M")})</span></div>'
     
     processed_flights.append({
         'is_gap': True,
@@ -364,24 +353,23 @@ for pf in processed_flights:
         
     tag_html = "".join([f'<div class="label-tag">{tag}</div>' for tag in pf['tags']])
     
-    # 全新的圖文並排 HTML 佈局
-    card_html = f"""
-<div class="flight-card {pf['css']}">
-    {tag_html}
-    <div style="display: flex; justify-content: space-between; align-items: center;">
-        <div style="display: flex; gap: 15px; align-items: center;">
-            {pf['image_html']}
-            <div style="display: flex; flex-direction: column; justify-content: center;">
-                <div style="font-size: 1.2em; opacity: 0.95; font-weight: 600;">{pf['num']} • {pf['origin']} {pf['sch_display']}</div>
-                {pf['aircraft_display']}
-                <div class="time-text">{pf['display']}</div>
-            </div>
-        </div>
-        <div style="text-align: right; padding-left: 10px;">
-            <div style="font-size: 0.8em; opacity: 0.7; margin-bottom: -2px;">Gate</div>
-            <div class="gate-text">{pf['gate']}</div>
-        </div>
-    </div>
+    # 確保 HTML 靠左對齊，防止被解析成 Code Block
+    card_html = f"""<div class="flight-card {pf['css']}">
+{tag_html}
+<div style="display: flex; justify-content: space-between; align-items: center;">
+<div style="display: flex; gap: 15px; align-items: center;">
+{pf['image_html']}
+<div style="display: flex; flex-direction: column; justify-content: center;">
+<div style="font-size: 1.2em; opacity: 0.95; font-weight: 600;">{pf['num']} • {pf['origin']} {pf['sch_display']}</div>
+{pf['aircraft_display']}
+<div class="time-text">{pf['display']}</div>
 </div>
-"""
+</div>
+<div style="text-align: right; padding-left: 10px;">
+<div style="font-size: 0.8em; opacity: 0.7; margin-bottom: -2px;">Gate</div>
+<div class="gate-text">{pf['gate']}</div>
+</div>
+</div>
+</div>"""
+
     st.markdown(card_html, unsafe_allow_html=True)
