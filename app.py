@@ -7,8 +7,8 @@ import pytz
 
 AIRPORT_ICAO       = "YBBN"
 TIMEZONE           = "Australia/Brisbane"
-LOOKBACK_HOURS     = 1
-LOOKAHEAD_HOURS    = 11 
+LOOKBACK_HOURS     = 4  # Captures early morning cancellations directly
+LOOKAHEAD_HOURS    = 8  # Focuses radar on the next 8 hours
 RECENT_LANDED_MAX  = 60
 GAP_MIN_MINUTES    = 20
 GAP_DISPLAY_MIN    = 5
@@ -67,17 +67,11 @@ st.markdown(f"""
         text-shadow: 0 2px 4px rgba(0,0,0,0.5);
     }}
     .close-btn-text:hover {{ color: #EF4444; }}
-    
-    .streamlit-expanderHeader {{ font-size: 0.9em !important; color: #94A3B8 !important; }}
-    .streamlit-expanderContent {{ font-size: 0.85em; color: #CBD5E1; }}
 </style>
 """, unsafe_allow_html=True)
 
 if "api_last_hit" not in st.session_state:
     st.session_state.api_last_hit = None
-# 取消航班專用的記憶體庫
-if "canceled_memory" not in st.session_state:
-    st.session_state.canceled_memory = {}
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def fetch_aircraft_image(reg: str) -> str:
@@ -89,8 +83,7 @@ def fetch_aircraft_image(reg: str) -> str:
             photos = r.json().get("photos", [])
             if photos: return photos[0]["thumbnail_large"]["src"]
         return "NOT_FOUND"
-    except Exception: 
-        return "NOT_FOUND"
+    except Exception: return "NOT_FOUND"
 
 def prefetch_images(flights: list):
     regs = [f.get("aircraft", {}).get("reg", "") for f in flights]
@@ -225,26 +218,17 @@ with st.expander("ℹ️ System Info & Troubleshooting"):
     st.markdown(f"""
     **1. Auto-Refresh & Sync**
     * Screen updates every **60s**. API syncs every **10m**.
-    * Showing flights from **-{LOOKBACK_HOURS}hr** to **+{LOOKAHEAD_HOURS}hrs**.
-    * *Note: The system automatically remembers canceled flights for the day as long as it remains running.*
+    * Showing flights from **-{LOOKBACK_HOURS}hrs** to **+{LOOKAHEAD_HOURS}hrs**.
 
-    **2. Missing Plane Photos?**
-    * Photos require a confirmed Aircraft Registration Number. If missing, a default ✈️ shows until radar updates closer to landing.
-
-    **3. Time Tags Guide**
-    * <span class="mono" style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 4px;border-radius:4px;">Act</span> **(Blue)**: Aircraft has landed.
-    * <span class="mono" style="color:#E2E8F0;font-weight:bold;background:rgba(226,232,240,0.15);padding:2px 4px;border-radius:4px;">Est</span> **(Light Gray)**: Radar confirmed. Accurate live ETA.
+    **2. Time Tags Guide**
+    * <span class="mono" style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 4px;border-radius:4px;">Act</span> **(Blue)**: Landed.
+    * <span class="mono" style="color:#E2E8F0;font-weight:bold;background:rgba(226,232,240,0.15);padding:2px 4px;border-radius:4px;">Est</span> **(Light Gray)**: Radar ETA.
     * <span class="mono" style="color:#94A3B8;font-weight:bold;background:rgba(148,163,184,0.15);padding:2px 4px;border-radius:4px;">Sch</span> **(Dark Gray)** + **⚠️ Check Board**: Radar blind spot. **Check physical airport screens!**
     
-    **4. Smart Filters**
-    * Domestic (D, DOM, GAT), private jets, and non-passenger flights are automatically hidden to focus strictly on International arrivals.
-
     ---
-    **5. Support & Maintenance**
-    * Built to optimize floor staffing for BNE Lotte Duty Free.
-    * **Version**: V7.16
-    * **Developer**: Phillip Yeh
-    * **Issues?** If the board freezes or data looks wrong, please take a screenshot and contact support immediately.
+    **3. Support & Maintenance**
+    * Built for BNE Lotte Duty Free floor staffing.
+    * **Developer**: Phillip Yeh | **Version**: V7.17 (4:8 Window)
     """, unsafe_allow_html=True)
 st.write("") 
 
@@ -260,10 +244,8 @@ for f in unique_flights:
     flight_num, status = f.get("number", "N/A"), f.get("status", "").lower()
     dep, mv = f.get("departure", {}), f.get("movement", {})
     ai = dep.get("airport") or mv.get("airport") or {}
-    raw_city = ai.get("municipalityName") or ai.get("name") or ai.get("iata") or "Unknown"
-    city = CITY_MAP.get(raw_city, raw_city)
-    iata = ai.get("iata", "")
-    country = str(ai.get("countryCode", "")).strip().lower()
+    city = CITY_MAP.get(ai.get("municipalityName") or ai.get("name") or "Unknown", ai.get("municipalityName") or ai.get("name") or "Unknown")
+    iata = ai.get("iata", ""); country = str(ai.get("countryCode", "")).strip().lower()
     arr_n = f.get("arrival") or f.get("movement") or {}
     term, gate = str(arr_n.get("terminal", "")).strip().upper(), arr_n.get("gate", "TBA")
     ac = f.get("aircraft", {}); ac_m, ac_r = ac.get("model", ""), ac.get("reg", "")
@@ -275,7 +257,6 @@ for f in unique_flights:
 
     s_dt = _parse_local_dt((arr_n.get("scheduledTime", {}) or {}).get("local"), aest) or best_dt
     sch_disp = s_dt.strftime("%H:%M") if (arr_n.get("scheduledTime", {}) or {}).get("local") else ""
-
     delay_hours = (best_dt - s_dt).total_seconds() / 3600 if s_dt else 0
     if delay_hours < -2 or delay_hours > 24: continue
 
@@ -283,7 +264,6 @@ for f in unique_flights:
     is_can = status in ("canceled", "cancelled")
     is_lan = (status in ("landed", "arrived") or t_diff <= 0) and not is_can
     l_min, m_left = max(0, -t_diff) if is_lan else 0, max(0, t_diff) if not is_lan else 0
-
     is_arch_can = is_can and bool(s_dt) and (now_aest - s_dt).total_seconds() / 60 > 15
     is_next_day = best_dt.date() > now_aest.date()
 
@@ -293,24 +273,12 @@ for f in unique_flights:
         "num": flight_num, "origin": city, "iata": iata, "sch_display": sch_disp,
         "ac_text": f"{ac_m} ({ac_r})" if ac_m and ac_r else ac_m or ac_r,
         "gate": gate, "actual_time": best_dt.strftime("%H:%M"), "is_landed": is_lan,
-        "is_canceled": is_can, "is_archived_canceled": is_arch_can, "landed_mins": l_min,
-        "dt": best_dt, "s_dt_val": s_dt, "time_type": t_type, "image_url": fetch_aircraft_image(ac_r),
+        "is_canceled": is_can, "landed_mins": l_min, "dt": best_dt, "s_dt_val": s_dt, 
+        "time_type": t_type, "image_url": fetch_aircraft_image(ac_r),
         "border_color": bc, "status_color": sc, "status_text": st_txt, "bg_color": bg, "is_next_day": is_next_day
     })
 
-# 記憶體庫資料更新邏輯 (更新今日取消航班並清除舊資料)
-now_date = now_aest.date()
-for pf in processed_flights:
-    if pf.get("is_canceled") and pf["s_dt_val"]:
-        if pf["s_dt_val"].date() == now_date:
-            st.session_state.canceled_memory[pf["num"]] = pf
-
-# 清除昨天的舊記憶體，確保不跨日累積
-old_keys = [k for k, v in st.session_state.canceled_memory.items() if v["s_dt_val"].date() != now_date]
-for k in old_keys:
-    del st.session_state.canceled_memory[k]
-
-# Extract future flights for gap detection (excluding canceled flights)
+# Gap Detection (Upcoming Active Flights Only)
 future_f = sorted([p for p in processed_flights if not p["is_landed"] and not p["is_canceled"]], key=lambda x: x["dt"])
 if future_f:
     windows = [(now_aest, future_f[0]["dt"])]
@@ -323,35 +291,27 @@ if future_f:
         tit = f"🟢 ACTIVE OFF-FLOOR ({format_hm(g_min)} left)" if act else f"🔄 {format_hm(g_min)} OFF-FLOOR WINDOW"
         tm = f"{ds.strftime('%H:%M')} – {t2.strftime('%H:%M')}"
         gb, gbo, gc = ("#064E3B", "#10B981", "#A7F3D0") if act else ("#0F172A", "#475569", "#94A3B8")
-        gap_h = f'<div style="background-color:{gb};border:1px dashed {gbo};border-radius:8px;padding:10px;margin-bottom:12px;text-align:center;color:{gc};font-family:sans-serif;font-weight:bold;box-shadow:0 2px 4px rgba(0,0,0,0.1);font-size:0.95em;">{tit} <span style="opacity:0.7;font-weight:normal;margin-left:6px;display:inline-block;">({tm})</span></div>'
+        gap_h = f'<div style="background-color:{gb};border:1px dashed {gbo};border-radius:8px;padding:10px;margin-bottom:12px;text-align:center;color:{gc};font-family:sans-serif;font-weight:bold;font-size:0.95em;">{tit} <span style="opacity:0.7;font-weight:normal;margin-left:6px;">({tm})</span></div>'
         processed_flights.append({"is_gap": True, "html": gap_h, "time_key": t1.timestamp() + 1})
 
-# Separate Active and Canceled Flights
-active_flights = [pf for pf in processed_flights if not pf.get("is_canceled")]
-# 這裡改由 Memory Bank 撈取整天的取消航班
-canceled_flights = list(st.session_state.canceled_memory.values())
-
-# Sort Active Flights
-def active_s_key(p):
+# Sorting & Rendering
+def s_key(p):
     if p.get("is_gap"): return (1, p["time_key"])
+    if p["is_canceled"]: return (2, p["s_dt_val"].timestamp())
     if p["is_landed"]: return (0, -p["dt"].timestamp()) if p["landed_mins"] <= RECENT_LANDED_MAX else (2, -p["dt"].timestamp())
     return (1, p["dt"].timestamp())
 
-active_flights.sort(key=active_s_key)
+processed_flights.sort(key=s_key)
+active_flights = [f for f in processed_flights if not f.get("is_canceled")]
+canceled_flights = sorted([f for f in processed_flights if f.get("is_canceled")], key=lambda x: x["s_dt_val"])
 
-# Sort Canceled Flights by Scheduled Time
-canceled_flights.sort(key=lambda x: x["s_dt_val"].timestamp())
-
-# 1. Render Active Section
 for i, pf in enumerate(active_flights):
     if pf.get("is_gap"): st.markdown(pf["html"], unsafe_allow_html=True)
     else: render_flight_card(pf, i)
 
-# 2. Render Canceled Section (At the Bottom)
 if canceled_flights:
-    st.markdown("<hr style='margin: 40px 0 20px 0; border-color: #334155; opacity: 0.5;'>", unsafe_allow_html=True)
-    st.markdown("<h4 style='color: #F87171; margin-bottom: 16px;'>❌ Canceled Flights (Today)</h4>", unsafe_allow_html=True)
-    
-    offset_index = len(active_flights)
+    st.markdown("<hr style='margin:40px 0 20px 0; border-color:#334155; opacity:0.5;'>", unsafe_allow_html=True)
+    st.markdown("<h4 style='color:#F87171;'>❌ Canceled (Current Window)</h4>", unsafe_allow_html=True)
+    offset = len(active_flights)
     for i, pf in enumerate(canceled_flights):
-        render_flight_card(pf, offset_index + i)
+        render_flight_card(pf, offset + i)
