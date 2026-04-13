@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import pytz
 
-# 設定頁面與手機直式螢幕最佳化 (English Title)
+# 設定頁面與手機直式螢幕最佳化
 st.set_page_config(page_title="BNE Flight Board", page_icon="✈️", layout="centered")
 
 # 自動更新機制：每 20 分鐘 (1200秒) 自動重整
@@ -113,6 +113,12 @@ if not flights:
 
 processed_flights = []
 
+# === 時間格式化工具 ===
+def format_hm(total_minutes):
+    h = total_minutes // 60
+    m = total_minutes % 60
+    return f"{h:02d}h{m:02d}m"
+
 for f in flights:
     flight_num = f.get('number', 'N/A')
     
@@ -197,6 +203,19 @@ for f in flights:
     time_diff_minutes = int((dt - now_aest).total_seconds() / 60)
     
     is_landed = status in ['landed', 'arrived'] or time_diff_minutes <= 0
+
+    # === 幽靈航班過濾器 (Ghost Flight Filter) ===
+    # 如果航班表定時間超過 12 小時，且尚未降落，判定為 API 系統錯誤並隱藏 (例如早上的 JQ150)
+    if not is_landed and scheduled_time_raw:
+        try:
+            s_dt_check = pd.to_datetime(scheduled_time_raw).to_pydatetime()
+            if s_dt_check.tzinfo is None: s_dt_check = aest.localize(s_dt_check)
+            else: s_dt_check = s_dt_check.astimezone(aest)
+            
+            if (now_aest - s_dt_check).total_seconds() > 12 * 3600:
+                continue  # 跳過這個幽靈航班
+        except:
+            pass
     
     css_class = "status-normal"
     tags = []
@@ -214,7 +233,7 @@ for f in flights:
         else:
             css_class = "status-landed-old"
             
-        time_display = f"Landed {landed_mins}m ago ({dt.strftime('%H:%M')})"
+        time_display = f"Landed {format_hm(landed_mins)} ago ({dt.strftime('%H:%M')})"
     else:
         minutes_left = max(0, time_diff_minutes)
         if is_early_prep:
@@ -224,7 +243,7 @@ for f in flights:
         elif minutes_left <= 60:
             css_class = "status-soon"
             
-        time_display = f"In {minutes_left}m ({dt.strftime('%H:%M')})"
+        time_display = f"In {format_hm(minutes_left)} ({dt.strftime('%H:%M')})"
             
     processed_flights.append({
         'num': flight_num,
