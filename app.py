@@ -18,8 +18,6 @@ RECENT_LANDED_MAX = 60      # minutes: landed cards stay "active" (green)
 IMMINENT_MINUTES  = 25      # < 25 min → red "fire" status
 SOON_MINUTES      = 60      # < 60 min → amber status
 OLD_FLIGHT_HOURS  = 8       # hide scheduled flights whose sch time is > 8 h ago
-PREP_START        = time(2, 30)   # early-morning prep window start
-PREP_END          = time(4, 10)   # early-morning prep window end
 IMAGE_WORKERS     = 8             # concurrent threads for photo prefetch
 DOMESTIC_TERMINALS = ('D', 'DOM')
 
@@ -159,7 +157,7 @@ def is_domestic(terminal: str, country_code: str) -> bool:
 
 
 def get_card_style(is_canceled, is_archived_canceled, is_landed,
-                   landed_mins, is_delayed, is_early_prep, minutes_left):
+                   landed_mins, is_delayed, minutes_left):
     """Return (border_color, status_color, bg_color, status_text)."""
     if is_canceled:
         if is_archived_canceled:
@@ -173,8 +171,6 @@ def get_card_style(is_canceled, is_archived_canceled, is_landed,
 
     delay_icon = "⚠️ " if is_delayed else ""
     bg = "#1E293B"
-    if is_early_prep:
-        return "#8B5CF6", "#A78BFA", bg, f"⏰ {delay_icon}In {format_hm(minutes_left)} (Prep)"
     if minutes_left < IMMINENT_MINUTES:
         return "#EF4444", "#F87171", bg, f"🔥 {delay_icon}In {format_hm(minutes_left)}"
     if minutes_left <= SOON_MINUTES:
@@ -336,12 +332,9 @@ for f in flights:
     minutes_left     = max(0, time_diff_min)  if not is_landed else 0
     mins_past_sch    = (now_aest - s_dt).total_seconds() / 60
     is_archived_can  = is_canceled and mins_past_sch > 15
-    is_early_prep    = (not is_landed and not is_canceled
-                        and PREP_START <= best_dt.time() <= PREP_END)
-
     border_color, status_color, bg_color, status_text = get_card_style(
         is_canceled, is_archived_can, is_landed,
-        landed_mins, is_delayed, is_early_prep, minutes_left,
+        landed_mins, is_delayed, minutes_left,
     )
 
     processed_flights.append({
