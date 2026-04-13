@@ -4,13 +4,15 @@ import pandas as pd
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 import pytz
-import time  # 新增：用來控制 API 發送頻率
 
 # ─────────────────────────────────────────────
-# Constants (BNE Operations - 24H Pro Stable)
+# Constants (BNE Operations - 12H Pro Stable)
 # ─────────────────────────────────────────────
 AIRPORT_ICAO       = "YBBN"
 TIMEZONE           = "Australia/Brisbane"
+# 1hr back + 11hr forward = 12hr total window (API Limit)
+LOOKBACK_HOURS     = 1
+LOOKAHEAD_HOURS    = 11 
 RECENT_LANDED_MAX  = 60
 GAP_MIN_MINUTES    = 20
 GAP_DISPLAY_MIN    = 5
@@ -27,8 +29,9 @@ CITY_MAP = {
 }
 
 UI_REFRESH_SEC     = 60   
-API_DATA_TTL_SEC   = 900  
-STALE_DATA_THRESHOLD_MIN = 45 
+# 單次抓取負擔小，恢復 10 分鐘更新一次
+API_DATA_TTL_SEC   = 600  
+STALE_DATA_THRESHOLD_MIN = 30 
 
 # ─────────────────────────────────────────────
 # Page Config & Typography
@@ -79,7 +82,7 @@ if "api_last_hit" not in st.session_state:
     st.session_state.api_last_hit = None
 
 # ─────────────────────────────────────────────
-# Data Fetchers (24H Double Fetch Strategy with Speed Limit)
+# Data Fetchers (Single Fetch for 12H Window)
 # ─────────────────────────────────────────────
 @st.cache_data(ttl=86400, show_spinner=False)
 def fetch_aircraft_image(reg: str) -> str:
@@ -98,38 +101,17 @@ def prefetch_images(flights: list):
         list(ex.map(fetch_aircraft_image, regs))
 
 @st.cache_data(ttl=API_DATA_TTL_SEC)
-def fetch_24h_flight_data(now_dt) -> list:
-    headers = {"X-RapidAPI-Key": st.secrets["X_RAPIDAPI_KEY"], "X-RapidAPI-Host": "aerodatabox.p.rapidapi.com"}
+def fetch_flight_data(from_time: str, to_time: str) -> list:
+    url = f"https://aerodatabox.p.rapidapi.com/flights/airports/icao/{AIRPORT_ICAO}/{from_time}/{to_time}"
     params = {"direction": "Arrival", "withCancelled": "true", "withCodeshared": "false"}
-    
-    t1_start = (now_dt - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M")
-    t1_end = (now_dt + timedelta(hours=11)).strftime("%Y-%m-%dT%H:%M")
-    url1 = f"https://aerodatabox.p.rapidapi.com/flights/airports/icao/{AIRPORT_ICAO}/{t1_start}/{t1_end}"
-    
-    t2_start = t1_end
-    t2_end = (now_dt + timedelta(hours=23)).strftime("%Y-%m-%dT%H:%M")
-    url2 = f"https://aerodatabox.p.rapidapi.com/flights/airports/icao/{AIRPORT_ICAO}/{t2_start}/{t2_end}"
-    
-    all_flights = []
+    headers = {"X-RapidAPI-Key": st.secrets["X_RAPIDAPI_KEY"], "X-RapidAPI-Host": "aerodatabox.p.rapidapi.com"}
     try:
-        # 第一抓
-        r1 = requests.get(url1, headers=headers, params=params, timeout=10)
-        r1.raise_for_status()
-        all_flights.extend(r1.json().get("arrivals", []))
-        
-        # ⚠️ 強制暫停 1.5 秒，避開 1 request/sec 的 Rate Limit (429 錯誤)
-        time.sleep(1.5)
-        
-        # 第二抓
-        r2 = requests.get(url2, headers=headers, params=params, timeout=10)
-        r2.raise_for_status()
-        all_flights.extend(r2.json().get("arrivals", []))
-        
+        r = requests.get(url, headers=headers, params=params, timeout=10)
+        r.raise_for_status()
         st.session_state.api_last_hit = datetime.now(pytz.timezone(TIMEZONE))
+        return r.json().get("arrivals", [])
     except Exception as e:
-        st.error(f"API Request Failed: {e}")
-        
-    return all_flights
+        st.error(f"API Request Failed: {e}"); return []
 
 # ─────────────────────────────────────────────
 # Logic Helpers
@@ -200,7 +182,7 @@ def render_flight_card(pf: dict, index: int):
     sch_str = f'<span class="mono">Sch {pf["sch_display"]}</span> • ' if pf["sch_display"] else ""
     next_day_tag = ' <small style="opacity:0.6;">(Next Day)</small>' if pf["is_next_day"] else ''
 
-    # 顏色修正：Act 保持天藍色，Est 改為中性冷灰色 (避免與延誤黃色混淆)
+    # 色彩校正：Est 改為中性冷灰色
     if pf["is_landed"] or pf["time_type"] == "actual":
         act_html = f'<span class="mono" style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 6px;border-radius:4px;border:1px solid rgba(14,165,233,0.3);">Act {pf["actual_time"]}</span>{next_day_tag}'
     elif pf["time_type"] == "revised":
@@ -229,6 +211,8 @@ def render_flight_card(pf: dict, index: int):
 # Main Process
 # ─────────────────────────────────────────────
 aest = pytz.timezone(TIMEZONE); now_aest = datetime.now(aest)
+from_t = (now_aest - timedelta(hours=LOOKBACK_HOURS)).strftime("%Y-%m-%dT%H:%M")
+to_t = (now_aest + timedelta(hours=LOOKAHEAD_HOURS)).strftime("%Y-%m-%dT%H:%M")
 
 col1, col2 = st.columns([2, 1])
 with col1: st.title("✈️ Arrivals")
@@ -241,7 +225,7 @@ with col2:
         api_html = f'API: {api_t.strftime("%H:%M") if api_t else "--:--"}'
     st.markdown(f'<div style="font-size:0.75em;color:#64748B;text-align:center;">{api_html}</div>', unsafe_allow_html=True)
 
-flights = fetch_24h_flight_data(now_aest)
+flights = fetch_flight_data(from_t, to_t)
 if not flights:
     st.info("No data available. Re-checking..."); st.stop()
 
@@ -266,12 +250,11 @@ for f in unique_flights:
     best_dt, t_type = extract_best_time(arr_n, aest)
     if best_dt is None: continue
 
-    sch_raw = (arr_n.get("scheduledTime", {}) or {}).get("local")
-    s_dt = _parse_local_dt(sch_raw, aest) or best_dt
-    sch_disp = s_dt.strftime("%H:%M") if sch_raw else ""
+    s_dt = _parse_local_dt((arr_n.get("scheduledTime", {}) or {}).get("local"), aest) or best_dt
+    sch_disp = s_dt.strftime("%H:%M") if (arr_n.get("scheduledTime", {}) or {}).get("local") else ""
 
     delay_hours = (best_dt - s_dt).total_seconds() / 3600 if s_dt else 0
-    if delay_hours < -2 or delay_hours > 24: continue
+    if delay_hours < -2 or delay_hours > 12: continue
 
     t_diff = int((best_dt - now_aest).total_seconds() / 60)
     is_can = status in ("canceled", "cancelled")
@@ -284,7 +267,6 @@ for f in unique_flights:
     bc, sc, bg, st_txt = get_card_style(is_can, is_arch_can, is_lan, l_min, delay_hours, m_left)
 
     processed_flights.append({
-        "is_gap": False,
         "num": flight_num, "origin": city, "iata": iata, "sch_display": sch_disp,
         "ac_text": f"{ac_m} ({ac_r})" if ac_m and ac_r else ac_m or ac_r,
         "gate": gate, "actual_time": best_dt.strftime("%H:%M"), "is_landed": is_lan,
@@ -318,7 +300,5 @@ def s_key(p):
 
 processed_flights.sort(key=s_key)
 for i, pf in enumerate(processed_flights):
-    if pf.get("is_gap"):
-        st.markdown(pf["html"], unsafe_allow_html=True)
-    else:
-        render_flight_card(pf, i)
+    if pf.get("is_gap"): st.markdown(pf["html"], unsafe_allow_html=True)
+    else: render_flight_card(pf, i)
