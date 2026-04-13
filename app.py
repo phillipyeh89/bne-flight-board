@@ -4,13 +4,13 @@ import pandas as pd
 from datetime import datetime, timedelta
 import pytz
 
-# 設定頁面與手機直式螢幕最佳化
-st.set_page_config(page_title="BNE Flight Board", page_icon="✈️", layout="centered")
+# 1. 頁面基礎設定
+st.set_page_config(page_title="BNE Flight Board PRO", page_icon="✈️", layout="centered")
 
-# 自動更新機制：每 20 分鐘 (1200秒) 自動重整
+# 自動重整機制 (20分鐘)
 st.markdown('<meta http-equiv="refresh" content="1200">', unsafe_allow_html=True)
 
-# 注入高質感漸層 CSS
+# 2. 注入高質感漸層 CSS
 st.markdown("""
 <style>
     .flight-card {
@@ -239,7 +239,8 @@ for f in flights:
 
     if is_landed:
         landed_mins = max(0, -time_diff_minutes)
-        if landed_mins <= 40:
+        # 修改為 60 分鐘內保持綠色置頂
+        if landed_mins <= 60:
             css_class = "status-landed-new"
         else:
             css_class = "status-landed-old"
@@ -272,7 +273,8 @@ for f in flights:
 
 def custom_sort(pf):
     if pf['is_landed']:
-        if pf['landed_mins'] <= 40:
+        # 修改排序邏輯，60 分鐘內的班次置頂
+        if pf['landed_mins'] <= 60:
             return (0, -pf['dt'].timestamp())
         else:
             return (2, -pf['dt'].timestamp())
