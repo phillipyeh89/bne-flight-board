@@ -113,7 +113,6 @@ aest = pytz.timezone('Australia/Brisbane')
 now_aest = datetime.now(aest)
 
 from_time = (now_aest - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M")
-# 延長 API 抓取極限至 11 小時，確保能涵蓋整個班表
 to_time = (now_aest + timedelta(hours=11)).strftime("%Y-%m-%dT%H:%M")
 
 col1, col2 = st.columns([2, 1])
@@ -279,25 +278,21 @@ for f in flights:
     })
 
 # === 離櫃空檔偵測系統 (真實相鄰航班計算) ===
-# 篩選出所有「未來尚未降落」的航班
 future_flights = [pf for pf in processed_flights if not pf['is_landed']]
 future_flights.sort(key=lambda x: x['dt'])
 
 gaps = []
 
 if future_flights:
-    # 1. 偵測：當下時刻 (或最後一班降落後) 到「下一班未來航班」的真實空檔
     landed_flights = [pf for pf in processed_flights if pf['is_landed']]
     last_landed_time = max([pf['dt'] for pf in landed_flights]) if landed_flights else now_aest
     
-    # 確保空檔起點不會早於現在時間
     start_time = max(last_landed_time, now_aest)
     first_future = future_flights[0]['dt']
     
     if (first_future - start_time).total_seconds() / 60 >= 20:
         gaps.append((start_time, first_future))
         
-    # 2. 偵測：未來所有航班與航班之間的真實空檔
     for i in range(len(future_flights) - 1):
         t1 = future_flights[i]['dt']
         t2 = future_flights[i+1]['dt']
@@ -308,7 +303,6 @@ if future_flights:
 for t_start, t_end in gaps:
     if t_end <= now_aest: continue # 過去的空檔不顯示
     
-    # 動態扣除時間：如果已經在空檔內，只顯示剩餘分鐘數
     display_start = max(t_start, now_aest)
     gap_mins = int((t_end - display_start).total_seconds() / 60)
     
@@ -317,7 +311,8 @@ for t_start, t_end in gaps:
     is_active = t_start <= now_aest
     gap_display = format_hm(gap_mins)
     
-    status_text = "🟢 ACTIVE OFF-FLOOR TIME" if is_active else f"🔄 {gap_display} OFF-FLOOR WINDOW (Break / Duties)"
+    # 這裡更新了文字，加入 (XXm left)
+    status_text = f"🟢 ACTIVE OFF-FLOOR TIME ({gap_display} left)" if is_active else f"🔄 {gap_display} OFF-FLOOR WINDOW (Break / Duties)"
     css_ext = "" if is_active else "future"
     
     gap_html = f'''
@@ -329,7 +324,6 @@ for t_start, t_end in gaps:
     processed_flights.append({
         'is_gap': True,
         'html': gap_html,
-        # 將空檔強制排在上一班飛機後面 (時間戳記加1秒)
         'time_key': t_start.timestamp() + 1 
     })
 
