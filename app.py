@@ -113,25 +113,21 @@ for f in flights:
     elif icao: origin = icao
     else: origin = "Unknown"
     
-    # === 時間抓取邏輯最佳化：優先抓取 Live Estimated Time ===
     time_candidates = []
     for node_name in ['arrival', 'movement', 'departure']:
         node = f.get(node_name, {})
         if not isinstance(node, dict): continue
         
-        # 1. 優先找新版 API 的實際或修正時間
         for t_key in ['actualTime', 'revisedTime', 'scheduledTime']:
             t_obj = node.get(t_key)
             if isinstance(t_obj, dict) and t_obj.get('local'):
                 time_candidates.append(t_obj.get('local'))
                 
-        # 2. 再找舊版 API 格式
         for t_key in ['actualTimeLocal', 'estimatedTimeLocal', 'scheduledTimeLocal']:
             t_val = node.get(t_key)
             if t_val:
                 time_candidates.append(t_val)
                 
-    # 3. 最外層防呆
     for t_key in ['actualTimeLocal', 'estimatedTimeLocal', 'scheduledTimeLocal']:
         t_val = f.get(t_key)
         if t_val:
@@ -165,8 +161,11 @@ for f in flights:
     css_class = "status-normal"
     tags = []
     
-    if dt.hour < 4 or (dt.hour == 4 and dt.minute <= 10):
-        tags.append("🚨 早班高消費客群預警")
+    # === 嚴格過濾早班時段：限定 02:30 AM 到 04:10 AM 降落的航班 ===
+    is_early_prep = (dt.hour == 2 and dt.minute >= 30) or (dt.hour == 3) or (dt.hour == 4 and dt.minute <= 10)
+    
+    if is_early_prep:
+        tags.append("⏰ 需提早準備開店")
 
     if is_landed:
         css_class = "status-landed"
@@ -174,7 +173,7 @@ for f in flights:
         time_display = f"Landed {landed_mins} 分鐘 ago ({dt.strftime('%H:%M')})"
     else:
         minutes_left = max(0, time_diff_minutes)
-        if dt.hour < 4 or (dt.hour == 4 and dt.minute <= 10):
+        if is_early_prep:
             css_class = "status-purple"
         elif minutes_left < 25:
             css_class = "status-red"
