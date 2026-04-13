@@ -11,7 +11,7 @@ import pytz
 AIRPORT_ICAO       = "YBBN"
 TIMEZONE           = "Australia/Brisbane"
 LOOKBACK_HOURS     = 1
-LOOKAHEAD_HOURS    = 11 # 保持在 12 小時總量內，避免 400 錯誤
+LOOKAHEAD_HOURS    = 11 
 RECENT_LANDED_MAX  = 60
 GAP_MIN_MINUTES    = 20
 GAP_DISPLAY_MIN    = 5
@@ -27,9 +27,8 @@ CITY_MAP = {
     "Guangzhou Baiyun": "Guangzhou"
 }
 
-# 專業版更新頻率
 UI_REFRESH_SEC     = 60   
-API_DATA_TTL_SEC   = 600  # 10 分鐘更新一次
+API_DATA_TTL_SEC   = 600  
 STALE_DATA_THRESHOLD_MIN = 30 
 
 # ─────────────────────────────────────────────
@@ -47,12 +46,14 @@ st.markdown(f"""
     .mono {{ font-family: 'JetBrains Mono', monospace; letter-spacing: -0.5px; }}
     @keyframes blink {{ 50% {{ opacity: 0; }} }}
     .stale-warning {{ color: #EF4444 !important; font-weight: 700 !important; animation: blink 1.2s linear infinite; }}
+    
     .avatar-btn {{
         cursor: pointer; margin-right: 18px; flex-shrink: 0;
         display: block; transition: transform 0.2s ease, box-shadow 0.2s ease;
-        border-radius: 35px;
+        border-radius: 35px; box-sizing: border-box;
     }}
     .avatar-btn:hover {{ transform: scale(1.08); box-shadow: 0 0 15px rgba(255,255,255,0.3); }}
+    
     .img-zoom-chk:checked + .img-zoom-modal {{ display: flex; }}
     .img-zoom-modal {{
         display: none; position: fixed; top:0; left:0; right:0; bottom:0;
@@ -125,8 +126,7 @@ def _parse_local_dt(raw: str | None, tz) -> datetime | None:
     except: return None
 
 def extract_best_time(node: dict, tz) -> tuple:
-    candidates = (("actualTime", "actual"), ("revisedTime", "revised"), ("scheduledTime", "scheduled"))
-    for key, label in candidates:
+    for key, label in (("actualTime", "actual"), ("revisedTime", "revised"), ("scheduledTime", "scheduled")):
         raw = node.get(key).get("local") if isinstance(node.get(key), dict) else node.get(key + "Local")
         if raw:
             dt = _parse_local_dt(raw, tz)
@@ -134,8 +134,7 @@ def extract_best_time(node: dict, tz) -> tuple:
     return None, ""
 
 def is_strictly_international(terminal: str, country_code: str, aircraft_model: str, city: str) -> bool:
-    t = terminal.strip().upper()
-    ac = aircraft_model.upper()
+    t, ac = terminal.strip().upper(), aircraft_model.upper()
     if t in DOMESTIC_TERMINALS: return False
     if country_code == "au": return False
     if any(k in ac for k in SMALL_AIRCRAFT_FILTER): return False
@@ -155,8 +154,7 @@ def get_card_style(is_canceled, is_archived, is_landed, landed_mins, delay_hours
         sc, bc, st_prefix = "#F87171", "#EF4444", "⚠️ HEAVY DELAY"
     else:
         st_prefix = f"In {format_hm(mins_left)}"
-        sc = "#FBBF24" if mins_left <= 60 else "#60A5FA"
-        bc = "#F59E0B" if mins_left <= 60 else "#3B82F6"
+        sc, bc = ("#FBBF24", "#F59E0B") if mins_left <= 60 else ("#60A5FA", "#3B82F6")
     
     if mins_left < 25 and not is_landed:
         return "#EF4444", "#F87171", bg, f"🔥 {st_prefix}"
@@ -179,7 +177,7 @@ def render_flight_card(pf: dict, index: int):
 <img src="{pf['image_url']}" />
 </div>"""
     else:
-        image_element = f'<div style="width:70px;height:70px;border-radius:35px;background:#334155;display:flex;align-items:center;justify-content:center;margin-right:18px;font-size:1.6em;border:2px solid {border_col};flex-shrink:0;">✈️</div>'
+        image_element = f'<div style="width:70px;height:70px;border-radius:35px;background:#334155;display:flex;align-items:center;justify-content:center;margin-right:18px;font-size:1.6em;border:2px solid {border_col};flex-shrink:0;box-sizing:border-box;">✈️</div>'
 
     sch_str = f'<span class="mono">Sch {pf["sch_display"]}</span> • ' if pf["sch_display"] else ""
     next_day_tag = ' <small style="opacity:0.6;">(Next Day)</small>' if pf["is_next_day"] else ''
@@ -191,7 +189,7 @@ def render_flight_card(pf: dict, index: int):
     else:
         act_html = next_day_tag
 
-    origin_display = f"{pf['origin']} <span class='mono' style='font-size:0.85em; opacity:0.8;'>({pf['iata']})</span>"
+    origin_display = f"{pf['origin']} <span class='mono' style='font-size:0.85em; opacity:0.8;'>({pf['iata']})</span>" if pf['iata'] else pf['origin']
 
     card_html = f"""<div style="background-color:{pf['bg_color']};border-left:6px solid {border_col};border-radius:8px;padding:16px 20px;margin-bottom:12px;display:flex;align-items:center;color:white;box-shadow:0 4px 6px rgba(0,0,0,0.15);">
 {image_element}
@@ -254,14 +252,17 @@ for f in flights:
     s_dt = _parse_local_dt(sch_raw, aest) or best_dt
     sch_disp = s_dt.strftime("%H:%M") if sch_raw else ""
     
-    delay_hours = (best_dt - s_dt).total_seconds() / 3600 if sch_raw else 0
+    # [修正安全鎖]：確保 s_dt 存在才計算延誤，避免 TypeError
+    delay_hours = (best_dt - s_dt).total_seconds() / 3600 if s_dt else 0
     if delay_hours > 12: continue
 
     t_diff = int((best_dt - now_aest).total_seconds() / 60)
     is_can = status in ("canceled", "cancelled")
     is_lan = (status in ("landed", "arrived") or t_diff <= 0) and not is_can
     l_min, m_left = max(0, -t_diff) if is_lan else 0, max(0, t_diff) if not is_lan else 0
-    is_arch_can = is_can and (now_aest - s_dt).total_seconds() / 60 > 15
+    
+    # [修正安全鎖]：確保 s_dt 存在才計算歸檔，避免 TypeError
+    is_arch_can = is_can and bool(s_dt) and (now_aest - s_dt).total_seconds() / 60 > 15
     is_next_day = best_dt.date() > now_aest.date()
     
     bc, sc, bg, st_txt = get_card_style(is_can, is_arch_can, is_lan, l_min, delay_hours, m_left)
@@ -275,7 +276,7 @@ for f in flights:
         "border_color": bc, "status_color": sc, "status_text": st_txt, "bg_color": bg, "is_next_day": is_next_day
     })
 
-# ── Gap Detection 邏輯回歸 ──
+# ── Gap Detection ──
 future_f = sorted([p for p in processed_flights if not p["is_landed"] and not p["is_canceled"]], key=lambda x: x["dt"])
 if future_f:
     windows = [(now_aest, future_f[0]["dt"])]
@@ -291,7 +292,7 @@ if future_f:
         gap_h = f'<div style="background-color:{gb};border:1px dashed {gbo};border-radius:8px;padding:12px;margin-bottom:12px;text-align:center;color:{gc};font-family:sans-serif;font-weight:bold;box-shadow:0 2px 4px rgba(0,0,0,0.1);">{tit} <span style="opacity:0.7;font-weight:normal;margin-left:8px;">({tm})</span></div>'
         processed_flights.append({"is_gap": True, "html": gap_h, "time_key": t1.timestamp() + 1})
 
-# ── 排序與渲染 (修正版) ──
+# ── Sort & Render ──
 def s_key(p):
     if p.get("is_gap"): 
         return (1, p["time_key"])
