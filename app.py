@@ -157,10 +157,10 @@ def render_flight_card(pf: dict, index: int):
         act_html = ""
     else:
         sch_str = f"Sch {pf['sch_display']} • " if pf["sch_display"] else ""
-        if pf["time_type"] == "actual":
+        # 核心修正：如果飛機已降落 (is_landed)，標籤強制改為 "Act"
+        if pf["is_landed"] or pf["time_type"] == "actual":
             act_html = f'<span style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 6px;border-radius:4px;border:1px solid rgba(14,165,233,0.3);">Act {pf["actual_time"]}</span>'
         elif pf["time_type"] == "revised":
-            # 修正：將 Est (Estimated) 改為中性白色，避免與 Delayed 黃色混淆
             act_html = f'<span style="color:#F8FAFC;font-weight:bold;background:rgba(248,250,252,0.1);padding:2px 6px;border-radius:4px;border:1px solid rgba(248,250,252,0.3);">Est {pf["actual_time"]}</span>'
         else: act_html = ""
 
@@ -198,7 +198,7 @@ with col2:
 
 flights = fetch_flight_data(from_t, to_t)
 if not flights:
-    st.warning("No data. Refreshing in 60s."); st.markdown('<meta http-equiv="refresh" content="60">', unsafe_allow_html=True); st.stop()
+    st.info("No data available. Refreshing in 60s."); st.markdown('<meta http-equiv="refresh" content="60">', unsafe_allow_html=True); st.stop()
 
 prefetch_images(flights)
 processed_flights = []
