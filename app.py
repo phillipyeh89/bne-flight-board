@@ -138,30 +138,19 @@ def get_card_style(is_canceled, is_archived, is_landed, landed_mins, delay_hours
     if is_canceled:
         if is_archived: return "#475569", "#94A3B8", "#0F172A", "❌ CANCELED"
         return "#EF4444", "#F87171", "#1E293B", "❌ CANCELED"
-    
     if is_landed:
         if landed_mins <= RECENT_LANDED_MAX: return "#10B981", "#34D399", "#1E293B", f"Landed {format_hm(landed_mins)} ago"
         return "#475569", "#94A3B8", "#0F172A", f"Landed {format_hm(landed_mins)} ago"
-    
     bg = "#1E293B"
-    # 判斷延誤程度
     if delay_hours >= 3:
-        status_prefix = "⚠️ HEAVY DELAY"
-        status_color = "#F87171" # 紅色警示
-        border_color = "#EF4444"
-    elif delay_hours > 0:
-        status_prefix = f"⚠️ In {format_hm(mins_left)}"
-        status_color = "#FBBF24" if mins_left <= SOON_MINUTES else "#60A5FA"
-        border_color = "#F59E0B" if mins_left <= SOON_MINUTES else "#3B82F6"
+        sc, bc, st_prefix = "#F87171", "#EF4444", "⚠️ HEAVY DELAY"
     else:
-        status_prefix = f"In {format_hm(mins_left)}"
-        status_color = "#FBBF24" if mins_left <= SOON_MINUTES else "#60A5FA"
-        border_color = "#F59E0B" if mins_left <= SOON_MINUTES else "#3B82F6"
-        
-    if mins_left < IMMINENT_MINUTES:
-        return "#EF4444", "#F87171", bg, f"🔥 {status_prefix}"
-    
-    return border_color, status_color, bg, status_prefix
+        st_prefix = f"In {format_hm(mins_left)}"
+        sc = "#FBBF24" if mins_left <= SOON_MINUTES else "#60A5FA"
+        bc = "#F59E0B" if mins_left <= SOON_MINUTES else "#3B82F6"
+    if mins_left < IMMINENT_MINUTES and not is_landed:
+        return "#EF4444", "#F87171", bg, f"🔥 {st_prefix}"
+    return bc, sc, bg, st_prefix
 
 # ─────────────────────────────────────────────
 # Renderers
@@ -186,7 +175,6 @@ def render_flight_card(pf: dict, index: int):
         sch_str = f'<span class="mono" style="text-decoration:line-through;opacity:0.5;">Sch {pf["sch_display"]}</span>' if pf["sch_display"] else ""
         act_html = ""
     else:
-        # 如果跨日抵達，標註 Next Day
         next_day_tag = ' <small style="opacity:0.6;">(Next Day)</small>' if pf["is_next_day"] else ''
         sch_str = f'<span class="mono">Sch {pf["sch_display"]}</span> • ' if pf["sch_display"] else ""
         if pf["is_landed"] or pf["time_type"] == "actual":
@@ -232,6 +220,7 @@ prefetch_images(flights)
 processed_flights = []
 
 for f in flights:
+    # --- 變數初始化防止 NameError ---
     flight_num, status = f.get("number", "N/A"), f.get("status", "").lower()
     dep, mv = f.get("departure", {}), f.get("movement", {})
     ai = dep.get("airport") or mv.get("airport") or {}
@@ -239,21 +228,19 @@ for f in flights:
     country = str(ai.get("countryCode", "")).strip().lower()
     arr_n = f.get("arrival") or f.get("movement") or {}
     term, gate = str(arr_n.get("terminal", "")).strip().upper(), arr_n.get("gate", "TBA")
-
     ac = f.get("aircraft", {}); ac_m, ac_r = ac.get("model", ""), ac.get("reg", "")
+    
     if not is_strictly_international(term, country, ac_m, city): continue
-
+    
     best_dt, t_type = extract_best_time(arr_n, aest)
     if best_dt is None: continue
 
     sch_raw = (arr_n.get("scheduledTime", {}) or {}).get("local")
     s_dt = _parse_local_dt(sch_raw, aest) or best_dt
-    sch_disp = s_dt.strftime("%H:%M") if sch_raw else ""
+    sch_disp = s_dt.strftime("%H:%M") if sch_raw else "" # 確保變數名稱正確
 
-    delay_hours = 0
-    if sch_raw:
-        delay_hours = (best_dt - s_dt).total_seconds() / 3600
-        if delay_hours > 12: continue
+    delay_hours = (best_dt - s_dt).total_seconds() / 3600 if sch_raw else 0
+    if delay_hours > 12: continue
 
     t_diff = int((best_dt - now_aest).total_seconds() / 60)
     is_can = status in ("canceled", "cancelled")
@@ -263,6 +250,8 @@ for f in flights:
     is_next_day = best_dt.date() > now_aest.date()
     
     bc, sc, bg, st_txt = get_card_style(is_can, is_arch_can, is_lan, l_min, delay_hours, m_left)
+    ac_text = f"{ac_m} ({ac_r})" if ac_m and ac_r else ac_m or ac_r
+    img_url = fetch_aircraft_image(ac_r)
 
     processed_flights.append({
         "is_gap": False, "num": flight_num, "origin": city, "sch_display": sch_disp, "ac_text": ac_text,
