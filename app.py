@@ -252,13 +252,14 @@ def render_flight_card(pf: dict, index: int):
     is_logo    = "avs.io" in img_url if img_url else False
 
     if img_url:
-        # Reg photos → round (35px); airline logos → square-ish (8px)
-        radius = "8px" if is_logo else "35px"
+        # Reg photos → round (35px); airline logos → square-ish (8px) with white bg
+        radius  = "8px" if is_logo else "35px"
+        logo_bg = "background:#FFFFFF;padding:6px;" if is_logo else ""
         mid = f"modal_{index}"
         image_element = (
             f'<label for="{mid}" class="avatar-btn">'
             f'<img src="{img_url}" style="width:70px;height:70px;border-radius:{radius};'
-            f'object-fit:cover;border:2px solid {border_col};"/></label>'
+            f'object-fit:contain;border:2px solid {border_col};{logo_bg}"/></label>'
             f'<input type="checkbox" id="{mid}" class="img-zoom-chk" style="display:none;">'
             f'<div class="img-zoom-modal">'
             f'<label for="{mid}" class="img-zoom-close"></label>'
