@@ -21,40 +21,47 @@ OLD_FLIGHT_HOURS   = 8
 IMAGE_WORKERS      = 8
 DOMESTIC_TERMINALS = ('D', 'DOM')
 
+# 重要：網頁每 60 秒刷新一次，讓數字「跳動」
+UI_REFRESH_SEC     = 60 
+# 重要：API 資料每 20 分鐘才真正更新一次，節省額度
+API_DATA_TTL_SEC   = 1200 
+
 # ─────────────────────────────────────────────
 # Page Config & Universal CSS
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Flight Board", page_icon="✈️", layout="centered")
-st.markdown("""
+# 注入 60 秒自動重整 Meta Tag
+st.markdown(f"""
+<meta http-equiv="refresh" content="{UI_REFRESH_SEC}">
 <style>
-    #MainMenu {visibility: hidden;}
-    header {visibility: hidden;}
-    .block-container {padding-top: 2rem;}
-    .avatar-btn {
+    #MainMenu {{visibility: hidden;}}
+    header {{visibility: hidden;}}
+    .block-container {{padding-top: 2rem;}}
+    .avatar-btn {{
         cursor: pointer; margin-right: 18px; flex-shrink: 0;
         display: block; transition: transform 0.2s ease, box-shadow 0.2s ease;
         border-radius: 35px;
-    }
-    .avatar-btn:hover { transform: scale(1.08); box-shadow: 0 0 15px rgba(255,255,255,0.3); }
-    .img-zoom-chk:checked + .img-zoom-modal { display: flex; }
-    .img-zoom-modal {
+    }}
+    .avatar-btn:hover {{ transform: scale(1.08); box-shadow: 0 0 15px rgba(255,255,255,0.3); }}
+    .img-zoom-chk:checked + .img-zoom-modal {{ display: flex; }}
+    .img-zoom-modal {{
         display: none; position: fixed; top:0; left:0; right:0; bottom:0;
         background: rgba(15,23,42,0.92); z-index: 999999;
         align-items: center; justify-content: center; backdrop-filter: blur(5px);
-    }
-    .img-zoom-modal img {
+    }}
+    .img-zoom-modal img {{
         max-width: 90vw; max-height: 80vh; border-radius: 12px;
         box-shadow: 0 10px 30px rgba(0,0,0,0.6); border: 2px solid #475569;
         object-fit: contain;
-    }
-    .img-zoom-close { position: absolute; top:0; left:0; right:0; bottom:0; cursor: pointer; }
-    .close-btn-text {
+    }}
+    .img-zoom-close {{ position: absolute; top:0; left:0; right:0; bottom:0; cursor: pointer; }}
+    .close-btn-text {{
         position: absolute; top: 20px; right: 30px;
         color: #F8FAFC; font-size: 3em; font-weight: bold;
         cursor: pointer; z-index: 1000000; line-height: 1;
         text-shadow: 0 2px 4px rgba(0,0,0,0.5);
-    }
-    .close-btn-text:hover { color: #EF4444; }
+    }}
+    .close-btn-text:hover {{ color: #EF4444; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -80,7 +87,8 @@ def prefetch_images(flights: list):
     with ThreadPoolExecutor(max_workers=IMAGE_WORKERS) as ex:
         list(ex.map(fetch_aircraft_image, regs))
 
-@st.cache_data(ttl=60)
+# 這裡快取設為 20 分鐘，保護你的 API 額度
+@st.cache_data(ttl=API_DATA_TTL_SEC)
 def fetch_flight_data(from_time: str, to_time: str) -> list:
     url = f"https://aerodatabox.p.rapidapi.com/flights/airports/icao/{AIRPORT_ICAO}/{from_time}/{to_time}"
     params = {"direction": "Arrival", "withCancelled": "true", "withCodeshared": "false"}
@@ -88,7 +96,8 @@ def fetch_flight_data(from_time: str, to_time: str) -> list:
     try:
         r = requests.get(url, headers=headers, params=params, timeout=10)
         r.raise_for_status()
-        st.session_state.last_update_time = datetime.now(pytz.timezone(TIMEZONE))
+        # 紀錄真正從 API 更新的時間
+        st.session_state.api_last_hit = datetime.now(pytz.timezone(TIMEZONE))
         return r.json().get("arrivals", [])
     except Exception as e:
         st.error(f"API Request Failed: {e}"); return []
@@ -157,7 +166,6 @@ def render_flight_card(pf: dict, index: int):
         act_html = ""
     else:
         sch_str = f"Sch {pf['sch_display']} • " if pf["sch_display"] else ""
-        # 核心修正：如果飛機已降落 (is_landed)，標籤強制改為 "Act"
         if pf["is_landed"] or pf["time_type"] == "actual":
             act_html = f'<span style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 6px;border-radius:4px;border:1px solid rgba(14,165,233,0.3);">Act {pf["actual_time"]}</span>'
         elif pf["time_type"] == "revised":
@@ -185,20 +193,26 @@ def render_gap_card(pf: dict):
 # ─────────────────────────────────────────────
 # Main Process
 # ─────────────────────────────────────────────
-aest = pytz.timezone(TIMEZONE); now_aest = datetime.now(aest)
+aest = pytz.timezone(TIMEZONE)
+# 這裡 now_aest 每一分鐘都會抓取最新時間，所以倒數會動！
+now_aest = datetime.now(aest) 
+
 from_t = (now_aest - timedelta(hours=LOOKBACK_HOURS)).strftime("%Y-%m-%dT%H:%M")
 to_t = (now_aest + timedelta(hours=LOOKAHEAD_HOURS)).strftime("%Y-%m-%dT%H:%M")
 
 col1, col2 = st.columns([2, 1])
 with col1: st.title("✈️ Arrivals")
 with col2:
-    upd = st.session_state.last_update_time
-    st.markdown(f'<div style="font-size:0.85em;color:#94A3B8;text-align:center;margin-bottom:8px;">🕒 {upd.strftime("%H:%M:%S") if upd else "Just Now"}</div>', unsafe_allow_html=True)
-    if st.button("🔄 Refresh", use_container_width=True): fetch_flight_data.clear(); st.rerun()
+    # 顯示「畫面重整時間」
+    st.markdown(f'<div style="font-size:0.85em;color:#94A3B8;text-align:center;margin-top:10px;">🕒 Live: {now_aest.strftime("%H:%M:%S")}</div>', unsafe_allow_html=True)
+    # 顯示「API 最後更新時間」，讓你知道資料新不新鮮
+    api_time = st.session_state.get('api_last_hit')
+    api_disp = api_time.strftime("%H:%M") if api_time else "--:--"
+    st.markdown(f'<div style="font-size:0.7em;color:#64748B;text-align:center;">API Data updated: {api_disp}</div>', unsafe_allow_html=True)
 
 flights = fetch_flight_data(from_t, to_t)
 if not flights:
-    st.info("No data available. Refreshing in 60s."); st.markdown('<meta http-equiv="refresh" content="60">', unsafe_allow_html=True); st.stop()
+    st.info("No data available. Re-checking..."); st.stop()
 
 prefetch_images(flights)
 processed_flights = []
@@ -229,6 +243,7 @@ for f in flights:
         if (best_dt - s_dt).total_seconds() / 3600 < -2 or (best_dt - s_dt).total_seconds() / 3600 > 12: continue
         if status not in ("canceled", "cancelled") and (now_aest - s_dt).total_seconds() > OLD_FLIGHT_HOURS * 3600: continue
 
+    # 這裡的 t_diff 每一分鐘重新計算，數字就會變！
     t_diff = int((best_dt - now_aest).total_seconds() / 60)
     is_can = status in ("canceled", "cancelled")
     is_lan = (status in ("landed", "arrived") or t_diff <= 0) and not is_can
@@ -246,7 +261,7 @@ for f in flights:
         "status_text": st_txt, "bg_color": bg
     })
 
-# ── Gap Detection Logic ────────────────────────
+# ── Gap Detection Logic (每一分鐘都會重新計算空檔剩餘時間) ──
 future_f = sorted([p for p in processed_flights if not p["is_landed"] and not p["is_canceled"]], key=lambda x: x["dt"])
 if future_f:
     windows = [(now_aest, future_f[0]["dt"])]
