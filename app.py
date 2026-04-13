@@ -7,7 +7,7 @@ import pytz
 # 設定頁面與手機直式螢幕最佳化
 st.set_page_config(page_title="BNE Flight Board", page_icon="✈️", layout="centered")
 
-# 注入 V5.2 旗艦醒目版 CSS (新增 Act Time 高亮設計)
+# 注入 V5.3 旗艦版 CSS (新增時間高亮排版與航班號碼置頂)
 st.markdown("""
 <style>
     /* 全域背景微調 */
@@ -45,21 +45,23 @@ st.markdown("""
         border-color: #475569;
     }
 
-    /* 文字排版系統 */
-    .flight-route { font-size: 1.5em; font-weight: 800; letter-spacing: -0.02em; color: #FFFFFF; }
-    .flight-num { font-size: 1.1em; font-weight: 600; color: #94A3B8; margin-top: 2px; }
-    .flight-meta { font-size: 0.85em; font-weight: 500; color: #64748B; margin-top: 8px; display: flex; align-items: center; gap: 8px; }
+    /* 文字排版系統 (對調後) */
+    .flight-route { font-size: 1.6em; font-weight: 800; letter-spacing: -0.01em; color: #FFFFFF; } /* 變為航班號碼 */
+    .flight-num { font-size: 1.1em; font-weight: 600; color: #94A3B8; margin-top: 4px; } /* 變為地點與機型 */
+    .flight-meta { font-size: 0.85em; font-weight: 500; color: #64748B; margin-top: 4px; }
     
-    /* 實際時間 (Act Time) 專屬高亮設計 */
+    /* 實際時間 (Act Time) 專屬高亮設計 (放大版) */
     .act-time {
         color: #7DD3FC; /* 明亮天空藍 */
         background: rgba(14, 165, 233, 0.15);
         border: 1px solid rgba(14, 165, 233, 0.4);
-        padding: 2px 8px;
+        padding: 4px 12px;
         border-radius: 6px;
-        font-weight: 700;
+        font-size: 1.15em; /* 放大字體 */
+        font-weight: 800; /* 加粗 */
         letter-spacing: 0.02em;
-        box-shadow: 0 0 8px rgba(14, 165, 233, 0.1);
+        box-shadow: 0 0 10px rgba(14, 165, 233, 0.15);
+        display: inline-block;
     }
 
     .gate-text { font-size: 3em; font-weight: 800; line-height: 1; color: #FFFFFF; text-align: right; letter-spacing: -0.03em; margin-top: 4px; }
@@ -73,10 +75,12 @@ st.markdown("""
         font-weight: 800;
         display: inline-flex;
         align-items: center;
+        justify-content: center;
         gap: 6px;
         white-space: nowrap;
         text-transform: uppercase;
         letter-spacing: 0.05em;
+        width: 100%;
     }
     
     .badge-landed { background: #10B981; color: #FFFFFF; box-shadow: 0 0 10px rgba(16, 185, 129, 0.4); }
@@ -369,19 +373,21 @@ for pf in processed_flights:
         continue
         
     # 動態組合表定時間，防呆處理
-    sch_part = f"Sch {pf['sch_display']}" if pf['sch_display'] else ""
+    sch_html = f'<div class="flight-meta">Sch {pf["sch_display"]}</div>' if pf["sch_display"] else ""
         
+    # 取消 HTML 縮排，使用 Flex 完美切分左右區塊
     card_html = f"""<div class="uniform-card">
 <div style="display: flex; gap: 18px; align-items: center; width: 100%;">
 {pf['image_html']}
-<div style="flex-grow: 1; display: flex; flex-direction: column; justify-content: center;">
-<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
-<div class="flight-route">{pf['origin']}</div>
-<div class="badge {pf['badge_class']}">{pf['badge_text']}</div>
+<div style="flex-grow: 1; display: flex; justify-content: space-between; align-items: center;">
+<div style="display: flex; flex-direction: column; justify-content: center;">
+<div class="flight-route">{pf['num']}</div>
+<div class="flight-num">{pf['origin']} <span style="opacity:0.5; font-weight:400; margin: 0 4px;">|</span> {pf['ac_text']}</div>
+{sch_html}
 </div>
-<div class="flight-num">{pf['num']} <span style="opacity:0.5; font-weight:400; margin: 0 4px;">|</span> {pf['ac_text']}</div>
-<div class="flight-meta">
-    {sch_part} <span class="act-time">Act {pf['actual_time']}</span>
+<div style="display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 8px;">
+<div class="badge {pf['badge_class']}">{pf['badge_text']}</div>
+<div class="act-time">Act {pf['actual_time']}</div>
 </div>
 </div>
 <div style="text-align: right; min-width: 80px; padding-left: 10px; border-left: 1px solid rgba(255,255,255,0.05); margin-left: 10px;">
