@@ -4,12 +4,8 @@ import pandas as pd
 from datetime import datetime, timedelta
 import pytz
 
-# 設定頁面與手機直式螢幕最佳化
 st.set_page_config(page_title="BNE 航班看板", page_icon="✈️", layout="centered")
 
-# 自動更新機制已關閉 (移除 meta refresh)
-
-# 注入自訂 CSS
 st.markdown("""
 <style>
     .flight-card {
@@ -92,12 +88,22 @@ if not flights:
     st.info("目前視窗內無航班資料。")
     st.stop()
 
+# ==========================================
+# 🛠️ 抓漏神器：直接把 API 回傳的第一手資料印出來
+# ==========================================
+with st.expander("🛠️ 除錯模式：若地名顯示 No Data，請點此展開並截圖給我"):
+    # 找一下 SQ265 或直接顯示前 3 筆
+    debug_data = [f for f in flights if "SQ" in f.get("number", "")]
+    if not debug_data:
+        debug_data = flights[:3]
+    st.json(debug_data)
+# ==========================================
+
 processed_flights = []
 
 for f in flights:
     flight_num = f.get('number', 'N/A')
     
-    # 強化版地名抓取與除錯機制
     dep = f.get('departure') or {}
     airport_info = dep.get('airport') or {}
     
@@ -106,19 +112,11 @@ for f in flights:
     iata = airport_info.get('iata')
     icao = airport_info.get('icao')
     
-    if city:
-        origin = city
-    elif name:
-        origin = name
-    elif iata:
-        origin = iata
-    elif icao:
-        origin = icao
-    elif dep:
-        # 如果都有資料但沒有上面的 key，直接印出前 30 個字元來除錯
-        origin = f"RAW: {str(dep)[:30]}..."
-    else:
-        origin = "No Data"
+    if city: origin = city
+    elif name: origin = name
+    elif iata: origin = iata
+    elif icao: origin = icao
+    else: origin = "No Data"
     
     time_candidates = []
     for node_name in ['arrival', 'movement', 'departure']:
