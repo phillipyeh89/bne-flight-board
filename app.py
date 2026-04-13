@@ -114,9 +114,19 @@ for f in flights:
     else: origin = "Unknown"
     
     time_candidates = []
+    scheduled_time_raw = None
+    
     for node_name in ['arrival', 'movement', 'departure']:
         node = f.get(node_name, {})
         if not isinstance(node, dict): continue
+        
+        # 抓取 Scheduled Time (表定時間) 供後續顯示
+        if not scheduled_time_raw:
+            s_obj = node.get('scheduledTime')
+            if isinstance(s_obj, dict) and s_obj.get('local'):
+                scheduled_time_raw = s_obj.get('local')
+            elif node.get('scheduledTimeLocal'):
+                scheduled_time_raw = node.get('scheduledTimeLocal')
         
         for t_key in ['actualTime', 'revisedTime', 'scheduledTime']:
             t_obj = node.get(t_key)
@@ -127,6 +137,10 @@ for f in flights:
             t_val = node.get(t_key)
             if t_val:
                 time_candidates.append(t_val)
+                
+    # 最外層防呆抓取 Scheduled
+    if not scheduled_time_raw and f.get('scheduledTimeLocal'):
+        scheduled_time_raw = f.get('scheduledTimeLocal')
                 
     for t_key in ['actualTimeLocal', 'estimatedTimeLocal', 'scheduledTimeLocal']:
         t_val = f.get(t_key)
@@ -145,6 +159,17 @@ for f in flights:
         else: dt = dt.astimezone(aest)
     except:
         continue
+
+    # 處理表定時間 (Scheduled Time) 的格式化
+    sch_display = ""
+    if scheduled_time_raw:
+        try:
+            s_dt = pd.to_datetime(scheduled_time_raw).to_pydatetime()
+            if s_dt.tzinfo is None: s_dt = aest.localize(s_dt)
+            else: s_dt = s_dt.astimezone(aest)
+            sch_display = f'<span style="font-size: 0.75em; opacity: 0.7; margin-left: 8px;">(表定 {s_dt.strftime("%H:%M")})</span>'
+        except:
+            pass
 
     arr_node = f.get('arrival') or f.get('movement') or {}
     gate = arr_node.get('gate', 'TBA')
@@ -184,6 +209,7 @@ for f in flights:
     processed_flights.append({
         'num': flight_num,
         'origin': origin,
+        'sch_display': sch_display,
         'gate': gate,
         'display': time_display,
         'is_landed': is_landed,
@@ -202,7 +228,7 @@ for pf in processed_flights:
 {tag_html}
 <div style="display: flex; justify-content: space-between; align-items: flex-end;">
 <div>
-<div style="font-size: 1.3em; opacity: 0.95;">{pf['num']} • {pf['origin']}</div>
+<div style="font-size: 1.3em; opacity: 0.95;">{pf['num']} • {pf['origin']} {pf['sch_display']}</div>
 <div class="time-text">{pf['display']}</div>
 </div>
 <div style="text-align: right;">
