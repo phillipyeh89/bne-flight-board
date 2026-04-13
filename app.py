@@ -10,7 +10,6 @@ import pytz
 # ─────────────────────────────────────────────
 AIRPORT_ICAO       = "YBBN"
 TIMEZONE           = "Australia/Brisbane"
-# 1hr back + 11hr forward = 12hr total window (API Limit)
 LOOKBACK_HOURS     = 1
 LOOKAHEAD_HOURS    = 11 
 RECENT_LANDED_MAX  = 60
@@ -29,7 +28,6 @@ CITY_MAP = {
 }
 
 UI_REFRESH_SEC     = 60   
-# 單次抓取負擔小，恢復 10 分鐘更新一次
 API_DATA_TTL_SEC   = 600  
 STALE_DATA_THRESHOLD_MIN = 30 
 
@@ -44,7 +42,7 @@ st.markdown(f"""
     #MainMenu {{visibility: hidden;}}
     header {{visibility: hidden;}}
     .block-container {{padding-top: 1.5rem; font-family: 'Inter', sans-serif;}}
-    div, span, label {{ font-family: 'Inter', sans-serif; }}
+    div, span, label, p, li {{ font-family: 'Inter', sans-serif; }}
     .mono {{ font-family: 'JetBrains Mono', monospace; letter-spacing: -0.5px; }}
     @keyframes blink {{ 50% {{ opacity: 0; }} }}
     .stale-warning {{ color: #EF4444 !important; font-weight: 700 !important; animation: blink 1.2s linear infinite; }}
@@ -75,6 +73,10 @@ st.markdown(f"""
         text-shadow: 0 2px 4px rgba(0,0,0,0.5);
     }}
     .close-btn-text:hover {{ color: #EF4444; }}
+    
+    /* 微調 expander 的字體大小與顏色，讓它看起來更專業 */
+    .streamlit-expanderHeader { font-size: 0.9em !important; color: #94A3B8 !important; }
+    .streamlit-expanderContent { font-size: 0.85em; color: #CBD5E1; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -82,7 +84,7 @@ if "api_last_hit" not in st.session_state:
     st.session_state.api_last_hit = None
 
 # ─────────────────────────────────────────────
-# Data Fetchers (Single Fetch for 12H Window)
+# Data Fetchers
 # ─────────────────────────────────────────────
 @st.cache_data(ttl=86400, show_spinner=False)
 def fetch_aircraft_image(reg: str) -> str:
@@ -182,7 +184,6 @@ def render_flight_card(pf: dict, index: int):
     sch_str = f'<span class="mono">Sch {pf["sch_display"]}</span> • ' if pf["sch_display"] else ""
     next_day_tag = ' <small style="opacity:0.6;">(Next Day)</small>' if pf["is_next_day"] else ''
 
-    # 色彩校正：Est 改為中性冷灰色
     if pf["is_landed"] or pf["time_type"] == "actual":
         act_html = f'<span class="mono" style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 6px;border-radius:4px;border:1px solid rgba(14,165,233,0.3);">Act {pf["actual_time"]}</span>{next_day_tag}'
     elif pf["time_type"] == "revised":
@@ -224,6 +225,26 @@ with col2:
     else:
         api_html = f'API: {api_t.strftime("%H:%M") if api_t else "--:--"}'
     st.markdown(f'<div style="font-size:0.75em;color:#64748B;text-align:center;">{api_html}</div>', unsafe_allow_html=True)
+
+# ── 系統說明區塊 (Expander) ──
+with st.expander("ℹ️ 系統運作說明與常見問題 (System Info)"):
+    st.markdown(f"""
+    **1. 數據更新機制**
+    * 畫面每 **60 秒**自動跳動倒數，而背後的即時 API 航班資料每 **10 分鐘**同步一次。
+    * 當前顯示範圍：過去 **{LOOKBACK_HOURS}** 小時至未來 **{LOOKAHEAD_HOURS}** 小時。
+
+    **2. 為什麼有些飛機沒有顯示照片？**
+    * 系統只會透過「實體機身編號 (Registration Number)」來抓取精確的飛機照片。
+    * 若飛機仍在遙遠航程中，航空公司有時尚未指派或回傳確切的機身編號，系統為了防呆會顯示預設 ✈️ 圖示。通常在降落前 1-2 小時會自動補齊。
+
+    **3. 時間標籤 (Act vs Est)**
+    * <span class="mono" style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 4px;border-radius:4px;">Act</span> **(天藍色)**：Actual。代表飛機已實際降落，或進入雷達密集區有了極高準確度的降落時間。
+    * <span class="mono" style="color:#E2E8F0;font-weight:bold;background:rgba(226,232,240,0.15);padding:2px 4px;border-radius:4px;">Est</span> **(冷灰色)**：Estimated。代表基於表定時間的初步預估，數值可能隨風速調整。
+    
+    **4. 隱藏航班與過濾器**
+    * 系統已啟動「免稅店專屬國際線過濾器」，自動排除了國內航廈 (Domestic)、小型私人飛機與非載客航班。
+    """, unsafe_allow_html=True)
+st.write("") # 增加一點留白
 
 flights = fetch_flight_data(from_t, to_t)
 if not flights:
