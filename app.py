@@ -14,7 +14,6 @@ st.markdown("""
     header {visibility: hidden;}
     .block-container {padding-top: 2rem;}
     
-    /* 點擊放大飛機照片的特效按鈕 */
     .avatar-btn {
         cursor: pointer; 
         margin-right: 18px; 
@@ -28,7 +27,6 @@ st.markdown("""
         box-shadow: 0 0 15px rgba(255,255,255,0.3);
     }
 
-    /* 純 CSS 圖片放大燈箱 (Lightbox) */
     .img-zoom-chk:checked + .img-zoom-modal { display: flex; }
     .img-zoom-modal {
         display: none; 
@@ -87,8 +85,9 @@ def fetch_aircraft_image(reg):
 
 @st.cache_data(ttl=60) 
 def fetch_flight_data(from_time, to_time):
+    # 開啟 withCancelled="true"，讓取消的航班進來
     url = f"https://aerodatabox.p.rapidapi.com/flights/airports/icao/YBBN/{from_time}/{to_time}"
-    querystring = {"direction": "Arrival", "withCancelled": "false", "withCodeshared": "false"}
+    querystring = {"direction": "Arrival", "withCancelled": "true", "withCodeshared": "false"}
     headers = {
         "X-RapidAPI-Key": st.secrets["X_RAPIDAPI_KEY"],
         "X-RapidAPI-Host": "aerodatabox.p.rapidapi.com"
@@ -177,12 +176,15 @@ for f in flights:
         else: dt = dt.astimezone(aest)
     except: continue
 
+    # 精準取得表定時間 (Sch)，用來判斷是否超過 15 分鐘
+    s_dt_val = dt 
     sch_display = ""
     if scheduled_time_raw:
         try:
             s_dt = pd.to_datetime(scheduled_time_raw).to_pydatetime()
             if s_dt.tzinfo is None: s_dt = aest.localize(s_dt)
             else: s_dt = s_dt.astimezone(aest)
+            s_dt_val = s_dt
             sch_display = s_dt.strftime("%H:%M")
         except: pass
 
@@ -192,24 +194,37 @@ for f in flights:
     if terminal == 'D' or terminal == 'DOM' or country_code == 'au': continue
         
     status = f.get('status', '').lower()
+    is_canceled = status in ['canceled', 'cancelled']
+    is_delayed = status == 'delayed'
+    
     time_diff_minutes = int((dt - now_aest).total_seconds() / 60)
-    is_landed = status in ['landed', 'arrived'] or time_diff_minutes <= 0
+    is_landed = (status in ['landed', 'arrived'] or time_diff_minutes <= 0) and not is_canceled
 
-    if scheduled_time_raw:
-        try:
-            s_dt_check = pd.to_datetime(scheduled_time_raw).to_pydatetime()
-            if s_dt_check.tzinfo is None: s_dt_check = aest.localize(s_dt_check)
-            else: s_dt_check = s_dt_check.astimezone(aest)
-            diff_hours = (dt - s_dt_check).total_seconds() / 3600
-            if diff_hours < -2 or diff_hours > 12: continue
-            if not is_landed and (now_aest - s_dt_check).total_seconds() > 8 * 3600: continue  
-        except: pass
+    if scheduled_time_raw and not is_canceled:
+        diff_hours = (dt - s_dt_val).total_seconds() / 3600
+        if diff_hours < -2 or diff_hours > 12: continue
+        if not is_landed and (now_aest - s_dt_val).total_seconds() > 8 * 3600: continue  
     
     landed_mins = max(0, -time_diff_minutes) if is_landed else 0
     minutes_left = max(0, time_diff_minutes) if not is_landed else 0
-    is_early_prep = not is_landed and ((dt.hour == 2 and dt.minute >= 30) or (dt.hour == 3) or (dt.hour == 4 and dt.minute <= 10))
+    is_early_prep = not is_landed and not is_canceled and ((dt.hour == 2 and dt.minute >= 30) or (dt.hour == 3) or (dt.hour == 4 and dt.minute <= 10))
 
-    if is_landed:
+    # 計算是否超過表定時間 15 分鐘
+    mins_past_sch = (now_aest - s_dt_val).total_seconds() / 60
+    is_archived_canceled = is_canceled and mins_past_sch > 15
+
+    # === 動態狀態判斷邏輯 ===
+    if is_canceled:
+        if is_archived_canceled:
+            border_color = "#475569" # 灰色 (已封存)
+            status_color = "#94A3B8"
+            bg_color = "#0F172A"
+        else:
+            border_color = "#EF4444" # 鮮紅色 (剛取消，警告用)
+            status_color = "#F87171"
+            bg_color = "#1E293B"
+        status_text = "❌ CANCELED"
+    elif is_landed:
         if landed_mins <= 60:
             border_color = "#10B981" 
             status_color = "#34D399"
@@ -221,22 +236,24 @@ for f in flights:
         status_text = f"Landed {format_hm(landed_mins)} ago"
     else:
         bg_color = "#1E293B"
+        delay_icon = "⚠️ " if is_delayed else ""
+        
         if is_early_prep:
             border_color = "#8B5CF6" 
             status_color = "#A78BFA"
-            status_text = f"⏰ In {format_hm(minutes_left)} (Prep)"
+            status_text = f"⏰ {delay_icon}In {format_hm(minutes_left)} (Prep)"
         elif minutes_left < 25:
             border_color = "#EF4444" 
             status_color = "#F87171"
-            status_text = f"🔥 In {format_hm(minutes_left)}"
+            status_text = f"🔥 {delay_icon}In {format_hm(minutes_left)}"
         elif minutes_left <= 60:
             border_color = "#F59E0B" 
             status_color = "#FBBF24"
-            status_text = f"In {format_hm(minutes_left)}"
+            status_text = f"{delay_icon}In {format_hm(minutes_left)}"
         else:
             border_color = "#3B82F6" 
             status_color = "#60A5FA"
-            status_text = f"In {format_hm(minutes_left)}"
+            status_text = f"{delay_icon}In {format_hm(minutes_left)}"
             
     processed_flights.append({
         'is_gap': False,
@@ -247,8 +264,11 @@ for f in flights:
         'gate': gate,
         'actual_time': dt.strftime('%H:%M'),
         'is_landed': is_landed,
+        'is_canceled': is_canceled,
+        'is_archived_canceled': is_archived_canceled,
         'landed_mins': landed_mins,
         'dt': dt,
+        's_dt_val': s_dt_val, # 用於取消航班的排序
         'image_url': image_url,
         'border_color': border_color,
         'status_color': status_color,
@@ -256,8 +276,8 @@ for f in flights:
         'bg_color': bg_color
     })
 
-# === 離櫃空檔偵測系統 ===
-future_flights = [pf for pf in processed_flights if not pf['is_landed']]
+# === 離櫃空檔偵測系統 (排除取消的航班) ===
+future_flights = [pf for pf in processed_flights if not pf['is_landed'] and not pf['is_canceled']]
 future_flights.sort(key=lambda x: x['dt'])
 
 gaps = []
@@ -289,7 +309,6 @@ for t_start, t_end in gaps:
     gap_border = "#10B981" if is_active else "#475569"
     gap_color = "#A7F3D0" if is_active else "#94A3B8"
     
-    # 無縮排的 HTML
     gap_html = f"""<div style="background-color: {gap_bg}; border: 1px dashed {gap_border}; border-radius: 8px; padding: 12px; margin-bottom: 12px; text-align: center; color: {gap_color}; font-family: sans-serif; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
 {title_text} <span style="opacity: 0.7; font-weight: normal; margin-left: 8px;">({time_text})</span>
 </div>"""
@@ -302,7 +321,13 @@ for t_start, t_end in gaps:
 
 # === 排序與渲染 ===
 def custom_sort(pf):
-    if pf['is_gap']: return (1, pf['time_key'])
+    if pf['is_gap']: 
+        return (1, pf['time_key'])
+    if pf.get('is_canceled'):
+        if pf.get('is_archived_canceled'):
+            return (2, -pf['s_dt_val'].timestamp()) # 降級到最底部 (Tier 2)
+        else:
+            return (1, pf['dt'].timestamp()) # 留在未來時間軸中 (Tier 1)
     if pf['is_landed']:
         return (0, -pf['dt'].timestamp()) if pf['landed_mins'] <= 60 else (2, -pf['dt'].timestamp())
     return (1, pf['dt'].timestamp())
@@ -314,7 +339,6 @@ for i, pf in enumerate(processed_flights):
         st.markdown(pf['html'], unsafe_allow_html=True)
         continue
         
-    # 動態產生無縮排的燈箱 HTML
     if pf['image_url']:
         modal_id = f"modal_{i}"
         image_element = f"""<label for="{modal_id}" class="avatar-btn">
@@ -331,13 +355,15 @@ for i, pf in enumerate(processed_flights):
         
     sch_str = f"Sch {pf['sch_display']} • " if pf['sch_display'] else ""
     
-    # 最堅固的 HTML 排版 (絕對無縮排)
+    # 如果是取消的航班，把 Act Time 隱藏，避免誤導
+    act_html = "" if pf['is_canceled'] else f'<span style="color: #7DD3FC; font-weight: bold; background: rgba(14,165,233,0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(14,165,233,0.3);">Act {pf["actual_time"]}</span>'
+    
     card_html = f"""<div style="background-color: {pf['bg_color']}; border-left: 6px solid {pf['border_color']}; border-radius: 8px; padding: 16px 20px; margin-bottom: 12px; display: flex; align-items: center; color: white; font-family: sans-serif; box-shadow: 0 4px 6px rgba(0,0,0,0.15);">
 {image_element}
 <div style="flex-grow: 1;">
 <div style="font-size: 1.4em; font-weight: bold; margin-bottom: 4px;">{pf['num']} <span style="font-size: 0.75em; color: #94A3B8; font-weight: normal; margin-left: 6px;">{pf['origin']}</span></div>
 <div style="font-size: 0.85em; color: #CBD5E1; margin-bottom: 6px;">{pf['ac_text']}</div>
-<div style="font-size: 0.85em; color: #CBD5E1;">{sch_str}<span style="color: #7DD3FC; font-weight: bold; background: rgba(14,165,233,0.15); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(14,165,233,0.3);">Act {pf['actual_time']}</span></div>
+<div style="font-size: 0.85em; color: #CBD5E1;">{sch_str}{act_html}</div>
 </div>
 <div style="text-align: right; min-width: 110px;">
 <div style="font-size: 0.8em; color: #94A3B8; text-transform: uppercase; font-weight: bold; letter-spacing: 0.05em;">Gate</div>
