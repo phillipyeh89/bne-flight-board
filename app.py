@@ -23,6 +23,14 @@ IMAGE_WORKERS      = 8
 DOMESTIC_TERMINALS = ('D', 'DOM', 'D-ANC', 'GAT', 'TBA')
 SMALL_AIRCRAFT_FILTER = ('BEECH', 'FAIRCHILD', 'CESSNA', 'PIPER', 'PILATUS', 'KING AIR', 'METROLINER')
 
+# 城市別名對照表：將 API 原始名稱轉換為更直覺的名稱
+CITY_MAP = {
+    "Lapu-Lapu City": "Cebu",
+    "Denpasar-Bali Island": "Bali",
+    "Ho Chi Minh City": "Saigon",
+    "Yaren District": "Nauru"
+}
+
 UI_REFRESH_SEC     = 60 
 API_DATA_TTL_SEC   = 1200 
 
@@ -220,11 +228,15 @@ prefetch_images(flights)
 processed_flights = []
 
 for f in flights:
-    # --- 變數初始化防止 NameError ---
+    # --- 變數初始化 ---
     flight_num, status = f.get("number", "N/A"), f.get("status", "").lower()
     dep, mv = f.get("departure", {}), f.get("movement", {})
     ai = dep.get("airport") or mv.get("airport") or {}
-    city = ai.get("municipalityName") or ai.get("name") or ai.get("iata") or "Unknown"
+    
+    # 城市名與別名處理
+    raw_city = ai.get("municipalityName") or ai.get("name") or ai.get("iata") or "Unknown"
+    city = CITY_MAP.get(raw_city, raw_city) # 如果在對照表內就換掉，沒有就用原名
+    
     country = str(ai.get("countryCode", "")).strip().lower()
     arr_n = f.get("arrival") or f.get("movement") or {}
     term, gate = str(arr_n.get("terminal", "")).strip().upper(), arr_n.get("gate", "TBA")
@@ -237,7 +249,7 @@ for f in flights:
 
     sch_raw = (arr_n.get("scheduledTime", {}) or {}).get("local")
     s_dt = _parse_local_dt(sch_raw, aest) or best_dt
-    sch_disp = s_dt.strftime("%H:%M") if sch_raw else "" # 確保變數名稱正確
+    sch_display_str = s_dt.strftime("%H:%M") if sch_raw else ""
 
     delay_hours = (best_dt - s_dt).total_seconds() / 3600 if sch_raw else 0
     if delay_hours > 12: continue
@@ -254,7 +266,7 @@ for f in flights:
     img_url = fetch_aircraft_image(ac_r)
 
     processed_flights.append({
-        "is_gap": False, "num": flight_num, "origin": city, "sch_display": sch_disp, "ac_text": ac_text,
+        "is_gap": False, "num": flight_num, "origin": city, "sch_display": sch_display_str, "ac_text": ac_text,
         "gate": gate, "actual_time": best_dt.strftime("%H:%M"), "is_landed": is_lan, "is_canceled": is_can,
         "is_archived_canceled": is_arch_can, "landed_mins": l_min, "dt": best_dt, "s_dt_val": s_dt,
         "time_type": t_type, "image_url": img_url, "border_color": bc, "status_color": sc,
