@@ -7,7 +7,7 @@ import pytz
 # 設定頁面與手機直式螢幕最佳化
 st.set_page_config(page_title="BNE Flight Board", page_icon="✈️", layout="centered")
 
-# 注入 V5.0 旗艦質感 CSS (統一暗色卡片 + 膠囊標籤)
+# 注入 V5.1 旗艦醒目版 CSS (高反差膠囊標籤)
 st.markdown("""
 <style>
     /* 全域背景微調 */
@@ -53,25 +53,35 @@ st.markdown("""
     .gate-text { font-size: 3em; font-weight: 800; line-height: 1; color: #FFFFFF; text-align: right; letter-spacing: -0.03em; margin-top: 4px; }
     .gate-label { font-size: 0.75em; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.1em; text-align: right; }
 
-    /* 膠囊狀態標籤 (Pill Badges) */
+    /* 膠囊狀態標籤 (高反差醒目版) */
     .badge {
-        padding: 6px 12px;
+        padding: 6px 14px;
         border-radius: 99px;
-        font-size: 0.85em;
-        font-weight: 700;
+        font-size: 0.9em;
+        font-weight: 800;
         display: inline-flex;
         align-items: center;
         gap: 6px;
         white-space: nowrap;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
     }
-    .badge-landed { background: rgba(16, 185, 129, 0.15); color: #34D399; border: 1px solid rgba(16, 185, 129, 0.3); }
-    .badge-archived { background: transparent; color: #64748B; border: 1px solid #475569; }
-    .badge-soon { background: rgba(245, 158, 11, 0.15); color: #FBBF24; border: 1px solid rgba(245, 158, 11, 0.3); }
-    .badge-urgent { background: rgba(239, 68, 68, 0.15); color: #F87171; border: 1px solid rgba(239, 68, 68, 0.3); }
-    .badge-purple { background: rgba(139, 92, 246, 0.15); color: #A78BFA; border: 1px solid rgba(139, 92, 246, 0.3); }
-    .badge-normal { background: rgba(56, 189, 248, 0.1); color: #7DD3FC; border: 1px solid rgba(56, 189, 248, 0.2); }
+    
+    .badge-landed { background: #10B981; color: #FFFFFF; box-shadow: 0 0 10px rgba(16, 185, 129, 0.4); }
+    .badge-archived { background: #334155; color: #E2E8F0; border: 1px solid #475569; }
+    .badge-soon { background: #F59E0B; color: #FFFFFF; box-shadow: 0 0 10px rgba(245, 158, 11, 0.4); }
+    .badge-urgent { background: #EF4444; color: #FFFFFF; box-shadow: 0 0 10px rgba(239, 68, 68, 0.6); animation: pulse-red 2s infinite; }
+    .badge-purple { background: #8B5CF6; color: #FFFFFF; box-shadow: 0 0 10px rgba(139, 92, 246, 0.4); }
+    .badge-normal { background: #0EA5E9; color: #FFFFFF; box-shadow: 0 0 10px rgba(14, 165, 233, 0.3); }
 
-    /* 離櫃空檔橫幅 (現代感長條設計) */
+    /* 緊急航班紅色呼吸燈 */
+    @keyframes pulse-red {
+        0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
+        70% { box-shadow: 0 0 0 12px rgba(239, 68, 68, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+    }
+
+    /* 離櫃空檔橫幅 */
     .gap-banner {
         background: #0F172A;
         border-left: 4px solid #10B981;
@@ -324,7 +334,6 @@ for t_start, t_end in gaps:
     css_ext = "" if is_active else "future"
     time_text = f"{display_start.strftime('%H:%M')} - {t_end.strftime('%H:%M')}"
     
-    # 取消 HTML 縮排，使用 flexbox 橫幅
     gap_html = f'<div class="gap-banner {css_ext}"><div class="gap-title">{title_text}</div><div class="gap-time">{time_text}</div></div>'
     
     processed_flights.append({
@@ -347,7 +356,6 @@ for pf in processed_flights:
         st.markdown(pf['html'], unsafe_allow_html=True)
         continue
         
-    # 取消 HTML 縮排，確保 Markdown 解析正確
     card_html = f"""<div class="uniform-card">
 <div style="display: flex; gap: 18px; align-items: center; width: 100%;">
 {pf['image_html']}
