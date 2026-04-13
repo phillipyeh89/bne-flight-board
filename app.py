@@ -12,13 +12,13 @@ AIRPORT_ICAO       = "YBBN"
 TIMEZONE           = "Australia/Brisbane"
 LOOKBACK_HOURS     = 1
 LOOKAHEAD_HOURS    = 11
-GAP_MIN_MINUTES    = 20      # 最小顯示空檔分鐘
-GAP_DISPLAY_MIN    = 5       # 剩餘不到5分鐘則隱藏空檔
-RECENT_LANDED_MAX  = 60      # 降落一小時內顯示為綠色
-IMMINENT_MINUTES   = 25      # 緊急狀態閾值
-SOON_MINUTES       = 60      # 靠近狀態閾值
-OLD_FLIGHT_HOURS   = 8       # 隱藏過久的表定資料
-IMAGE_WORKERS      = 8       # 並發抓圖線程數
+GAP_MIN_MINUTES    = 20
+GAP_DISPLAY_MIN    = 5
+RECENT_LANDED_MAX  = 60
+IMMINENT_MINUTES   = 25
+SOON_MINUTES       = 60
+OLD_FLIGHT_HOURS   = 8
+IMAGE_WORKERS      = 8
 DOMESTIC_TERMINALS = ('D', 'DOM')
 
 # ─────────────────────────────────────────────
@@ -134,7 +134,7 @@ def get_card_style(is_canceled, is_archived, is_landed, landed_mins, is_delayed,
     return "#3B82F6", "#60A5FA", bg, f"{icon}In {format_hm(mins_left)}"
 
 # ─────────────────────────────────────────────
-# Renderers (Absolute Safe Mode: All Left Aligned)
+# Renderers
 # ─────────────────────────────────────────────
 def render_flight_card(pf: dict, index: int):
     img_url, border_col = pf["image_url"], pf["border_color"]
@@ -147,12 +147,11 @@ def render_flight_card(pf: dict, index: int):
 <div class="img-zoom-modal">
 <label for="{mid}" class="img-zoom-close"></label>
 <label for="{mid}" class="close-btn-text">&times;</label>
-<img src="{img_url}" />
+<img src="{pf['image_url']}" />
 </div>"""
     else:
         image_element = f'<div style="width:70px;height:70px;border-radius:35px;background:#334155;display:flex;align-items:center;justify-content:center;margin-right:18px;font-size:1.6em;border:2px solid {border_col};flex-shrink:0;">✈️</div>'
 
-    # 取消航班顯示刪除線
     if pf["is_canceled"]:
         sch_str = f'<span style="text-decoration:line-through;opacity:0.5;">Sch {pf["sch_display"]}</span>' if pf["sch_display"] else ""
         act_html = ""
@@ -161,7 +160,8 @@ def render_flight_card(pf: dict, index: int):
         if pf["time_type"] == "actual":
             act_html = f'<span style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 6px;border-radius:4px;border:1px solid rgba(14,165,233,0.3);">Act {pf["actual_time"]}</span>'
         elif pf["time_type"] == "revised":
-            act_html = f'<span style="color:#FBBF24;font-weight:bold;background:rgba(251,191,36,0.15);padding:2px 6px;border-radius:4px;border:1px solid rgba(251,191,36,0.3);">Est {pf["actual_time"]}</span>'
+            # 修正：將 Est (Estimated) 改為中性白色，避免與 Delayed 黃色混淆
+            act_html = f'<span style="color:#F8FAFC;font-weight:bold;background:rgba(248,250,252,0.1);padding:2px 6px;border-radius:4px;border:1px solid rgba(248,250,252,0.3);">Est {pf["actual_time"]}</span>'
         else: act_html = ""
 
     card_html = f"""<div style="background-color:{pf['bg_color']};border-left:6px solid {border_col};border-radius:8px;padding:16px 20px;margin-bottom:12px;display:flex;align-items:center;color:white;font-family:sans-serif;box-shadow:0 4px 6px rgba(0,0,0,0.15);">
