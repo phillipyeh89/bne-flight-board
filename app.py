@@ -218,23 +218,29 @@ with col2:
         api_html = f'API: {api_t.strftime("%H:%M") if api_t else "--:--"}'
     st.markdown(f'<div style="font-size:0.75em;color:#64748B;text-align:center;">{api_html}</div>', unsafe_allow_html=True)
 
-with st.expander("ℹ️ 系統運作說明與常見問題 (System Info)"):
+with st.expander("ℹ️ System Info & Troubleshooting"):
     st.markdown(f"""
-    **1. 數據更新機制**
-    * 畫面每 **60 秒**自動跳動倒數，而背後的即時 API 航班資料每 **10 分鐘**同步一次。
-    * 當前顯示範圍：過去 **{LOOKBACK_HOURS}** 小時至未來 **{LOOKAHEAD_HOURS}** 小時。
+    **1. Auto-Refresh & Sync**
+    * Screen updates every **60s**. API syncs every **10m**.
+    * Showing flights from **-{LOOKBACK_HOURS}hr** to **+{LOOKAHEAD_HOURS}hrs**.
 
-    **2. 為什麼有些飛機沒有顯示照片？**
-    * 系統只會透過「實體機身編號 (Registration Number)」來抓取精確的飛機照片。
-    * 若飛機仍在遙遠航程中，航空公司有時尚未指派或回傳確切的機身編號，系統為了防呆會顯示預設 ✈️ 圖示。通常在降落前 1-2 小時會自動補齊。
+    **2. Missing Plane Photos?**
+    * Photos require a confirmed Aircraft Registration Number. If missing, the plane is likely still far out. A default ✈️ will show until radar updates closer to landing.
 
-    **3. 時間標籤狀態說明**
-    * <span class="mono" style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 4px;border-radius:4px;">Act</span> **(天藍色)**：飛機已實際降落。
-    * <span class="mono" style="color:#E2E8F0;font-weight:bold;background:rgba(226,232,240,0.15);padding:2px 4px;border-radius:4px;">Est</span> **(冷灰色)**：雷達已掌握即時動態，並計算出精準預估時間。就算航班表現完美、沒有延遲，只要有雷達追蹤就會顯示此標籤。
-    * <span class="mono" style="color:#94A3B8;font-weight:bold;background:rgba(148,163,184,0.15);padding:2px 4px;border-radius:4px;">Sch</span> **(暗灰色)** + **⚠️ Check Board**：雷達尚未收到該航班動態，僅能提供原本的表定時間。此時請務必抬頭核對機場實體螢幕，以免錯估客流時間。
+    **3. Time Tags Guide**
+    * <span class="mono" style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 4px;border-radius:4px;">Act</span> **(Blue)**: Aircraft has landed.
+    * <span class="mono" style="color:#E2E8F0;font-weight:bold;background:rgba(226,232,240,0.15);padding:2px 4px;border-radius:4px;">Est</span> **(Light Gray)**: Radar confirmed. This is an accurate, live ETA.
+    * <span class="mono" style="color:#94A3B8;font-weight:bold;background:rgba(148,163,184,0.15);padding:2px 4px;border-radius:4px;">Sch</span> **(Dark Gray)** + **⚠️ Check Board**: Radar blind spot. The API only has scheduled times. **Check physical airport screens to avoid missing passengers!**
     
-    **4. 隱藏航班與過濾器**
-    * 系統已啟動「免稅店專屬國際線過濾器」，自動排除了國內航廈 (Domestic)、小型私人飛機與非載客航班。
+    **4. Smart Filters**
+    * Domestic (D, DOM, GAT), private jets, and non-passenger flights are automatically hidden to focus strictly on International arrivals.
+
+    ---
+    **5. Support & Maintenance**
+    * Built to optimize floor staffing for BNE Lotte Duty Free.
+    * **Version**: V7.14
+    * **Developer**: [Your Name/Contact Info]
+    * **Issues?** If the board freezes or data looks wrong, please take a screenshot and contact support immediately.
     """, unsafe_allow_html=True)
 st.write("") 
 
