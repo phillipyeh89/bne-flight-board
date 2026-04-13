@@ -1,16 +1,16 @@
 import streamlit as st
 import requests
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 import pytz
 
-# 1. 頁面基礎設定
-st.set_page_config(page_title="BNE Flight Board PRO", page_icon="✈️", layout="centered")
+# 設定頁面與手機直式螢幕最佳化
+st.set_page_config(page_title="BNE Flight Board", page_icon="✈️", layout="centered")
 
-# 自動重整機制 (20分鐘)
+# 自動更新機制：每 20 分鐘 (1200秒) 自動重整
 st.markdown('<meta http-equiv="refresh" content="1200">', unsafe_allow_html=True)
 
-# 2. 注入高質感漸層 CSS
+# 注入高質感漸層 CSS (新增空檔橫幅設計)
 st.markdown("""
 <style>
     .flight-card {
@@ -46,13 +46,11 @@ st.markdown("""
         text-transform: uppercase;
     }
     
-    /* Modern Color Palette */
-    .status-normal { background: linear-gradient(135deg, #334155, #1E293B); } /* Slate */
-    .status-soon { background: linear-gradient(135deg, #D97706, #B45309); } /* Amber */
-    .status-urgent { background: linear-gradient(135deg, #E11D48, #BE123C); } /* Rose Red */
-    .status-landed-new { background: linear-gradient(135deg, #059669, #047857); } /* Emerald Green */
+    .status-normal { background: linear-gradient(135deg, #334155, #1E293B); } 
+    .status-soon { background: linear-gradient(135deg, #D97706, #B45309); } 
+    .status-urgent { background: linear-gradient(135deg, #E11D48, #BE123C); } 
+    .status-landed-new { background: linear-gradient(135deg, #059669, #047857); } 
     
-    /* Archived/Old Landed Flights */
     .status-landed-old { 
         background: #0F172A; 
         color: #64748B; 
@@ -61,7 +59,6 @@ st.markdown("""
     }
     .status-landed-old .time-text, .status-landed-old .gate-text { opacity: 0.6; }
 
-    /* Pulsing effect for Early Prep */
     @keyframes pulse-purple {
         0% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.5); }
         70% { box-shadow: 0 0 0 10px rgba(139, 92, 246, 0); }
@@ -71,6 +68,27 @@ st.markdown("""
         background: linear-gradient(135deg, #8B5CF6, #6D28D9);
         animation: pulse-purple 2s infinite;
         border: 1px solid #A78BFA;
+    }
+
+    /* 空檔橫幅專屬設計 */
+    .gap-card {
+        text-align: center;
+        padding: 12px;
+        margin: 5px 0 15px 0;
+        border-radius: 8px;
+        background: linear-gradient(90deg, rgba(15, 23, 42, 0) 0%, rgba(34, 197, 94, 0.15) 50%, rgba(15, 23, 42, 0) 100%);
+        border-top: 1px dashed rgba(34, 197, 94, 0.5);
+        border-bottom: 1px dashed rgba(34, 197, 94, 0.5);
+        color: #86EFAC;
+        font-size: 1.05em;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+    }
+    .gap-card.future {
+        background: linear-gradient(90deg, rgba(15, 23, 42, 0) 0%, rgba(51, 65, 85, 0.6) 50%, rgba(15, 23, 42, 0) 100%);
+        border-top: 1px dashed rgba(148, 163, 184, 0.4);
+        border-bottom: 1px dashed rgba(148, 163, 184, 0.4);
+        color: #94A3B8;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -95,7 +113,8 @@ aest = pytz.timezone('Australia/Brisbane')
 now_aest = datetime.now(aest)
 
 from_time = (now_aest - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M")
-to_time = (now_aest + timedelta(hours=10)).strftime("%Y-%m-%dT%H:%M")
+# 延長 API 抓取極限至 11 小時，確保能盡可能涵蓋整個班表
+to_time = (now_aest + timedelta(hours=11)).strftime("%Y-%m-%dT%H:%M")
 
 col1, col2 = st.columns([2, 1])
 with col1:
@@ -139,16 +158,13 @@ for f in flights:
     elif icao: origin = icao
     else: origin = "Unknown"
     
-    # === 抓取機型與註冊編號 (Aircraft Type & Registration) ===
     aircraft_node = f.get('aircraft') or {}
     aircraft_model = aircraft_node.get('model', '')
     aircraft_reg = aircraft_node.get('reg', '')
     
     ac_display_parts = []
-    if aircraft_model:
-        ac_display_parts.append(aircraft_model)
-    if aircraft_reg:
-        ac_display_parts.append(f"({aircraft_reg})")
+    if aircraft_model: ac_display_parts.append(aircraft_model)
+    if aircraft_reg: ac_display_parts.append(f"({aircraft_reg})")
         
     ac_text = " ".join(ac_display_parts)
     aircraft_display = f'<div style="font-size: 0.85em; opacity: 0.6; margin-top: 4px; font-weight: 500;">✈️ {ac_text}</div>' if ac_text else ''
@@ -174,20 +190,17 @@ for f in flights:
                 
         for t_key in ['actualTimeLocal', 'estimatedTimeLocal', 'scheduledTimeLocal']:
             t_val = node.get(t_key)
-            if t_val:
-                time_candidates.append(t_val)
+            if t_val: time_candidates.append(t_val)
                 
     if not scheduled_time_raw and f.get('scheduledTimeLocal'):
         scheduled_time_raw = f.get('scheduledTimeLocal')
                 
     for t_key in ['actualTimeLocal', 'estimatedTimeLocal', 'scheduledTimeLocal']:
         t_val = f.get(t_key)
-        if t_val:
-            time_candidates.append(t_val)
+        if t_val: time_candidates.append(t_val)
     
     valid_times = [t for t in time_candidates if isinstance(t, str) and len(t) > 5]
-    if not valid_times:
-        continue
+    if not valid_times: continue
         
     best_time_str = valid_times[0]
     
@@ -217,7 +230,6 @@ for f in flights:
         
     status = f.get('status', '').lower()
     time_diff_minutes = int((dt - now_aest).total_seconds() / 60)
-    
     is_landed = status in ['landed', 'arrived'] or time_diff_minutes <= 0
 
     if scheduled_time_raw:
@@ -227,13 +239,8 @@ for f in flights:
             else: s_dt_check = s_dt_check.astimezone(aest)
             
             diff_hours = (dt - s_dt_check).total_seconds() / 3600
-            
-            if diff_hours < -2:
-                continue
-            if diff_hours > 12:
-                continue
-            if not is_landed and (now_aest - s_dt_check).total_seconds() > 8 * 3600:
-                continue  
+            if diff_hours < -2 or diff_hours > 12: continue
+            if not is_landed and (now_aest - s_dt_check).total_seconds() > 8 * 3600: continue  
         except:
             pass
     
@@ -242,30 +249,22 @@ for f in flights:
     landed_mins = 0
     
     is_early_prep = (dt.hour == 2 and dt.minute >= 30) or (dt.hour == 3) or (dt.hour == 4 and dt.minute <= 10)
-    
-    if is_early_prep:
-        tags.append("⏰ Early Prep Required")
+    if is_early_prep: tags.append("⏰ Early Prep Required")
 
     if is_landed:
         landed_mins = max(0, -time_diff_minutes)
-        if landed_mins <= 60:
-            css_class = "status-landed-new"
-        else:
-            css_class = "status-landed-old"
-            
+        if landed_mins <= 60: css_class = "status-landed-new"
+        else: css_class = "status-landed-old"
         time_display = f"Landed {format_hm(landed_mins)} ago ({dt.strftime('%H:%M')})"
     else:
         minutes_left = max(0, time_diff_minutes)
-        if is_early_prep:
-            css_class = "status-purple"
-        elif minutes_left < 25:
-            css_class = "status-urgent"
-        elif minutes_left <= 60:
-            css_class = "status-soon"
-            
+        if is_early_prep: css_class = "status-purple"
+        elif minutes_left < 25: css_class = "status-urgent"
+        elif minutes_left <= 60: css_class = "status-soon"
         time_display = f"In {format_hm(minutes_left)} ({dt.strftime('%H:%M')})"
             
     processed_flights.append({
+        'is_gap': False,
         'num': flight_num,
         'origin': origin,
         'sch_display': sch_display,
@@ -279,7 +278,70 @@ for f in flights:
         'dt': dt
     })
 
+# === 新增：班表全覆蓋空檔偵測系統 (Full-Shift Gap Detector) ===
+shift_date = now_aest.date() if now_aest.hour < 12 else now_aest.date() + timedelta(days=1)
+shift_start = aest.localize(datetime.combine(shift_date, time(4, 30)))
+shift_end = aest.localize(datetime.combine(shift_date, time(12, 0)))
+
+# 安全邊界：防止 API 抓不到 12 點的資料而產生假空檔
+api_end = now_aest + timedelta(hours=11)
+effective_end = min(shift_end, api_end)
+
+# 篩選出落在班表內的航班時間
+shift_flights = [pf['dt'] for pf in processed_flights if not pf['is_gap'] and shift_start <= pf['dt'] <= effective_end]
+shift_flights.sort()
+
+gaps = []
+
+if not shift_flights:
+    if (effective_end - shift_start).total_seconds() / 60 >= 20:
+        gaps.append((shift_start, effective_end))
+else:
+    # 偵測：從上班 (04:30) 到第一班飛機的空檔
+    if (shift_flights[0] - shift_start).total_seconds() / 60 >= 20:
+        gaps.append((shift_start, shift_flights[0]))
+        
+    # 偵測：飛機與飛機之間的空檔
+    for i in range(1, len(shift_flights)):
+        if (shift_flights[i] - shift_flights[i-1]).total_seconds() / 60 >= 20:
+            gaps.append((shift_flights[i-1], shift_flights[i]))
+            
+    # 偵測：最後一班飛機到下班 (12:00) 的空檔
+    if (effective_end - shift_flights[-1]).total_seconds() / 60 >= 20:
+        gaps.append((shift_flights[-1], effective_end))
+
+# 將偵測到的空檔注入到列表
+for t_start, t_end in gaps:
+    if t_end <= now_aest: continue # 過去的空檔不顯示
+    
+    # 動態扣除時間：如果已經在空檔內，只顯示剩餘分鐘數
+    display_start = max(t_start, now_aest)
+    gap_mins = int((t_end - display_start).total_seconds() / 60)
+    
+    if gap_mins < 5: continue # 剩餘不到 5 分鐘忽略
+    
+    is_active = t_start <= now_aest
+    status_text = "🟢 ACTIVE BREAK NOW" if is_active else f"☕ {gap_mins}m BREAK OPPORTUNITY"
+    css_ext = "" if is_active else "future"
+    
+    gap_html = f'''
+    <div class="gap-card {css_ext}">
+        {status_text} <span style="opacity:0.6; margin-left:8px;">({display_start.strftime('%H:%M')} - {t_end.strftime('%H:%M')})</span>
+    </div>
+    '''
+    
+    processed_flights.append({
+        'is_gap': True,
+        'html': gap_html,
+        # 將空檔強制排在尚未降落的區域，緊跟在上一班飛機後面
+        'time_key': t_start.timestamp() + 1 
+    })
+
+
+# === 排序與渲染 ===
 def custom_sort(pf):
+    if pf['is_gap']:
+        return (1, pf['time_key'])
     if pf['is_landed']:
         if pf['landed_mins'] <= 60:
             return (0, -pf['dt'].timestamp())
@@ -291,6 +353,10 @@ def custom_sort(pf):
 processed_flights.sort(key=custom_sort)
 
 for pf in processed_flights:
+    if pf['is_gap']:
+        st.markdown(pf['html'], unsafe_allow_html=True)
+        continue
+        
     tag_html = "".join([f'<div class="label-tag">{tag}</div>' for tag in pf['tags']])
     
     card_html = f"""
