@@ -7,12 +7,64 @@ import pytz
 # 設定頁面與手機直式螢幕最佳化
 st.set_page_config(page_title="BNE Flight Board", page_icon="✈️", layout="centered")
 
-# 隱藏 Streamlit 預設的頂部空白與選單，讓畫面更像 App
+# 隱藏 Streamlit 預設的頂部空白與選單，讓畫面更像 App，並加入圖片放大的 CSS
 st.markdown("""
 <style>
     #MainMenu {visibility: hidden;}
     header {visibility: hidden;}
     .block-container {padding-top: 2rem;}
+    
+    /* 點擊放大飛機照片的特效按鈕 */
+    .avatar-btn {
+        cursor: pointer; 
+        margin-right: 15px; 
+        flex-shrink: 0; 
+        display: block; 
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        border-radius: 30px;
+    }
+    .avatar-btn:hover {
+        transform: scale(1.1); 
+        box-shadow: 0 0 12px rgba(255,255,255,0.2);
+    }
+
+    /* 純 CSS 圖片放大燈箱 (Lightbox) */
+    .img-zoom-chk:checked + .img-zoom-modal { display: flex; }
+    .img-zoom-modal {
+        display: none; 
+        position: fixed; 
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(15, 23, 42, 0.92); 
+        z-index: 999999;
+        align-items: center; 
+        justify-content: center; 
+        backdrop-filter: blur(5px);
+    }
+    .img-zoom-modal img {
+        max-width: 90vw; 
+        max-height: 80vh; 
+        border-radius: 12px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.6); 
+        border: 2px solid #475569;
+        object-fit: contain;
+    }
+    .img-zoom-close { 
+        position: absolute; 
+        top: 0; left: 0; right: 0; bottom: 0; 
+        cursor: pointer; 
+    }
+    .close-btn-text {
+        position: absolute; 
+        top: 20px; right: 30px; 
+        color: #F8FAFC;
+        font-size: 3em; 
+        font-weight: bold;
+        cursor: pointer; 
+        z-index: 1000000; 
+        line-height: 1;
+        text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+    }
+    .close-btn-text:hover { color: #EF4444; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -94,12 +146,6 @@ for f in flights:
     
     image_url = fetch_aircraft_image(aircraft_reg)
     ac_text = f"{aircraft_model} ({aircraft_reg})" if aircraft_model and aircraft_reg else aircraft_model or aircraft_reg
-    
-    # 建立照片的 HTML 元素 (安全的內聯樣式)
-    if image_url:
-        image_element = f'<img src="{image_url}" style="width: 60px; height: 60px; border-radius: 30px; object-fit: cover; margin-right: 15px; border: 2px solid #334155;" />'
-    else:
-        image_element = '<div style="width: 60px; height: 60px; border-radius: 30px; background: #334155; display: flex; align-items: center; justify-content: center; margin-right: 15px; font-size: 1.5em; border: 2px solid #475569;">✈️</div>'
 
     time_candidates = []
     scheduled_time_raw = None
@@ -163,33 +209,32 @@ for f in flights:
     minutes_left = max(0, time_diff_minutes) if not is_landed else 0
     is_early_prep = not is_landed and ((dt.hour == 2 and dt.minute >= 30) or (dt.hour == 3) or (dt.hour == 4 and dt.minute <= 10))
 
-    # 決定卡片顏色與狀態文字
     if is_landed:
         if landed_mins <= 60:
-            border_color = "#10B981" # 亮綠色
+            border_color = "#10B981" 
             status_color = "#34D399"
             bg_color = "#1E293B"
         else:
-            border_color = "#475569" # 灰色 (已封存)
+            border_color = "#475569" 
             status_color = "#94A3B8"
             bg_color = "#0F172A"
         status_text = f"Landed {format_hm(landed_mins)} ago"
     else:
         bg_color = "#1E293B"
         if is_early_prep:
-            border_color = "#8B5CF6" # 紫色
+            border_color = "#8B5CF6" 
             status_color = "#A78BFA"
             status_text = f"⏰ In {format_hm(minutes_left)} (Prep)"
         elif minutes_left < 25:
-            border_color = "#EF4444" # 紅色
+            border_color = "#EF4444" 
             status_color = "#F87171"
             status_text = f"🔥 In {format_hm(minutes_left)}"
         elif minutes_left <= 60:
-            border_color = "#F59E0B" # 橘黃色
+            border_color = "#F59E0B" 
             status_color = "#FBBF24"
             status_text = f"In {format_hm(minutes_left)}"
         else:
-            border_color = "#3B82F6" # 藍色
+            border_color = "#3B82F6" 
             status_color = "#60A5FA"
             status_text = f"In {format_hm(minutes_left)}"
             
@@ -204,7 +249,7 @@ for f in flights:
         'is_landed': is_landed,
         'landed_mins': landed_mins,
         'dt': dt,
-        'image_element': image_element,
+        'image_url': image_url,
         'border_color': border_color,
         'status_color': status_color,
         'status_text': status_text,
@@ -240,7 +285,6 @@ for t_start, t_end in gaps:
     title_text = f"🟢 ACTIVE OFF-FLOOR ({gap_display} left)" if is_active else f"🔄 {gap_display} OFF-FLOOR WINDOW"
     time_text = f"{display_start.strftime('%H:%M')} - {t_end.strftime('%H:%M')}"
     
-    # 安全的空檔 HTML (無縮排)
     gap_bg = "#064E3B" if is_active else "#0F172A"
     gap_border = "#10B981" if is_active else "#475569"
     gap_color = "#A7F3D0" if is_active else "#94A3B8"
@@ -264,16 +308,32 @@ def custom_sort(pf):
 
 processed_flights.sort(key=custom_sort)
 
-for pf in processed_flights:
+for i, pf in enumerate(processed_flights):
     if pf['is_gap']:
         st.markdown(pf['html'], unsafe_allow_html=True)
         continue
         
+    # 動態產生燈箱 HTML
+    if pf['image_url']:
+        modal_id = f"modal_{i}"
+        image_element = f"""
+        <label for="{modal_id}" class="avatar-btn">
+            <img src="{pf['image_url']}" style="width: 60px; height: 60px; border-radius: 30px; object-fit: cover; border: 2px solid {pf['border_color']}; display: block;" />
+        </label>
+        <input type="checkbox" id="{modal_id}" class="img-zoom-chk" style="display:none;">
+        <div class="img-zoom-modal">
+            <label for="{modal_id}" class="img-zoom-close"></label>
+            <label for="{modal_id}" class="close-btn-text">&times;</label>
+            <img src="{pf['image_url']}" />
+        </div>
+        """
+    else:
+        image_element = f'<div style="width: 60px; height: 60px; border-radius: 30px; background: #334155; display: flex; align-items: center; justify-content: center; margin-right: 15px; font-size: 1.5em; border: 2px solid {pf["border_color"]}; flex-shrink: 0;">✈️</div>'
+
     sch_str = f"Sch {pf['sch_display']} • " if pf['sch_display'] else ""
     
-    # 最堅固的 HTML 排版 (絕對無縮排)
     card_html = f"""<div style="background-color: {pf['bg_color']}; border-left: 6px solid {pf['border_color']}; border-radius: 8px; padding: 16px 20px; margin-bottom: 12px; display: flex; align-items: center; color: white; font-family: sans-serif; box-shadow: 0 4px 6px rgba(0,0,0,0.15);">
-{pf['image_element']}
+{image_element}
 <div style="flex-grow: 1;">
 <div style="font-size: 1.4em; font-weight: bold; margin-bottom: 4px;">{pf['num']} <span style="font-size: 0.75em; color: #94A3B8; font-weight: normal; margin-left: 6px;">{pf['origin']}</span></div>
 <div style="font-size: 0.85em; color: #CBD5E1; margin-bottom: 6px;">{pf['ac_text']}</div>
