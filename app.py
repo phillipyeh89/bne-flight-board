@@ -7,7 +7,7 @@ import pytz
 # 設定頁面與手機直式螢幕最佳化
 st.set_page_config(page_title="BNE Flight Board", page_icon="✈️", layout="centered")
 
-# 注入 V5.1 旗艦醒目版 CSS (高反差膠囊標籤)
+# 注入 V5.2 旗艦醒目版 CSS (新增 Act Time 高亮設計)
 st.markdown("""
 <style>
     /* 全域背景微調 */
@@ -48,8 +48,20 @@ st.markdown("""
     /* 文字排版系統 */
     .flight-route { font-size: 1.5em; font-weight: 800; letter-spacing: -0.02em; color: #FFFFFF; }
     .flight-num { font-size: 1.1em; font-weight: 600; color: #94A3B8; margin-top: 2px; }
-    .flight-meta { font-size: 0.85em; font-weight: 500; color: #64748B; margin-top: 6px; }
+    .flight-meta { font-size: 0.85em; font-weight: 500; color: #64748B; margin-top: 8px; display: flex; align-items: center; gap: 8px; }
     
+    /* 實際時間 (Act Time) 專屬高亮設計 */
+    .act-time {
+        color: #7DD3FC; /* 明亮天空藍 */
+        background: rgba(14, 165, 233, 0.15);
+        border: 1px solid rgba(14, 165, 233, 0.4);
+        padding: 2px 8px;
+        border-radius: 6px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        box-shadow: 0 0 8px rgba(14, 165, 233, 0.1);
+    }
+
     .gate-text { font-size: 3em; font-weight: 800; line-height: 1; color: #FFFFFF; text-align: right; letter-spacing: -0.03em; margin-top: 4px; }
     .gate-label { font-size: 0.75em; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.1em; text-align: right; }
 
@@ -356,6 +368,9 @@ for pf in processed_flights:
         st.markdown(pf['html'], unsafe_allow_html=True)
         continue
         
+    # 動態組合表定時間，防呆處理
+    sch_part = f"Sch {pf['sch_display']}" if pf['sch_display'] else ""
+        
     card_html = f"""<div class="uniform-card">
 <div style="display: flex; gap: 18px; align-items: center; width: 100%;">
 {pf['image_html']}
@@ -365,7 +380,9 @@ for pf in processed_flights:
 <div class="badge {pf['badge_class']}">{pf['badge_text']}</div>
 </div>
 <div class="flight-num">{pf['num']} <span style="opacity:0.5; font-weight:400; margin: 0 4px;">|</span> {pf['ac_text']}</div>
-<div class="flight-meta">Sch {pf['sch_display']} <span style="margin: 0 6px;">•</span> Act {pf['actual_time']}</div>
+<div class="flight-meta">
+    {sch_part} <span class="act-time">Act {pf['actual_time']}</span>
+</div>
 </div>
 <div style="text-align: right; min-width: 80px; padding-left: 10px; border-left: 1px solid rgba(255,255,255,0.05); margin-left: 10px;">
 <div class="gate-label">Gate</div>
