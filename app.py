@@ -183,9 +183,9 @@ def render_flight_card(pf: dict, index: int):
     sch_str = f'<span class="mono">Sch {pf["sch_display"]}</span> • ' if pf["sch_display"] else ""
     next_day_tag = ' <small style="opacity:0.6;">(Next Day)</small>' if pf["is_next_day"] else ''
 
-    # 新增：當尚未降落且只有 Est/Sch 時，加入警告標籤
+    # 💡 新邏輯：只有當「尚未降落」、「未取消」且「預估時間完全等於表定時間（代表沒有雷達動態更新）」時，才顯示警告
     check_board_tag = ""
-    if not pf["is_landed"] and pf["time_type"] != "actual" and not pf["is_canceled"]:
+    if not pf["is_landed"] and not pf["is_canceled"] and pf["actual_time"] == pf["sch_display"]:
         check_board_tag = ' <span style="color:#FBBF24; font-size:0.85em; margin-left:6px; font-weight:700;">⚠️ Check Board</span>'
 
     if pf["is_landed"] or pf["time_type"] == "actual":
@@ -243,8 +243,8 @@ with st.expander("ℹ️ 系統運作說明與常見問題 (System Info)"):
 
     **3. 時間標籤 (Act vs Est vs ⚠️ Check Board)**
     * <span class="mono" style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 4px;border-radius:4px;">Act</span> **(天藍色)**：Actual。飛機已實際降落，或進入雷達密集區鎖定了極高準確度的降落時間。
-    * <span class="mono" style="color:#E2E8F0;font-weight:bold;background:rgba(226,232,240,0.15);padding:2px 4px;border-radius:4px;">Est</span> **(冷灰色)**：Estimated。基於表定時間的初步預估。
-    * **⚠️ Check Board**：當系統只抓到 `Est` 或 `Sch` 時間時會出現此警告，建議同仁務必抬頭核對機場實體螢幕，以免 API 延遲導致漏接旅客。
+    * <span class="mono" style="color:#E2E8F0;font-weight:bold;background:rgba(226,232,240,0.15);padding:2px 4px;border-radius:4px;">Est</span> **(冷灰色)**：Estimated。已獲取雷達動態更新的預估抵達時間。
+    * **⚠️ Check Board**：當預估時間(Est)與表定時間(Sch)完全相同，代表系統尚未抓取到雷達即時動態。此時請抬頭核對機場實體螢幕，以防漏接旅客。
     
     **4. 隱藏航班與過濾器**
     * 系統已啟動「免稅店專屬國際線過濾器」，自動排除了國內航廈 (Domestic)、小型私人飛機與非載客航班。
