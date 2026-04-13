@@ -5,9 +5,6 @@ from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 import pytz
 
-# ─────────────────────────────────────────────
-# Constants (BNE Operations - 12H Pro Stable)
-# ─────────────────────────────────────────────
 AIRPORT_ICAO       = "YBBN"
 TIMEZONE           = "Australia/Brisbane"
 LOOKBACK_HOURS     = 1
@@ -16,7 +13,7 @@ RECENT_LANDED_MAX  = 60
 GAP_MIN_MINUTES    = 20
 GAP_DISPLAY_MIN    = 5
 IMAGE_WORKERS      = 10
-DOMESTIC_TERMINALS = ('D', 'DOM', 'D-ANC', 'GAT', 'TBA')
+DOMESTIC_TERMINALS = ('D', 'DOM', 'D-ANC', 'GAT')
 SMALL_AIRCRAFT_FILTER = ('BEECH', 'FAIRCHILD', 'CESSNA', 'PIPER', 'PILATUS', 'KING AIR', 'METROLINER')
 
 CITY_MAP = {
@@ -31,9 +28,6 @@ UI_REFRESH_SEC     = 60
 API_DATA_TTL_SEC   = 600  
 STALE_DATA_THRESHOLD_MIN = 30 
 
-# ─────────────────────────────────────────────
-# Page Config & Typography
-# ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 st.markdown(f"""
 <meta http-equiv="refresh" content="{UI_REFRESH_SEC}">
@@ -82,19 +76,18 @@ st.markdown(f"""
 if "api_last_hit" not in st.session_state:
     st.session_state.api_last_hit = None
 
-# ─────────────────────────────────────────────
-# Data Fetchers
-# ─────────────────────────────────────────────
 @st.cache_data(ttl=86400, show_spinner=False)
 def fetch_aircraft_image(reg: str) -> str:
-    if not reg: return ""
+    if not reg: return "NOT_FOUND"
     try:
         url = f"https://api.planespotters.net/pub/photos/reg/{reg}"
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=3)
-        photos = r.json().get("photos", [])
-        if photos: return photos[0]["thumbnail_large"]["src"]
-    except Exception: pass
-    return ""
+        r = requests.get(url, headers={"User-Agent": "BNE-Board-App/1.0"}, timeout=1.5)
+        if r.status_code == 200:
+            photos = r.json().get("photos", [])
+            if photos: return photos[0]["thumbnail_large"]["src"]
+        return "NOT_FOUND"
+    except Exception: 
+        return "NOT_FOUND"
 
 def prefetch_images(flights: list):
     regs = [f.get("aircraft", {}).get("reg", "") for f in flights]
@@ -114,9 +107,6 @@ def fetch_flight_data(from_time: str, to_time: str) -> list:
     except Exception as e:
         st.error(f"API Request Failed: {e}"); return []
 
-# ─────────────────────────────────────────────
-# Logic Helpers
-# ─────────────────────────────────────────────
 def format_hm(total_minutes: int) -> str:
     h, m = divmod(total_minutes, 60)
     return f"{m:02d}m" if h == 0 else f"{h:02d}h {m:02d}m"
@@ -152,6 +142,8 @@ def get_card_style(is_canceled, is_archived, is_landed, landed_mins, delay_hours
         return "#475569", "#94A3B8", "#0F172A", f"Landed {format_hm(landed_mins)} ago"
 
     bg = "#1E293B"
+    if delay_hours >= 12:
+        return "#7F1D1D", "#FCA5A5", bg, f"🚨 SEVERE DELAY  In {format_hm(mins_left)}"
     if mins_left < 25:
         delay_suffix = f" (+{int(delay_hours)}h late)" if delay_hours >= 1 else ""
         return "#EF4444", "#F87171", bg, f"🔥 In {format_hm(mins_left)}{delay_suffix}"
@@ -161,11 +153,10 @@ def get_card_style(is_canceled, is_archived, is_landed, landed_mins, delay_hours
         return "#F59E0B", "#FBBF24", bg, f"In {format_hm(mins_left)}"
     return "#3B82F6", "#60A5FA", bg, f"In {format_hm(mins_left)}"
 
-# ─────────────────────────────────────────────
-# Renderers
-# ─────────────────────────────────────────────
 def render_flight_card(pf: dict, index: int):
-    img_url, border_col = pf["image_url"], pf["border_color"]
+    img_url = "" if pf["image_url"] == "NOT_FOUND" else pf["image_url"]
+    border_col = pf["border_color"]
+    
     if img_url:
         mid = f"modal_{index}"
         image_element = f"""<label for="{mid}" class="avatar-btn">
@@ -175,7 +166,7 @@ def render_flight_card(pf: dict, index: int):
 <div class="img-zoom-modal">
 <label for="{mid}" class="img-zoom-close"></label>
 <label for="{mid}" class="close-btn-text">&times;</label>
-<img src="{pf['image_url']}" />
+<img src="{img_url}" />
 </div>"""
     else:
         image_element = f'<div style="width:70px;height:70px;border-radius:35px;background:#334155;display:flex;align-items:center;justify-content:center;margin-right:18px;font-size:1.6em;border:2px solid {border_col};flex-shrink:0;box-sizing:border-box;">✈️</div>'
@@ -183,8 +174,6 @@ def render_flight_card(pf: dict, index: int):
     sch_str = f'<span class="mono">Sch {pf["sch_display"]}</span> • ' if pf["sch_display"] else ""
     next_day_tag = ' <small style="opacity:0.6;">(Next Day)</small>' if pf["is_next_day"] else ''
 
-    # 💡 V7.12 修正：從檢查數字改為檢查「時間來源標籤」
-    # 如果 time_type 只能拿到 scheduled，代表雷達沒有更新預估時間
     check_board_tag = ""
     if not pf["is_landed"] and not pf["is_canceled"] and pf["time_type"] == "scheduled":
         check_board_tag = ' <span style="color:#FBBF24; font-size:0.85em; margin-left:6px; font-weight:700;">⚠️ Check Board</span>'
@@ -193,9 +182,8 @@ def render_flight_card(pf: dict, index: int):
         act_html = f'<span class="mono" style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 6px;border-radius:4px;border:1px solid rgba(14,165,233,0.3);">Act {pf["actual_time"]}</span>{next_day_tag}'
     elif pf["time_type"] == "revised":
         act_html = f'<span class="mono" style="color:#E2E8F0;font-weight:bold;background:rgba(226,232,240,0.15);padding:2px 6px;border-radius:4px;border:1px solid rgba(226,232,240,0.3);">Est {pf["actual_time"]}</span>{next_day_tag}{check_board_tag}'
-    else: # pf["time_type"] == "scheduled"
+    else: 
         act_html = f'<span class="mono" style="color:#94A3B8;font-weight:bold;background:rgba(148,163,184,0.15);padding:2px 6px;border-radius:4px;border:1px solid rgba(148,163,184,0.3);">Sch {pf["actual_time"]}</span>{next_day_tag}{check_board_tag}'
-        # 若只有 scheduled，連前面原本顯示的 "Sch xx:xx • " 都不需要重複顯示，讓版面更乾淨
         sch_str = "" 
 
     origin_display = f"{pf['origin']} <span class='mono' style='font-size:0.85em; opacity:0.8;'>({pf['iata']})</span>" if pf['iata'] else pf['origin']
@@ -215,9 +203,6 @@ def render_flight_card(pf: dict, index: int):
 </div>"""
     st.markdown(card_html, unsafe_allow_html=True)
 
-# ─────────────────────────────────────────────
-# Main Process
-# ─────────────────────────────────────────────
 aest = pytz.timezone(TIMEZONE); now_aest = datetime.now(aest)
 from_t = (now_aest - timedelta(hours=LOOKBACK_HOURS)).strftime("%Y-%m-%dT%H:%M")
 to_t = (now_aest + timedelta(hours=LOOKAHEAD_HOURS)).strftime("%Y-%m-%dT%H:%M")
@@ -233,7 +218,6 @@ with col2:
         api_html = f'API: {api_t.strftime("%H:%M") if api_t else "--:--"}'
     st.markdown(f'<div style="font-size:0.75em;color:#64748B;text-align:center;">{api_html}</div>', unsafe_allow_html=True)
 
-# ── 系統說明區塊 (Expander) ──
 with st.expander("ℹ️ 系統運作說明與常見問題 (System Info)"):
     st.markdown(f"""
     **1. 數據更新機制**
@@ -283,7 +267,7 @@ for f in unique_flights:
     sch_disp = s_dt.strftime("%H:%M") if (arr_n.get("scheduledTime", {}) or {}).get("local") else ""
 
     delay_hours = (best_dt - s_dt).total_seconds() / 3600 if s_dt else 0
-    if delay_hours < -2 or delay_hours > 12: continue
+    if delay_hours < -2 or delay_hours > 24: continue
 
     t_diff = int((best_dt - now_aest).total_seconds() / 60)
     is_can = status in ("canceled", "cancelled")
@@ -304,7 +288,6 @@ for f in unique_flights:
         "border_color": bc, "status_color": sc, "status_text": st_txt, "bg_color": bg, "is_next_day": is_next_day
     })
 
-# ── Gap Detection ──
 future_f = sorted([p for p in processed_flights if not p["is_landed"] and not p["is_canceled"]], key=lambda x: x["dt"])
 if future_f:
     windows = [(now_aest, future_f[0]["dt"])]
@@ -320,7 +303,6 @@ if future_f:
         gap_h = f'<div style="background-color:{gb};border:1px dashed {gbo};border-radius:8px;padding:10px;margin-bottom:12px;text-align:center;color:{gc};font-family:sans-serif;font-weight:bold;box-shadow:0 2px 4px rgba(0,0,0,0.1);font-size:0.95em;">{tit} <span style="opacity:0.7;font-weight:normal;margin-left:6px;display:inline-block;">({tm})</span></div>'
         processed_flights.append({"is_gap": True, "html": gap_h, "time_key": t1.timestamp() + 1})
 
-# ── Sort & Render ──
 def s_key(p):
     if p.get("is_gap"): return (1, p["time_key"])
     if p["is_canceled"]: return (2, -p["s_dt_val"].timestamp()) if p.get("is_archived_canceled") else (1, p["dt"].timestamp())
