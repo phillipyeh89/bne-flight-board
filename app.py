@@ -225,12 +225,12 @@ with st.expander("ℹ️ System Info & Troubleshooting"):
     * Showing flights from **-{LOOKBACK_HOURS}hr** to **+{LOOKAHEAD_HOURS}hrs**.
 
     **2. Missing Plane Photos?**
-    * Photos require a confirmed Aircraft Registration Number. If missing, the plane is likely still far out. A default ✈️ will show until radar updates closer to landing.
+    * Photos require a confirmed Aircraft Registration Number. If missing, a default ✈️ shows until radar updates closer to landing.
 
     **3. Time Tags Guide**
     * <span class="mono" style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 4px;border-radius:4px;">Act</span> **(Blue)**: Aircraft has landed.
-    * <span class="mono" style="color:#E2E8F0;font-weight:bold;background:rgba(226,232,240,0.15);padding:2px 4px;border-radius:4px;">Est</span> **(Light Gray)**: Radar confirmed. This is an accurate, live ETA.
-    * <span class="mono" style="color:#94A3B8;font-weight:bold;background:rgba(148,163,184,0.15);padding:2px 4px;border-radius:4px;">Sch</span> **(Dark Gray)** + **⚠️ Check Board**: Radar blind spot. The API only has scheduled times. **Check physical airport screens to avoid missing passengers!**
+    * <span class="mono" style="color:#E2E8F0;font-weight:bold;background:rgba(226,232,240,0.15);padding:2px 4px;border-radius:4px;">Est</span> **(Light Gray)**: Radar confirmed. Accurate live ETA.
+    * <span class="mono" style="color:#94A3B8;font-weight:bold;background:rgba(148,163,184,0.15);padding:2px 4px;border-radius:4px;">Sch</span> **(Dark Gray)** + **⚠️ Check Board**: Radar blind spot. **Check physical airport screens!**
     
     **4. Smart Filters**
     * Domestic (D, DOM, GAT), private jets, and non-passenger flights are automatically hidden to focus strictly on International arrivals.
@@ -238,8 +238,8 @@ with st.expander("ℹ️ System Info & Troubleshooting"):
     ---
     **5. Support & Maintenance**
     * Built to optimize floor staffing for BNE Lotte Duty Free.
-    * **Version**: V7.14
-    * **Developer**: [Your Name/Contact Info]
+    * **Version**: V7.15
+    * **Developer**: Phillip Yeh
     * **Issues?** If the board freezes or data looks wrong, please take a screenshot and contact support immediately.
     """, unsafe_allow_html=True)
 st.write("") 
@@ -294,6 +294,7 @@ for f in unique_flights:
         "border_color": bc, "status_color": sc, "status_text": st_txt, "bg_color": bg, "is_next_day": is_next_day
     })
 
+# Extract future flights for gap detection (excluding canceled flights)
 future_f = sorted([p for p in processed_flights if not p["is_landed"] and not p["is_canceled"]], key=lambda x: x["dt"])
 if future_f:
     windows = [(now_aest, future_f[0]["dt"])]
@@ -309,13 +310,32 @@ if future_f:
         gap_h = f'<div style="background-color:{gb};border:1px dashed {gbo};border-radius:8px;padding:10px;margin-bottom:12px;text-align:center;color:{gc};font-family:sans-serif;font-weight:bold;box-shadow:0 2px 4px rgba(0,0,0,0.1);font-size:0.95em;">{tit} <span style="opacity:0.7;font-weight:normal;margin-left:6px;display:inline-block;">({tm})</span></div>'
         processed_flights.append({"is_gap": True, "html": gap_h, "time_key": t1.timestamp() + 1})
 
-def s_key(p):
+# Separate Active and Canceled Flights
+active_flights = [pf for pf in processed_flights if not pf.get("is_canceled")]
+canceled_flights = [pf for pf in processed_flights if pf.get("is_canceled")]
+
+# Sort Active Flights
+def active_s_key(p):
     if p.get("is_gap"): return (1, p["time_key"])
-    if p["is_canceled"]: return (2, -p["s_dt_val"].timestamp()) if p.get("is_archived_canceled") else (1, p["dt"].timestamp())
     if p["is_landed"]: return (0, -p["dt"].timestamp()) if p["landed_mins"] <= RECENT_LANDED_MAX else (2, -p["dt"].timestamp())
     return (1, p["dt"].timestamp())
 
-processed_flights.sort(key=s_key)
-for i, pf in enumerate(processed_flights):
+active_flights.sort(key=active_s_key)
+
+# Sort Canceled Flights by Scheduled Time
+canceled_flights.sort(key=lambda x: x["s_dt_val"].timestamp())
+
+# 1. Render Active Section
+for i, pf in enumerate(active_flights):
     if pf.get("is_gap"): st.markdown(pf["html"], unsafe_allow_html=True)
     else: render_flight_card(pf, i)
+
+# 2. Render Canceled Section (At the Bottom)
+if canceled_flights:
+    st.markdown("<hr style='margin: 40px 0 20px 0; border-color: #334155; opacity: 0.5;'>", unsafe_allow_html=True)
+    st.markdown("<h4 style='color: #F87171; margin-bottom: 16px;'>❌ Canceled Flights (Tracked Window)</h4>", unsafe_allow_html=True)
+    
+    offset_index = len(active_flights)
+    for i, pf in enumerate(canceled_flights):
+        # Using offset to prevent modal ID collisions between active and canceled sections
+        render_flight_card(pf, offset_index + i)
