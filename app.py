@@ -127,20 +127,30 @@ def _parse_local_dt(raw: str | None, tz) -> datetime | None:
         return None
 
 
-def extract_best_time(node: dict, tz) -> datetime | None:
+def extract_best_time(node: dict, tz) -> tuple:
     """
-    Return the most accurate time from a flight node.
-    Priority: actualTime > revisedTime > scheduledTime
+    Return (datetime, time_type) from a flight node.
+    Priority: actualTime > revisedTime > scheduledTime.
+    time_type is one of: 'actual', 'revised', 'scheduled', or '' if nothing found.
+    Also falls back to checking the top-level node keys (*TimeLocal flat strings).
     """
-    for key in ("actualTime", "revisedTime", "scheduledTime"):
+    candidates = (
+        ("actualTime",    "actual"),
+        ("revisedTime",   "revised"),
+        ("scheduledTime", "scheduled"),
+    )
+    for key, label in candidates:
         raw = node.get(key)
         if isinstance(raw, dict):
             raw = raw.get("local")
+        # also check flat *Local variants (e.g. actualTimeLocal)
+        if not raw:
+            raw = node.get(key + "Local")
         if raw:
             dt = _parse_local_dt(raw, tz)
             if dt:
-                return dt
-    return None
+                return dt, label
+    return None, ""
 
 
 def is_domestic(terminal: str, country_code: str) -> bool:
@@ -205,12 +215,24 @@ def render_flight_card(pf: dict, index: int):
         )
 
     sch_str  = f"Sch {pf['sch_display']} • " if pf["sch_display"] else ""
-    act_html = (
-        "" if pf["is_canceled"] else
-        f'<span style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);'
-        f'padding:2px 6px;border-radius:4px;border:1px solid rgba(14,165,233,0.3);">'
-        f'Act {pf["actual_time"]}</span>'
-    )
+
+    # Only label as "Act" if it really is an actual time; "Est" for revised; hide if only scheduled
+    if pf["is_canceled"]:
+        act_html = ""
+    elif pf["time_type"] == "actual":
+        act_html = (
+            f'<span style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);'
+            f'padding:2px 6px;border-radius:4px;border:1px solid rgba(14,165,233,0.3);">'
+            f'Act {pf["actual_time"]}</span>'
+        )
+    elif pf["time_type"] == "revised":
+        act_html = (
+            f'<span style="color:#FBBF24;font-weight:bold;background:rgba(251,191,36,0.15);'
+            f'padding:2px 6px;border-radius:4px;border:1px solid rgba(251,191,36,0.3);">'
+            f'Est {pf["actual_time"]}</span>'
+        )
+    else:
+        act_html = ""  # scheduledTime already shown in sch_str
 
     card_html = f"""<div style="background-color:{pf['bg_color']};border-left:6px solid {border_col};
 border-radius:8px;padding:16px 20px;margin-bottom:12px;display:flex;
@@ -305,7 +327,7 @@ for f in flights:
     image_url    = fetch_aircraft_image(ac_reg)
 
     # ── Best arrival time (actual > revised > scheduled) ──
-    best_dt = extract_best_time(arr_node, aest)
+    best_dt, time_type = extract_best_time(arr_node, aest)
     if best_dt is None:
         continue
 
@@ -351,6 +373,7 @@ for f in flights:
         "landed_mins":        landed_mins,
         "dt":                 best_dt,
         "s_dt_val":           s_dt,
+        "time_type":          time_type,
         "image_url":          image_url,
         "border_color":       border_color,
         "status_color":       status_color,
