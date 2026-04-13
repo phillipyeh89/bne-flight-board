@@ -113,10 +113,12 @@ if not flights:
 
 processed_flights = []
 
-# === 時間格式化工具 ===
+# === 智慧時間格式化工具：隱藏 00h ===
 def format_hm(total_minutes):
     h = total_minutes // 60
     m = total_minutes % 60
+    if h == 0:
+        return f"{m:02d}m"
     return f"{h:02d}h{m:02d}m"
 
 for f in flights:
@@ -130,6 +132,7 @@ for f in flights:
     name = airport_info.get('name')
     iata = airport_info.get('iata')
     icao = airport_info.get('icao')
+    country_code = str(airport_info.get('countryCode', '')).strip().lower()
     
     if city: origin = city
     elif name: origin = name
@@ -196,7 +199,8 @@ for f in flights:
     gate = arr_node.get('gate', 'TBA')
     terminal = str(arr_node.get('terminal', '')).strip().upper()
     
-    if terminal == 'D' or terminal == 'DOM':
+    # === 終極國內線過濾器：航廈為 D/DOM，或者國家代碼為 au (澳洲) ===
+    if terminal == 'D' or terminal == 'DOM' or country_code == 'au':
         continue
         
     status = f.get('status', '').lower()
@@ -204,8 +208,6 @@ for f in flights:
     
     is_landed = status in ['landed', 'arrived'] or time_diff_minutes <= 0
 
-    # === 幽靈航班過濾器 (Ghost Flight Filter) ===
-    # 如果航班表定時間超過 12 小時，且尚未降落，判定為 API 系統錯誤並隱藏 (例如早上的 JQ150)
     if not is_landed and scheduled_time_raw:
         try:
             s_dt_check = pd.to_datetime(scheduled_time_raw).to_pydatetime()
@@ -213,7 +215,7 @@ for f in flights:
             else: s_dt_check = s_dt_check.astimezone(aest)
             
             if (now_aest - s_dt_check).total_seconds() > 12 * 3600:
-                continue  # 跳過這個幽靈航班
+                continue  
         except:
             pass
     
