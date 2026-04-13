@@ -61,9 +61,9 @@ st.markdown("""
 # 抓取航班資訊，快取設定為 600 秒 (10分鐘)
 @st.cache_data(ttl=600)
 def fetch_flight_data(from_time, to_time):
-    # API 限制單次查詢窗口不得超過 12 小時，此處設定為 11 小時確保安全
     url = f"https://aerodatabox.p.rapidapi.com/flights/airports/icao/YBBN/{from_time}/{to_time}"
-    querystring = {"direction": "Arrival", "withCancelled": "false", "withCodeshared": "false"}
+    # 修正：開啟 withCodeshared，確保所有實體班機(包含被誤判的聯營)都會顯示
+    querystring = {"direction": "Arrival", "withCancelled": "false", "withCodeshared": "true"}
     headers = {
         "X-RapidAPI-Key": st.secrets["X_RAPIDAPI_KEY"],
         "X-RapidAPI-Host": "aerodatabox.p.rapidapi.com"
@@ -80,7 +80,7 @@ def fetch_flight_data(from_time, to_time):
 aest = pytz.timezone('Australia/Brisbane')
 now_aest = datetime.now(aest)
 
-# 滾動視窗：抓取前 1 小時到未來 10 小時的數據 (共 11 小時，避免觸發 API 12 小時限制)
+# 滾動視窗：抓取前 1 小時到未來 10 小時的數據 (共 11 小時)
 from_time = (now_aest - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M")
 to_time = (now_aest + timedelta(hours=10)).strftime("%Y-%m-%dT%H:%M")
 
@@ -106,12 +106,14 @@ processed_flights = []
 # 處理並計算航班屬性
 for f in flights:
     flight_num = f.get('number', 'N/A')
-    # 嘗試抓取機場簡稱，若無則抓取全名
-    origin = f.get('departure', {}).get('airport', {}).get('shortName') or f.get('departure', {}).get('airport', {}).get('name', 'Unknown')
-    arr = f.get('arrival', {})
     
-    # 優先使用實際時間，若無則使用預定時間
-    best_time_str = arr.get('actualTimeLocal') or arr.get('scheduledTimeLocal')
+    # 增強相容性：掃描多種 API 可能的層級結構
+    arr = f.get('arrival') or f.get('movement') or {}
+    dep = f.get('departure') or {}
+    
+    origin = dep.get('airport', {}).get('shortName') or dep.get('airport', {}).get('name', 'Unknown')
+    
+    best_time_str = arr.get('actualTimeLocal') or arr.get('scheduledTimeLocal') or f.get('actualTimeLocal') or f.get('scheduledTimeLocal')
     
     if not best_time_str:
         continue
@@ -141,13 +143,11 @@ for f in flights:
 
     if is_landed:
         css_class = "status-landed"
-        # 計算已經降落多久
         landed_mins = max(0, -time_diff_minutes)
         time_display = f"已降落 {landed_mins} 分鐘 ({dt.strftime('%H:%M')})"
     else:
         minutes_left = max(0, time_diff_minutes)
         
-        # 特殊警報優先級最高
         if dt.hour < 4 or (dt.hour == 4 and dt.minute <= 10):
             css_class = "status-purple"
         elif minutes_left < 25:
@@ -167,6 +167,12 @@ for f in flights:
         'tags': tags,
         'dt': dt
     })
+
+# 【全新保險機制】如果所有資料都被濾光，直接把原始資料印出來方便我們抓漏
+if len(processed_flights) == 0:
+    st.warning("⚠️ 系統有抓到航班，但無法解析格式。以下是 API 的原始資料：")
+    st.json(flights)
+    st.stop()
 
 # 排序邏輯：未降落的排前面（依照時間早到晚），已降落的自動移動到最下方 (依照降落時間新到舊)
 processed_flights.sort(key=lambda x: (1 if x['is_landed'] else 0, -x['dt'].timestamp() if x['is_landed'] else x['dt'].timestamp()))
