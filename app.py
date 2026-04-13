@@ -98,7 +98,6 @@ processed_flights = []
 for f in flights:
     flight_num = f.get('number', 'N/A')
     
-    # 完美修復版：同時搜尋 departure 與 movement 節點
     dep = f.get('departure') or {}
     movement = f.get('movement') or {}
     airport_info = dep.get('airport') or movement.get('airport') or {}
@@ -114,17 +113,29 @@ for f in flights:
     elif icao: origin = icao
     else: origin = "Unknown"
     
+    # === 時間抓取邏輯最佳化：優先抓取 Live Estimated Time ===
     time_candidates = []
     for node_name in ['arrival', 'movement', 'departure']:
         node = f.get(node_name, {})
         if not isinstance(node, dict): continue
-        time_candidates.extend([node.get('actualTimeLocal'), node.get('scheduledTimeLocal')])
-        for t_key in ['actualTime', 'scheduledTime', 'revisedTime']:
+        
+        # 1. 優先找新版 API 的實際或修正時間
+        for t_key in ['actualTime', 'revisedTime', 'scheduledTime']:
             t_obj = node.get(t_key)
-            if isinstance(t_obj, dict):
+            if isinstance(t_obj, dict) and t_obj.get('local'):
                 time_candidates.append(t_obj.get('local'))
                 
-    time_candidates.extend([f.get('actualTimeLocal'), f.get('scheduledTimeLocal')])
+        # 2. 再找舊版 API 格式
+        for t_key in ['actualTimeLocal', 'estimatedTimeLocal', 'scheduledTimeLocal']:
+            t_val = node.get(t_key)
+            if t_val:
+                time_candidates.append(t_val)
+                
+    # 3. 最外層防呆
+    for t_key in ['actualTimeLocal', 'estimatedTimeLocal', 'scheduledTimeLocal']:
+        t_val = f.get(t_key)
+        if t_val:
+            time_candidates.append(t_val)
     
     valid_times = [t for t in time_candidates if isinstance(t, str) and len(t) > 5]
     if not valid_times:
