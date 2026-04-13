@@ -74,9 +74,9 @@ st.markdown(f"""
     }}
     .close-btn-text:hover {{ color: #EF4444; }}
     
-    /* 微調 expander 的字體大小與顏色，讓它看起來更專業 */
-    .streamlit-expanderHeader { font-size: 0.9em !important; color: #94A3B8 !important; }
-    .streamlit-expanderContent { font-size: 0.85em; color: #CBD5E1; }
+    /* CSS 修復：大括號已經全部 double 處理 */
+    .streamlit-expanderHeader {{ font-size: 0.9em !important; color: #94A3B8 !important; }}
+    .streamlit-expanderContent {{ font-size: 0.85em; color: #CBD5E1; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -244,7 +244,7 @@ with st.expander("ℹ️ 系統運作說明與常見問題 (System Info)"):
     **4. 隱藏航班與過濾器**
     * 系統已啟動「免稅店專屬國際線過濾器」，自動排除了國內航廈 (Domestic)、小型私人飛機與非載客航班。
     """, unsafe_allow_html=True)
-st.write("") # 增加一點留白
+st.write("") 
 
 flights = fetch_flight_data(from_t, to_t)
 if not flights:
