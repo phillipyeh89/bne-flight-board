@@ -74,7 +74,6 @@ st.markdown(f"""
     }}
     .close-btn-text:hover {{ color: #EF4444; }}
     
-    /* CSS 修復：大括號已經全部 double 處理 */
     .streamlit-expanderHeader {{ font-size: 0.9em !important; color: #94A3B8 !important; }}
     .streamlit-expanderContent {{ font-size: 0.85em; color: #CBD5E1; }}
 </style>
@@ -184,12 +183,17 @@ def render_flight_card(pf: dict, index: int):
     sch_str = f'<span class="mono">Sch {pf["sch_display"]}</span> • ' if pf["sch_display"] else ""
     next_day_tag = ' <small style="opacity:0.6;">(Next Day)</small>' if pf["is_next_day"] else ''
 
+    # 新增：當尚未降落且只有 Est/Sch 時，加入警告標籤
+    check_board_tag = ""
+    if not pf["is_landed"] and pf["time_type"] != "actual" and not pf["is_canceled"]:
+        check_board_tag = ' <span style="color:#FBBF24; font-size:0.85em; margin-left:6px; font-weight:700;">⚠️ Check Board</span>'
+
     if pf["is_landed"] or pf["time_type"] == "actual":
         act_html = f'<span class="mono" style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 6px;border-radius:4px;border:1px solid rgba(14,165,233,0.3);">Act {pf["actual_time"]}</span>{next_day_tag}'
     elif pf["time_type"] == "revised":
-        act_html = f'<span class="mono" style="color:#E2E8F0;font-weight:bold;background:rgba(226,232,240,0.15);padding:2px 6px;border-radius:4px;border:1px solid rgba(226,232,240,0.3);">Est {pf["actual_time"]}</span>{next_day_tag}'
+        act_html = f'<span class="mono" style="color:#E2E8F0;font-weight:bold;background:rgba(226,232,240,0.15);padding:2px 6px;border-radius:4px;border:1px solid rgba(226,232,240,0.3);">Est {pf["actual_time"]}</span>{next_day_tag}{check_board_tag}'
     else:
-        act_html = next_day_tag
+        act_html = f'{next_day_tag}{check_board_tag}'
 
     origin_display = f"{pf['origin']} <span class='mono' style='font-size:0.85em; opacity:0.8;'>({pf['iata']})</span>" if pf['iata'] else pf['origin']
 
@@ -237,9 +241,10 @@ with st.expander("ℹ️ 系統運作說明與常見問題 (System Info)"):
     * 系統只會透過「實體機身編號 (Registration Number)」來抓取精確的飛機照片。
     * 若飛機仍在遙遠航程中，航空公司有時尚未指派或回傳確切的機身編號，系統為了防呆會顯示預設 ✈️ 圖示。通常在降落前 1-2 小時會自動補齊。
 
-    **3. 時間標籤 (Act vs Est)**
-    * <span class="mono" style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 4px;border-radius:4px;">Act</span> **(天藍色)**：Actual。代表飛機已實際降落，或進入雷達密集區有了極高準確度的降落時間。
-    * <span class="mono" style="color:#E2E8F0;font-weight:bold;background:rgba(226,232,240,0.15);padding:2px 4px;border-radius:4px;">Est</span> **(冷灰色)**：Estimated。代表基於表定時間的初步預估，數值可能隨風速調整。
+    **3. 時間標籤 (Act vs Est vs ⚠️ Check Board)**
+    * <span class="mono" style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 4px;border-radius:4px;">Act</span> **(天藍色)**：Actual。飛機已實際降落，或進入雷達密集區鎖定了極高準確度的降落時間。
+    * <span class="mono" style="color:#E2E8F0;font-weight:bold;background:rgba(226,232,240,0.15);padding:2px 4px;border-radius:4px;">Est</span> **(冷灰色)**：Estimated。基於表定時間的初步預估。
+    * **⚠️ Check Board**：當系統只抓到 `Est` 或 `Sch` 時間時會出現此警告，建議同仁務必抬頭核對機場實體螢幕，以免 API 延遲導致漏接旅客。
     
     **4. 隱藏航班與過濾器**
     * 系統已啟動「免稅店專屬國際線過濾器」，自動排除了國內航廈 (Domestic)、小型私人飛機與非載客航班。
