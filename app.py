@@ -93,6 +93,24 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# === 外掛：飛機真實照片抓取器 (Planespotters.net API) ===
+# 加上 24 小時快取保護，避免網頁載入過慢
+@st.cache_data(ttl=86400, show_spinner=False)
+def fetch_aircraft_image(reg):
+    if not reg:
+        return ""
+    try:
+        url = f"https://api.planespotters.net/pub/photos/reg/{reg}"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, headers=headers, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            if data.get("photos") and len(data["photos"]) > 0:
+                return data["photos"][0]["thumbnail_large"]["src"]
+    except:
+        pass
+    return ""
+
 @st.cache_data(ttl=1200)
 def fetch_flight_data(from_time, to_time):
     url = f"https://aerodatabox.p.rapidapi.com/flights/airports/icao/YBBN/{from_time}/{to_time}"
@@ -157,19 +175,20 @@ for f in flights:
     elif icao: origin = icao
     else: origin = "Unknown"
     
-    # === 抓取機型、註冊編號與照片 (Aircraft Image) ===
+    # 抓取機型與註冊編號
     aircraft_node = f.get('aircraft') or {}
     aircraft_model = aircraft_node.get('model', '')
     aircraft_reg = aircraft_node.get('reg', '')
-    image_node = aircraft_node.get('image') or {}
-    image_url = image_node.get('url', '')
+    
+    # 這裡呼叫我們外掛的照片 API
+    image_url = fetch_aircraft_image(aircraft_reg)
     
     ac_display_parts = []
     if aircraft_model: ac_display_parts.append(aircraft_model)
     if aircraft_reg: ac_display_parts.append(f"({aircraft_reg})")
     ac_text = " ".join(ac_display_parts)
     
-    # 這裡拔除了 HTML 縮排，避免 Streamlit Markdown 解析錯誤
+    # 取消 HTML 縮排，防止被解析成 Code Block
     if image_url:
         image_html = f'<div style="width: 70px; height: 70px; border-radius: 8px; overflow: hidden; flex-shrink: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.2);"><img src="{image_url}" style="width: 100%; height: 100%; object-fit: cover;" /></div>'
     else:
@@ -323,7 +342,7 @@ for t_start, t_end in gaps:
     status_text = f"🟢 ACTIVE OFF-FLOOR TIME ({gap_display} left)" if is_active else f"🔄 {gap_display} OFF-FLOOR WINDOW (Break / Duties)"
     css_ext = "" if is_active else "future"
     
-    # 這裡也移除了縮排
+    # 取消 HTML 縮排
     gap_html = f'<div class="gap-card {css_ext}">{status_text} <span style="opacity:0.6; margin-left:8px;">({display_start.strftime("%H:%M")} - {t_end.strftime("%H:%M")})</span></div>'
     
     processed_flights.append({
@@ -353,7 +372,7 @@ for pf in processed_flights:
         
     tag_html = "".join([f'<div class="label-tag">{tag}</div>' for tag in pf['tags']])
     
-    # 確保 HTML 靠左對齊，防止被解析成 Code Block
+    # 強制所有 HTML 標籤靠左對齊，防範 Streamlit Markdown 排版陷阱
     card_html = f"""<div class="flight-card {pf['css']}">
 {tag_html}
 <div style="display: flex; justify-content: space-between; align-items: center;">
