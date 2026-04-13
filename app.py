@@ -7,8 +7,9 @@ import pytz
 # 設定頁面與手機直式螢幕最佳化
 st.set_page_config(page_title="BNE Flight Board", page_icon="✈️", layout="centered")
 
-# 自動更新機制：每 20 分鐘 (1200秒) 自動重整
-st.markdown('<meta http-equiv="refresh" content="1200">', unsafe_allow_html=True)
+# ==========================================
+# 🛑 取消了自動重整機制，改為純手動控制
+# ==========================================
 
 # 注入高質感漸層 CSS (包含飛機照片與離櫃空檔橫幅設計)
 st.markdown("""
@@ -90,8 +91,21 @@ st.markdown("""
         border-bottom: 1px dashed rgba(148, 163, 184, 0.4);
         color: #94A3B8;
     }
+    
+    /* 更新時間標籤設計 */
+    .update-time {
+        font-size: 0.8em;
+        color: #94A3B8;
+        text-align: center;
+        margin-bottom: 8px;
+        font-weight: 500;
+    }
 </style>
 """, unsafe_allow_html=True)
+
+# 為了記錄最後更新時間，我們使用 Session State
+if 'last_update_time' not in st.session_state:
+    st.session_state.last_update_time = None
 
 # === 外掛：飛機真實照片抓取器 (Planespotters.net API) ===
 # 加上 24 小時快取保護，避免網頁載入過慢
@@ -111,7 +125,8 @@ def fetch_aircraft_image(reg):
         pass
     return ""
 
-@st.cache_data(ttl=1200)
+# 調整 TTL，讓手動重整能夠強制抓取最新資料
+@st.cache_data(ttl=60) 
 def fetch_flight_data(from_time, to_time):
     url = f"https://aerodatabox.p.rapidapi.com/flights/airports/icao/YBBN/{from_time}/{to_time}"
     querystring = {"direction": "Arrival", "withCancelled": "false", "withCodeshared": "false"}
@@ -122,6 +137,10 @@ def fetch_flight_data(from_time, to_time):
     try:
         response = requests.get(url, headers=headers, params=querystring, timeout=10)
         response.raise_for_status()
+        
+        # 成功抓取後，更新最後更新時間
+        st.session_state.last_update_time = datetime.now(pytz.timezone('Australia/Brisbane'))
+        
         return response.json().get('arrivals', [])
     except Exception as e:
         st.error(f"API Request Failed: {e}")
@@ -137,6 +156,10 @@ col1, col2 = st.columns([2, 1])
 with col1:
     st.title("✈️ Arrivals Board")
 with col2:
+    # 顯示最後更新時間
+    update_display = st.session_state.last_update_time.strftime('%H:%M') if st.session_state.last_update_time else "Just Now"
+    st.markdown(f'<div class="update-time">🕒 Last Updated: {update_display}</div>', unsafe_allow_html=True)
+    
     if st.button("🔄 Refresh", use_container_width=True):
         fetch_flight_data.clear()
         st.rerun()
