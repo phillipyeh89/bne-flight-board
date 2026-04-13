@@ -7,8 +7,7 @@ import pytz
 # 設定頁面與手機直式螢幕最佳化
 st.set_page_config(page_title="BNE 航班看板", page_icon="✈️", layout="centered")
 
-# 自動更新機制：每 20 分鐘 (1200秒) 自動重整
-st.markdown('<meta http-equiv="refresh" content="1200">', unsafe_allow_html=True)
+# 自動更新機制已關閉 (移除 meta refresh)
 
 # 注入自訂 CSS
 st.markdown("""
@@ -98,10 +97,28 @@ processed_flights = []
 for f in flights:
     flight_num = f.get('number', 'N/A')
     
-    # 強化地名抓取邏輯：優先抓城市名稱 (Singapore)，若無則抓縮寫、全名或 IATA 代碼
-    dep = f.get('departure', {})
-    airport_info = dep.get('airport', {})
-    origin = airport_info.get('municipalityName') or airport_info.get('shortName') or airport_info.get('name') or airport_info.get('iata') or 'Unknown'
+    # 強化版地名抓取與除錯機制
+    dep = f.get('departure') or {}
+    airport_info = dep.get('airport') or {}
+    
+    city = airport_info.get('municipalityName')
+    name = airport_info.get('name')
+    iata = airport_info.get('iata')
+    icao = airport_info.get('icao')
+    
+    if city:
+        origin = city
+    elif name:
+        origin = name
+    elif iata:
+        origin = iata
+    elif icao:
+        origin = icao
+    elif dep:
+        # 如果都有資料但沒有上面的 key，直接印出前 30 個字元來除錯
+        origin = f"RAW: {str(dep)[:30]}..."
+    else:
+        origin = "No Data"
     
     time_candidates = []
     for node_name in ['arrival', 'movement', 'departure']:
@@ -138,7 +155,6 @@ for f in flights:
     status = f.get('status', '').lower()
     time_diff_minutes = int((dt - now_aest).total_seconds() / 60)
     
-    # 雙重判定：API 狀態顯示降落，或者「預計抵達時間已經小於等於0」都視為降落
     is_landed = status in ['landed', 'arrived'] or time_diff_minutes <= 0
     
     css_class = "status-normal"
@@ -171,11 +187,6 @@ for f in flights:
         'tags': tags,
         'dt': dt
     })
-
-if len(processed_flights) == 0:
-    st.error("⚠️ 航班時間解析失敗。以下是【第一筆航班】的原始資料：")
-    st.json(flights[0])
-    st.stop()
 
 processed_flights.sort(key=lambda x: (1 if x['is_landed'] else 0, -x['dt'].timestamp() if x['is_landed'] else x['dt'].timestamp()))
 
