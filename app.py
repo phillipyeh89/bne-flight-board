@@ -1,94 +1,108 @@
 import streamlit as st
 import requests
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 import pytz
 
 # 設定頁面與手機直式螢幕最佳化
 st.set_page_config(page_title="BNE Flight Board", page_icon="✈️", layout="centered")
 
-# 注入極致清晰版 CSS (實用派、高對比、無多餘特效)
+# 注入 V5.0 旗艦質感 CSS (統一暗色卡片 + 膠囊標籤)
 st.markdown("""
 <style>
-    /* 客製化按鈕 - 乾淨實用 */
+    /* 全域背景微調 */
+    .stApp { background-color: #0F172A; }
+
+    /* 客製化按鈕 */
     .stButton > button {
-        background-color: #2563EB !important;
-        color: white !important;
-        border: none !important;
-        border-radius: 6px !important;
+        background-color: #1E293B !important;
+        color: #F8FAFC !important;
+        border: 1px solid #334155 !important;
+        border-radius: 8px !important;
         font-weight: 600 !important;
         padding: 0.5rem 1rem !important;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
+        transition: all 0.2s !important;
     }
     .stButton > button:hover {
-        background-color: #1D4ED8 !important;
+        border-color: #64748B !important;
+        background-color: #334155 !important;
     }
 
-    /* 實體色塊卡片 */
-    .flight-card {
-        padding: 18px 22px;
+    /* 統一暗色卡片設計 */
+    .uniform-card {
+        background-color: #1E293B;
+        border: 1px solid #334155;
+        border-radius: 16px;
+        padding: 18px 20px;
         margin-bottom: 16px;
-        border-radius: 10px;
-        color: #FFFFFF;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+        font-family: 'Inter', -apple-system, sans-serif;
+        color: #F8FAFC;
+        transition: transform 0.2s;
     }
-    
-    /* 紮實的狀態背景色 */
-    .status-normal { background: #1E293B; } 
-    .status-soon { background: #D97706; } 
-    .status-urgent { background: #E11D48; } 
-    .status-landed-new { background: #059669; } 
-    .status-landed-old { 
-        background: #0F172A; 
-        color: #94A3B8; 
-        border: 1px dashed #475569; 
-        box-shadow: none; 
-    }
-    .status-purple {
-        background: #7C3AED;
-        border: 2px solid #A78BFA;
+    .uniform-card:hover {
+        transform: translateY(-2px);
+        border-color: #475569;
     }
 
     /* 文字排版系統 */
-    .gate-text { font-size: 2.8em; font-weight: 800; line-height: 1; margin-top: 5px; }
-    .time-text { font-size: 1.6em; font-weight: 700; margin-top: 4px; }
-    .flight-num-text { font-size: 1.4em; font-weight: 700; margin-bottom: 4px; }
+    .flight-route { font-size: 1.5em; font-weight: 800; letter-spacing: -0.02em; color: #FFFFFF; }
+    .flight-num { font-size: 1.1em; font-weight: 600; color: #94A3B8; margin-top: 2px; }
+    .flight-meta { font-size: 0.85em; font-weight: 500; color: #64748B; margin-top: 6px; }
     
-    /* 標籤設計 */
-    .label-tag {
-        background-color: rgba(0, 0, 0, 0.25);
-        padding: 4px 10px;
-        border-radius: 4px;
-        font-size: 0.85em;
-        font-weight: 600;
-        margin-bottom: 12px;
-        display: inline-block;
-        text-transform: uppercase;
-    }
+    .gate-text { font-size: 3em; font-weight: 800; line-height: 1; color: #FFFFFF; text-align: right; letter-spacing: -0.03em; margin-top: 4px; }
+    .gate-label { font-size: 0.75em; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.1em; text-align: right; }
 
-    /* 離櫃空檔橫幅 (清晰醒目) */
-    .gap-card {
-        text-align: center;
-        padding: 12px;
-        margin: 10px 0 20px 0;
-        border-radius: 6px;
-        background: #064E3B; /* 深綠色背景 */
-        border: 1px solid #10B981;
-        color: #A7F3D0;
-        font-size: 1.05em;
+    /* 膠囊狀態標籤 (Pill Badges) */
+    .badge {
+        padding: 6px 12px;
+        border-radius: 99px;
+        font-size: 0.85em;
         font-weight: 700;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        white-space: nowrap;
     }
-    .gap-card.future {
-        background: #1E293B; /* 深灰色背景 */
-        border: 1px dashed #475569;
-        color: #94A3B8;
-        box-shadow: none;
+    .badge-landed { background: rgba(16, 185, 129, 0.15); color: #34D399; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .badge-archived { background: transparent; color: #64748B; border: 1px solid #475569; }
+    .badge-soon { background: rgba(245, 158, 11, 0.15); color: #FBBF24; border: 1px solid rgba(245, 158, 11, 0.3); }
+    .badge-urgent { background: rgba(239, 68, 68, 0.15); color: #F87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+    .badge-purple { background: rgba(139, 92, 246, 0.15); color: #A78BFA; border: 1px solid rgba(139, 92, 246, 0.3); }
+    .badge-normal { background: rgba(56, 189, 248, 0.1); color: #7DD3FC; border: 1px solid rgba(56, 189, 248, 0.2); }
+
+    /* 離櫃空檔橫幅 (現代感長條設計) */
+    .gap-banner {
+        background: #0F172A;
+        border-left: 4px solid #10B981;
+        border-radius: 8px;
+        padding: 14px 20px;
+        margin: 8px 0 24px 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
     }
+    .gap-banner.future {
+        border-left: 4px solid #475569;
+        background: rgba(30, 41, 59, 0.5);
+    }
+    .gap-title { font-size: 1.05em; font-weight: 700; color: #A7F3D0; }
+    .gap-banner.future .gap-title { color: #94A3B8; }
+    .gap-time { font-size: 0.9em; font-weight: 600; color: #64748B; }
+
+    .update-time { font-size: 0.85em; color: #64748B; text-align: center; margin-bottom: 8px; font-weight: 500; }
     
-    .update-time { font-size: 0.85em; color: #94A3B8; text-align: center; margin-bottom: 8px; font-weight: 500; }
+    /* 照片容器 */
+    .photo-container {
+        width: 100px; 
+        height: 100px; 
+        border-radius: 12px; 
+        overflow: hidden; 
+        flex-shrink: 0; 
+        box-shadow: 0 4px 8px rgba(0,0,0,0.4); 
+        background: #0F172A;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -134,10 +148,10 @@ to_time = (now_aest + timedelta(hours=11)).strftime("%Y-%m-%dT%H:%M")
 
 col1, col2 = st.columns([2, 1])
 with col1:
-    st.title("✈️ Arrivals Board")
+    st.title("✈️ Arrivals")
 with col2:
     update_display = st.session_state.last_update_time.strftime('%H:%M') if st.session_state.last_update_time else "Just Now"
-    st.markdown(f'<div class="update-time">🕒 Last Updated: {update_display}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="update-time">🕒 Updated: {update_display}</div>', unsafe_allow_html=True)
     if st.button("🔄 Refresh", use_container_width=True):
         fetch_flight_data.clear()
         st.rerun()
@@ -175,12 +189,10 @@ for f in flights:
     ac_text = " ".join(ac_display_parts)
     
     if image_url:
-        image_html = f'<div style="width: 100px; height: 100px; border-radius: 8px; overflow: hidden; flex-shrink: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.3); background: #000;"><img src="{image_url}" style="width: 100%; height: 100%; object-fit: cover;" /></div>'
+        image_html = f'<div class="photo-container"><img src="{image_url}" style="width: 100%; height: 100%; object-fit: cover;" /></div>'
     else:
-        image_html = '<div style="width: 100px; height: 100px; border-radius: 8px; background: rgba(0,0,0,0.2); display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><span style="font-size: 2.5em; opacity: 0.5;">✈️</span></div>'
+        image_html = '<div class="photo-container" style="display: flex; align-items: center; justify-content: center;"><span style="font-size: 2.5em; opacity: 0.3;">✈️</span></div>'
 
-    aircraft_display = f'<div style="font-size: 0.85em; opacity: 0.8; font-weight: 500; margin-bottom: 2px;">{ac_text}</div>' if ac_text else ''
-    
     time_candidates = []
     scheduled_time_raw = None
     for node_name in ['arrival', 'movement', 'departure']:
@@ -217,7 +229,7 @@ for f in flights:
             s_dt = pd.to_datetime(scheduled_time_raw).to_pydatetime()
             if s_dt.tzinfo is None: s_dt = aest.localize(s_dt)
             else: s_dt = s_dt.astimezone(aest)
-            sch_display = f'<span style="font-size: 0.75em; opacity: 0.7; margin-left: 8px; font-weight: normal;">(Sch {s_dt.strftime("%H:%M")})</span>'
+            sch_display = s_dt.strftime("%H:%M")
         except: pass
 
     arr_node = f.get('arrival') or f.get('movement') or {}
@@ -239,24 +251,32 @@ for f in flights:
             if not is_landed and (now_aest - s_dt_check).total_seconds() > 8 * 3600: continue  
         except: pass
     
-    css_class = "status-normal"
-    tags = []
+    badge_class = ""
+    badge_text = ""
     landed_mins = 0
     
     is_early_prep = (dt.hour == 2 and dt.minute >= 30) or (dt.hour == 3) or (dt.hour == 4 and dt.minute <= 10)
-    if is_early_prep: tags.append("⏰ Early Prep Required")
 
     if is_landed:
         landed_mins = max(0, -time_diff_minutes)
-        if landed_mins <= 60: css_class = "status-landed-new"
-        else: css_class = "status-landed-old"
-        time_display = f"Landed {format_hm(landed_mins)} ago ({dt.strftime('%H:%M')})"
+        badge_text = f"Landed {format_hm(landed_mins)} ago"
+        badge_class = "badge-landed" if landed_mins <= 60 else "badge-archived"
     else:
         minutes_left = max(0, time_diff_minutes)
-        if is_early_prep: css_class = "status-purple"
-        elif minutes_left < 25: css_class = "status-urgent"
-        elif minutes_left <= 60: css_class = "status-soon"
-        time_display = f"In {format_hm(minutes_left)} ({dt.strftime('%H:%M')})"
+        time_str = f"In {format_hm(minutes_left)}"
+        
+        if is_early_prep:
+            badge_class = "badge-purple"
+            badge_text = f"⏰ {time_str} (Prep)"
+        elif minutes_left < 25:
+            badge_class = "badge-urgent"
+            badge_text = f"🔥 {time_str}"
+        elif minutes_left <= 60:
+            badge_class = "badge-soon"
+            badge_text = time_str
+        else:
+            badge_class = "badge-normal"
+            badge_text = time_str
             
     processed_flights.append({
         'is_gap': False,
@@ -264,13 +284,13 @@ for f in flights:
         'origin': city,
         'sch_display': sch_display,
         'image_html': image_html,
-        'aircraft_display': aircraft_display,
+        'ac_text': ac_text,
         'gate': gate,
-        'display': time_display,
+        'actual_time': dt.strftime('%H:%M'),
         'is_landed': is_landed,
         'landed_mins': landed_mins,
-        'css': css_class,
-        'tags': tags,
+        'badge_class': badge_class,
+        'badge_text': badge_text,
         'dt': dt
     })
 
@@ -300,10 +320,12 @@ for t_start, t_end in gaps:
     is_active = t_start <= now_aest
     gap_display = format_hm(gap_mins)
     
-    status_text = f"🟢 ACTIVE OFF-FLOOR TIME ({gap_display} left)" if is_active else f"🔄 {gap_display} OFF-FLOOR WINDOW (Break / Duties)"
+    title_text = f"🟢 ACTIVE OFF-FLOOR ({gap_display} left)" if is_active else f"🔄 {gap_display} OFF-FLOOR WINDOW"
     css_ext = "" if is_active else "future"
+    time_text = f"{display_start.strftime('%H:%M')} - {t_end.strftime('%H:%M')}"
     
-    gap_html = f'<div class="gap-card {css_ext}">{status_text} <span style="opacity:0.6; margin-left:8px;">({display_start.strftime("%H:%M")} - {t_end.strftime("%H:%M")})</span></div>'
+    # 取消 HTML 縮排，使用 flexbox 橫幅
+    gap_html = f'<div class="gap-banner {css_ext}"><div class="gap-title">{title_text}</div><div class="gap-time">{time_text}</div></div>'
     
     processed_flights.append({
         'is_gap': True,
@@ -325,21 +347,20 @@ for pf in processed_flights:
         st.markdown(pf['html'], unsafe_allow_html=True)
         continue
         
-    tag_html = "".join([f'<div class="label-tag">{tag}</div>' for tag in pf['tags']])
-    
-    card_html = f"""<div class="flight-card {pf['css']}">
-{tag_html}
-<div style="display: flex; justify-content: space-between; align-items: center;">
-<div style="display: flex; gap: 18px; align-items: center;">
+    # 取消 HTML 縮排，確保 Markdown 解析正確
+    card_html = f"""<div class="uniform-card">
+<div style="display: flex; gap: 18px; align-items: center; width: 100%;">
 {pf['image_html']}
-<div style="display: flex; flex-direction: column; justify-content: center;">
-<div class="flight-num-text">{pf['num']} • {pf['origin']} {pf['sch_display']}</div>
-{pf['aircraft_display']}
-<div class="time-text">{pf['display']}</div>
+<div style="flex-grow: 1; display: flex; flex-direction: column; justify-content: center;">
+<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
+<div class="flight-route">{pf['origin']}</div>
+<div class="badge {pf['badge_class']}">{pf['badge_text']}</div>
 </div>
+<div class="flight-num">{pf['num']} <span style="opacity:0.5; font-weight:400; margin: 0 4px;">|</span> {pf['ac_text']}</div>
+<div class="flight-meta">Sch {pf['sch_display']} <span style="margin: 0 6px;">•</span> Act {pf['actual_time']}</div>
 </div>
-<div style="text-align: right; padding-left: 10px;">
-<div style="font-size: 0.9em; opacity: 0.7; margin-bottom: -5px; font-weight: 600; text-transform: uppercase;">Gate</div>
+<div style="text-align: right; min-width: 80px; padding-left: 10px; border-left: 1px solid rgba(255,255,255,0.05); margin-left: 10px;">
+<div class="gate-label">Gate</div>
 <div class="gate-text">{pf['gate']}</div>
 </div>
 </div>
