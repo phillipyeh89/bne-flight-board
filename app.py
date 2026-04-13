@@ -20,16 +20,14 @@ SOON_MINUTES       = 60
 OLD_FLIGHT_HOURS   = 8
 IMAGE_WORKERS      = 8
 
-# 擴大國內線與無效航廈的判定
 DOMESTIC_TERMINALS = ('D', 'DOM', 'D-ANC', 'GAT', 'TBA')
-# 排除不可能出現在國際線的小型機型關鍵字
 SMALL_AIRCRAFT_FILTER = ('BEECH', 'FAIRCHILD', 'CESSNA', 'PIPER', 'PILATUS', 'KING AIR', 'METROLINER')
 
 UI_REFRESH_SEC     = 60 
 API_DATA_TTL_SEC   = 1200 
 
 # ─────────────────────────────────────────────
-# Page Config & Universal CSS
+# Page Config & CSS
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Flight Board", page_icon="✈️", layout="centered")
 st.markdown(f"""
@@ -128,35 +126,42 @@ def extract_best_time(node: dict, tz) -> tuple:
     return None, ""
 
 def is_strictly_international(terminal: str, country_code: str, aircraft_model: str, city: str) -> bool:
-    """更嚴格的國際線判定邏輯"""
     t = terminal.strip().upper()
     ac = aircraft_model.upper()
-    
-    # 1. 排除明確標註為國內線航廈的航班
     if t in DOMESTIC_TERMINALS: return False
-    
-    # 2. 排除所有澳洲境內國家代碼 (除了 Unknown 以外)
     if country_code == "au": return False
-    
-    # 3. 排除小型通用航空機型 (防止 Beechcraft 穿透)
     if any(k in ac for k in SMALL_AIRCRAFT_FILTER): return False
-    
-    # 4. 如果來源地是 Unknown 且沒有明確標註為國際航廈 (I/INT/1)，則視為雜訊排除
     if city == "Unknown" and t not in ['I', 'INT', '1']: return False
-    
     return True
 
-def get_card_style(is_canceled, is_archived, is_landed, landed_mins, is_delayed, mins_left):
+def get_card_style(is_canceled, is_archived, is_landed, landed_mins, delay_hours, mins_left):
     if is_canceled:
         if is_archived: return "#475569", "#94A3B8", "#0F172A", "❌ CANCELED"
         return "#EF4444", "#F87171", "#1E293B", "❌ CANCELED"
+    
     if is_landed:
         if landed_mins <= RECENT_LANDED_MAX: return "#10B981", "#34D399", "#1E293B", f"Landed {format_hm(landed_mins)} ago"
         return "#475569", "#94A3B8", "#0F172A", f"Landed {format_hm(landed_mins)} ago"
-    bg, icon = "#1E293B", "⚠️ " if is_delayed else ""
-    if mins_left < IMMINENT_MINUTES: return "#EF4444", "#F87171", bg, f"🔥 {icon}In {format_hm(mins_left)}"
-    if mins_left <= SOON_MINUTES: return "#F59E0B", "#FBBF24", bg, f"{icon}In {format_hm(mins_left)}"
-    return "#3B82F6", "#60A5FA", bg, f"{icon}In {format_hm(mins_left)}"
+    
+    bg = "#1E293B"
+    # 判斷延誤程度
+    if delay_hours >= 3:
+        status_prefix = "⚠️ HEAVY DELAY"
+        status_color = "#F87171" # 紅色警示
+        border_color = "#EF4444"
+    elif delay_hours > 0:
+        status_prefix = f"⚠️ In {format_hm(mins_left)}"
+        status_color = "#FBBF24" if mins_left <= SOON_MINUTES else "#60A5FA"
+        border_color = "#F59E0B" if mins_left <= SOON_MINUTES else "#3B82F6"
+    else:
+        status_prefix = f"In {format_hm(mins_left)}"
+        status_color = "#FBBF24" if mins_left <= SOON_MINUTES else "#60A5FA"
+        border_color = "#F59E0B" if mins_left <= SOON_MINUTES else "#3B82F6"
+        
+    if mins_left < IMMINENT_MINUTES:
+        return "#EF4444", "#F87171", bg, f"🔥 {status_prefix}"
+    
+    return border_color, status_color, bg, status_prefix
 
 # ─────────────────────────────────────────────
 # Renderers
@@ -181,12 +186,14 @@ def render_flight_card(pf: dict, index: int):
         sch_str = f'<span class="mono" style="text-decoration:line-through;opacity:0.5;">Sch {pf["sch_display"]}</span>' if pf["sch_display"] else ""
         act_html = ""
     else:
+        # 如果跨日抵達，標註 Next Day
+        next_day_tag = ' <small style="opacity:0.6;">(Next Day)</small>' if pf["is_next_day"] else ''
         sch_str = f'<span class="mono">Sch {pf["sch_display"]}</span> • ' if pf["sch_display"] else ""
         if pf["is_landed"] or pf["time_type"] == "actual":
-            act_html = f'<span class="mono" style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 6px;border-radius:4px;border:1px solid rgba(14,165,233,0.3);">Act {pf["actual_time"]}</span>'
+            act_html = f'<span class="mono" style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 6px;border-radius:4px;border:1px solid rgba(14,165,233,0.3);">Act {pf["actual_time"]}</span>{next_day_tag}'
         elif pf["time_type"] == "revised":
-            act_html = f'<span class="mono" style="color:#F8FAFC;font-weight:bold;background:rgba(248,250,252,0.1);padding:2px 6px;border-radius:4px;border:1px solid rgba(248,250,252,0.3);">Est {pf["actual_time"]}</span>'
-        else: act_html = ""
+            act_html = f'<span class="mono" style="color:#F8FAFC;font-weight:bold;background:rgba(248,250,252,0.1);padding:2px 6px;border-radius:4px;border:1px solid rgba(248,250,252,0.3);">Est {pf["actual_time"]}</span>{next_day_tag}'
+        else: act_html = f'{next_day_tag}'
 
     card_html = f"""<div style="background-color:{pf['bg_color']};border-left:6px solid {border_col};border-radius:8px;padding:16px 20px;margin-bottom:12px;display:flex;align-items:center;color:white;box-shadow:0 4px 6px rgba(0,0,0,0.15);">
 {image_element}
@@ -234,13 +241,8 @@ for f in flights:
     term, gate = str(arr_n.get("terminal", "")).strip().upper(), arr_n.get("gate", "TBA")
 
     ac = f.get("aircraft", {}); ac_m, ac_r = ac.get("model", ""), ac.get("reg", "")
-    
-    # 執行更嚴格的國際線過濾
-    if not is_strictly_international(term, country, ac_m, city):
-        continue
+    if not is_strictly_international(term, country, ac_m, city): continue
 
-    ac_text = f"{ac_m} ({ac_r})" if ac_m and ac_r else ac_m or ac_r
-    img_url = fetch_aircraft_image(ac_r)
     best_dt, t_type = extract_best_time(arr_n, aest)
     if best_dt is None: continue
 
@@ -248,20 +250,26 @@ for f in flights:
     s_dt = _parse_local_dt(sch_raw, aest) or best_dt
     sch_disp = s_dt.strftime("%H:%M") if sch_raw else ""
 
+    delay_hours = 0
+    if sch_raw:
+        delay_hours = (best_dt - s_dt).total_seconds() / 3600
+        if delay_hours > 12: continue
+
     t_diff = int((best_dt - now_aest).total_seconds() / 60)
     is_can = status in ("canceled", "cancelled")
     is_lan = (status in ("landed", "arrived") or t_diff <= 0) and not is_can
     l_min, m_left = max(0, -t_diff) if is_lan else 0, max(0, t_diff) if not is_lan else 0
     is_arch_can = is_can and (now_aest - s_dt).total_seconds() / 60 > 15
+    is_next_day = best_dt.date() > now_aest.date()
     
-    bc, sc, bg, st_txt = get_card_style(is_can, is_arch_can, is_lan, l_min, status == "delayed", m_left)
+    bc, sc, bg, st_txt = get_card_style(is_can, is_arch_can, is_lan, l_min, delay_hours, m_left)
 
     processed_flights.append({
         "is_gap": False, "num": flight_num, "origin": city, "sch_display": sch_disp, "ac_text": ac_text,
         "gate": gate, "actual_time": best_dt.strftime("%H:%M"), "is_landed": is_lan, "is_canceled": is_can,
         "is_archived_canceled": is_arch_can, "landed_mins": l_min, "dt": best_dt, "s_dt_val": s_dt,
         "time_type": t_type, "image_url": img_url, "border_color": bc, "status_color": sc,
-        "status_text": st_txt, "bg_color": bg
+        "status_text": st_txt, "bg_color": bg, "is_next_day": is_next_day
     })
 
 # ── Gap Detection ──
