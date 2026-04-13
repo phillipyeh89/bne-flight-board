@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytz
 
 # ─────────────────────────────────────────────
-# Constants (BNE Operations - Optimized for Gate 81 Store)
+# Constants (BNE Operations)
 # ─────────────────────────────────────────────
 AIRPORT_ICAO       = "YBBN"
 TIMEZONE           = "Australia/Brisbane"
@@ -21,14 +21,16 @@ OLD_FLIGHT_HOURS   = 8
 IMAGE_WORKERS      = 8
 DOMESTIC_TERMINALS = ('D', 'DOM')
 
-# 自動更新設定
+# 重要：網頁每 60 秒刷新一次，讓數字「跳動」
 UI_REFRESH_SEC     = 60 
+# 重要：API 資料每 20 分鐘才真正更新一次，節省額度
 API_DATA_TTL_SEC   = 1200 
 
 # ─────────────────────────────────────────────
 # Page Config & Universal CSS
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Flight Board", page_icon="✈️", layout="centered")
+# 注入 60 秒自動重整 Meta Tag
 st.markdown(f"""
 <meta http-equiv="refresh" content="{UI_REFRESH_SEC}">
 <style>
@@ -63,14 +65,8 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-# ─────────────────────────────────────────────
-# Sidebar Mode Selector
-# ─────────────────────────────────────────────
-with st.sidebar:
-    st.title("Settings")
-    mode = st.radio("Display Mode", ["Arrivals", "Departures"], index=0)
-    st.divider()
-    st.info("Store Location: Front of Gate 81")
+if "last_update_time" not in st.session_state:
+    st.session_state.last_update_time = None
 
 # ─────────────────────────────────────────────
 # Data Fetchers
@@ -91,16 +87,18 @@ def prefetch_images(flights: list):
     with ThreadPoolExecutor(max_workers=IMAGE_WORKERS) as ex:
         list(ex.map(fetch_aircraft_image, regs))
 
+# 這裡快取設為 20 分鐘，保護你的 API 額度
 @st.cache_data(ttl=API_DATA_TTL_SEC)
-def fetch_flight_data(from_time: str, to_time: str, direction: str) -> list:
+def fetch_flight_data(from_time: str, to_time: str) -> list:
     url = f"https://aerodatabox.p.rapidapi.com/flights/airports/icao/{AIRPORT_ICAO}/{from_time}/{to_time}"
-    params = {"direction": direction, "withCancelled": "true", "withCodeshared": "false"}
+    params = {"direction": "Arrival", "withCancelled": "true", "withCodeshared": "false"}
     headers = {"X-RapidAPI-Key": st.secrets["X_RAPIDAPI_KEY"], "X-RapidAPI-Host": "aerodatabox.p.rapidapi.com"}
     try:
         r = requests.get(url, headers=headers, params=params, timeout=10)
         r.raise_for_status()
+        # 紀錄真正從 API 更新的時間
         st.session_state.api_last_hit = datetime.now(pytz.timezone(TIMEZONE))
-        return r.json().get('arrivals' if direction == 'Arrival' else 'departures', [])
+        return r.json().get("arrivals", [])
     except Exception as e:
         st.error(f"API Request Failed: {e}"); return []
 
@@ -132,19 +130,22 @@ def is_domestic(terminal: str, country_code: str) -> bool:
     if t in DOMESTIC_TERMINALS: return True
     return True if not t and country_code == "au" else False
 
-def get_departure_walk_offset(gate: str) -> int:
-    """計算從 Gate 81 走到目標 Gate 的偏移量(分鐘)"""
-    try:
-        g_num = int(''.join(filter(str.isdigit, gate)))
-        if g_num in [80, 81, 82]: return 0      # 就在店門口
-        if g_num in [78, 79, 83, 84, 85]: return 5  # 近戰區
-        return 10  # 遠征區 (69-77, 86-87)
-    except: return 5
+def get_card_style(is_canceled, is_archived, is_landed, landed_mins, is_delayed, mins_left):
+    if is_canceled:
+        if is_archived: return "#475569", "#94A3B8", "#0F172A", "❌ CANCELED"
+        return "#EF4444", "#F87171", "#1E293B", "❌ CANCELED"
+    if is_landed:
+        if landed_mins <= RECENT_LANDED_MAX: return "#10B981", "#34D399", "#1E293B", f"Landed {format_hm(landed_mins)} ago"
+        return "#475569", "#94A3B8", "#0F172A", f"Landed {format_hm(landed_mins)} ago"
+    bg, icon = "#1E293B", "⚠️ " if is_delayed else ""
+    if mins_left < IMMINENT_MINUTES: return "#EF4444", "#F87171", bg, f"🔥 {icon}In {format_hm(mins_left)}"
+    if mins_left <= SOON_MINUTES: return "#F59E0B", "#FBBF24", bg, f"{icon}In {format_hm(mins_left)}"
+    return "#3B82F6", "#60A5FA", bg, f"{icon}In {format_hm(mins_left)}"
 
 # ─────────────────────────────────────────────
 # Renderers
 # ─────────────────────────────────────────────
-def render_flight_card(pf: dict, index: int, current_mode: str):
+def render_flight_card(pf: dict, index: int):
     img_url, border_col = pf["image_url"], pf["border_color"]
     if img_url:
         mid = f"modal_{index}"
@@ -171,14 +172,10 @@ def render_flight_card(pf: dict, index: int, current_mode: str):
             act_html = f'<span style="color:#F8FAFC;font-weight:bold;background:rgba(248,250,252,0.1);padding:2px 6px;border-radius:4px;border:1px solid rgba(248,250,252,0.3);">Est {pf["actual_time"]}</span>'
         else: act_html = ""
 
-    # 離境模式標題特殊化
-    header_text = f"{pf['num']} to {pf['origin']}" if current_mode == "Departures" else f"{pf['num']} {pf['origin']}"
-    status_label = "Window" if current_mode == "Departures" else "Status"
-    
     card_html = f"""<div style="background-color:{pf['bg_color']};border-left:6px solid {border_col};border-radius:8px;padding:16px 20px;margin-bottom:12px;display:flex;align-items:center;color:white;font-family:sans-serif;box-shadow:0 4px 6px rgba(0,0,0,0.15);">
 {image_element}
 <div style="flex-grow:1;">
-<div style="font-size:1.4em;font-weight:bold;margin-bottom:4px;">{header_text}</div>
+<div style="font-size:1.4em;font-weight:bold;margin-bottom:4px;">{pf['num']}<span style="font-size:0.75em;color:#94A3B8;font-weight:normal;margin-left:6px;">{pf['origin']}</span></div>
 <div style="font-size:0.85em;color:#CBD5E1;margin-bottom:6px;">{pf['ac_text']}</div>
 <div style="font-size:0.85em;color:#CBD5E1;">{sch_str}{act_html}</div>
 </div>
@@ -190,23 +187,30 @@ def render_flight_card(pf: dict, index: int, current_mode: str):
 </div>"""
     st.markdown(card_html, unsafe_allow_html=True)
 
+def render_gap_card(pf: dict):
+    st.markdown(pf["html"], unsafe_allow_html=True)
+
 # ─────────────────────────────────────────────
 # Main Process
 # ─────────────────────────────────────────────
-aest = pytz.timezone(TIMEZONE); now_aest = datetime.now(aest)
+aest = pytz.timezone(TIMEZONE)
+# 這裡 now_aest 每一分鐘都會抓取最新時間，所以倒數會動！
+now_aest = datetime.now(aest) 
+
 from_t = (now_aest - timedelta(hours=LOOKBACK_HOURS)).strftime("%Y-%m-%dT%H:%M")
 to_t = (now_aest + timedelta(hours=LOOKAHEAD_HOURS)).strftime("%Y-%m-%dT%H:%M")
 
-api_direction = "Arrival" if mode == "Arrivals" else "Departure"
-
 col1, col2 = st.columns([2, 1])
-with col1: st.title(f"✈️ {mode}")
+with col1: st.title("✈️ Arrivals")
 with col2:
+    # 顯示「畫面重整時間」
     st.markdown(f'<div style="font-size:0.85em;color:#94A3B8;text-align:center;margin-top:10px;">🕒 Live: {now_aest.strftime("%H:%M:%S")}</div>', unsafe_allow_html=True)
+    # 顯示「API 最後更新時間」，讓你知道資料新不新鮮
     api_time = st.session_state.get('api_last_hit')
-    st.markdown(f'<div style="font-size:0.7em;color:#64748B;text-align:center;">API: {api_time.strftime("%H:%M") if api_time else "--:--"}</div>', unsafe_allow_html=True)
+    api_disp = api_time.strftime("%H:%M") if api_time else "--:--"
+    st.markdown(f'<div style="font-size:0.7em;color:#64748B;text-align:center;">API Data updated: {api_disp}</div>', unsafe_allow_html=True)
 
-flights = fetch_flight_data(from_t, to_t, api_direction)
+flights = fetch_flight_data(from_t, to_t)
 if not flights:
     st.info("No data available. Re-checking..."); st.stop()
 
@@ -215,69 +219,51 @@ processed_flights = []
 
 for f in flights:
     flight_num, status = f.get("number", "N/A"), f.get("status", "").lower()
-    
-    # 離境看目的地，入境看來源地
-    airport_node = (f.get("arrival") or f.get("movement")) if mode == "Arrivals" else (f.get("departure") or f.get("movement"))
-    other_node = (f.get("departure") or f.get("movement")) if mode == "Arrivals" else (f.get("arrival") or f.get("movement"))
-    
-    ai = other_node.get("airport", {})
+    dep, mv = f.get("departure", {}), f.get("movement", {})
+    ai = dep.get("airport") or mv.get("airport") or {}
     city = ai.get("municipalityName") or ai.get("name") or ai.get("iata") or "Unknown"
     country = str(ai.get("countryCode", "")).strip().lower()
-    
-    term, gate = str(airport_node.get("terminal", "")).strip().upper(), airport_node.get("gate", "TBA")
+    arr_n = f.get("arrival") or f.get("movement") or {}
+    term, gate = str(arr_n.get("terminal", "")).strip().upper(), arr_n.get("gate", "TBA")
+
     if is_domestic(term, country): continue
 
     ac = f.get("aircraft", {}); ac_m, ac_r = ac.get("model", ""), ac.get("reg", "")
     ac_text = f"{ac_m} ({ac_r})" if ac_m and ac_r else ac_m or ac_r
     img_url = fetch_aircraft_image(ac_r)
 
-    best_dt, t_type = extract_best_time(airport_node, aest)
+    best_dt, t_type = extract_best_time(arr_n, aest)
     if best_dt is None: continue
 
-    sch_raw = (airport_node.get("scheduledTime", {}) or {}).get("local")
+    sch_raw = (arr_n.get("scheduledTime", {}) or {}).get("local")
     s_dt = _parse_local_dt(sch_raw, aest) or best_dt
     sch_disp = s_dt.strftime("%H:%M") if sch_raw else ""
 
+    if sch_raw:
+        if (best_dt - s_dt).total_seconds() / 3600 < -2 or (best_dt - s_dt).total_seconds() / 3600 > 12: continue
+        if status not in ("canceled", "cancelled") and (now_aest - s_dt).total_seconds() > OLD_FLIGHT_HOURS * 3600: continue
+
+    # 這裡的 t_diff 每一分鐘重新計算，數字就會變！
     t_diff = int((best_dt - now_aest).total_seconds() / 60)
     is_can = status in ("canceled", "cancelled")
+    is_lan = (status in ("landed", "arrived") or t_diff <= 0) and not is_can
+    l_min = max(0, -t_diff) if is_lan else 0
+    m_left = max(0, t_diff) if not is_lan else 0
+    is_arch_can = is_can and (now_aest - s_dt).total_seconds() / 60 > 15
     
-    # === 離境專屬狀態邏輯 ===
-    if mode == "Departures":
-        is_landed = False # 離境不看降落
-        is_arch_can = is_can and (now_aest - s_dt).total_seconds() / 60 > 15
-        
-        walk_offset = get_departure_walk_offset(gate)
-        mins_to_dep = t_diff
-        
-        if is_can:
-            bg, bc, sc, st_txt = ("#0F172A", "#475569", "#94A3B8", "❌ CANCELED") if is_arch_can else ("#1E293B", "#EF4444", "#F87171", "❌ CANCELED")
-        elif mins_to_dep < (40 + walk_offset):
-            bg, bc, sc, st_txt = "#0F172A", "#475569", "#94A3B8", "🌑 EXPIRED"
-        elif mins_to_dep <= (60 + walk_offset):
-            bg, bc, sc, st_txt = "#1E293B", "#EF4444", "#F87171", f"🔥 FINAL ({mins_to_dep}m)"
-        elif mins_to_dep <= 100:
-            bg, bc, sc, st_txt = "#1E293B", "#10B981", "#34D399", f"🛍️ PRIME ({mins_to_dep}m)"
-        else:
-            bg, bc, sc, st_txt = "#1E293B", "#3B82F6", "#60A5FA", f"💎 GOLDEN ({mins_to_dep}m)"
-    
-    # === 入境專屬狀態邏輯 ===
-    else:
-        is_lan = (status in ("landed", "arrived") or t_diff <= 0) and not is_can
-        l_min, m_left = max(0, -t_diff) if is_lan else 0, max(0, t_diff) if not is_lan else 0
-        is_arch_can = is_can and (now_aest - s_dt).total_seconds() / 60 > 15
-        bc, sc, bg, st_txt = get_card_style(is_can, is_arch_can, is_lan, l_min, status == "delayed", m_left)
+    bc, sc, bg, st_txt = get_card_style(is_can, is_arch_can, is_lan, l_min, status == "delayed", m_left)
 
     processed_flights.append({
         "is_gap": False, "num": flight_num, "origin": city, "sch_display": sch_disp, "ac_text": ac_text,
-        "gate": gate, "actual_time": best_dt.strftime("%H:%M"), "is_landed": (is_lan if mode == "Arrivals" else False), 
-        "is_canceled": is_can, "is_archived_canceled": is_arch_can, "landed_mins": (l_min if mode == "Arrivals" else 0), 
-        "dt": best_dt, "s_dt_val": s_dt, "time_type": t_type, "image_url": img_url, 
-        "border_color": bc, "status_color": sc, "status_text": st_txt, "bg_color": bg
+        "gate": gate, "actual_time": best_dt.strftime("%H:%M"), "is_landed": is_lan, "is_canceled": is_can,
+        "is_archived_canceled": is_arch_can, "landed_mins": l_min, "dt": best_dt, "s_dt_val": s_dt,
+        "time_type": t_type, "image_url": img_url, "border_color": bc, "status_color": sc,
+        "status_text": st_txt, "bg_color": bg
     })
 
-# ── Gap Detection Logic ──
-future_f = sorted([p for p in processed_flights if not p["is_canceled"] and p["status_text"] not in ["🌑 EXPIRED", "Landed >60m"]], key=lambda x: x["dt"])
-if future_f and mode == "Arrivals": # 目前先在入境模式啟動空檔偵測
+# ── Gap Detection Logic (每一分鐘都會重新計算空檔剩餘時間) ──
+future_f = sorted([p for p in processed_flights if not p["is_landed"] and not p["is_canceled"]], key=lambda x: x["dt"])
+if future_f:
     windows = [(now_aest, future_f[0]["dt"])]
     for i in range(len(future_f)-1): windows.append((future_f[i]["dt"], future_f[i+1]["dt"]))
     for t1, t2 in windows:
@@ -295,13 +281,10 @@ if future_f and mode == "Arrivals": # 目前先在入境模式啟動空檔偵測
 def s_key(p):
     if p["is_gap"]: return (1, p["time_key"])
     if p.get("is_canceled"): return (2, -p["s_dt_val"].timestamp()) if p.get("is_archived_canceled") else (1, p["dt"].timestamp())
-    if mode == "Arrivals":
-        if p["is_landed"]: return (0, -p["dt"].timestamp()) if p["landed_mins"] <= RECENT_LANDED_MAX else (2, -p["dt"].timestamp())
-    else: # Departures
-        if p["status_text"] == "🌑 EXPIRED": return (2, -p["dt"].timestamp())
+    if p["is_landed"]: return (0, -p["dt"].timestamp()) if p["landed_mins"] <= RECENT_LANDED_MAX else (2, -p["dt"].timestamp())
     return (1, p["dt"].timestamp())
 
 processed_flights.sort(key=s_key)
 for i, pf in enumerate(processed_flights):
-    if pf["is_gap"]: st.markdown(pf["html"], unsafe_allow_html=True)
-    else: render_flight_card(pf, i, mode)
+    if pf["is_gap"]: render_gap_card(pf)
+    else: render_flight_card(pf, i)
