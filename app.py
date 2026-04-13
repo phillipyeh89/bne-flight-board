@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 import pytz
+import time  # 新增：用來控制 API 發送頻率
 
 # ─────────────────────────────────────────────
 # Constants (BNE Operations - 24H Pro Stable)
@@ -26,7 +27,6 @@ CITY_MAP = {
 }
 
 UI_REFRESH_SEC     = 60   
-# 為了支撐雙重查詢，更新頻率改為 15 分鐘 (900秒)，確保一個月花費完美壓在 6000 units 內
 API_DATA_TTL_SEC   = 900  
 STALE_DATA_THRESHOLD_MIN = 45 
 
@@ -46,7 +46,6 @@ st.markdown(f"""
     @keyframes blink {{ 50% {{ opacity: 0; }} }}
     .stale-warning {{ color: #EF4444 !important; font-weight: 700 !important; animation: blink 1.2s linear infinite; }}
     
-    /* 恢復 70px 舒適大圖與排版 */
     .avatar-btn {{
         cursor: pointer; margin-right: 18px; flex-shrink: 0;
         display: block; transition: transform 0.2s ease, box-shadow 0.2s ease;
@@ -80,7 +79,7 @@ if "api_last_hit" not in st.session_state:
     st.session_state.api_last_hit = None
 
 # ─────────────────────────────────────────────
-# Data Fetchers (24H Double Fetch Strategy)
+# Data Fetchers (24H Double Fetch Strategy with Speed Limit)
 # ─────────────────────────────────────────────
 @st.cache_data(ttl=86400, show_spinner=False)
 def fetch_aircraft_image(reg: str) -> str:
@@ -100,7 +99,6 @@ def prefetch_images(flights: list):
 
 @st.cache_data(ttl=API_DATA_TTL_SEC)
 def fetch_24h_flight_data(now_dt) -> list:
-    """保留 24 小時雙重抓取，讓你提早安排排班"""
     headers = {"X-RapidAPI-Key": st.secrets["X_RAPIDAPI_KEY"], "X-RapidAPI-Host": "aerodatabox.p.rapidapi.com"}
     params = {"direction": "Arrival", "withCancelled": "true", "withCodeshared": "false"}
     
@@ -114,10 +112,15 @@ def fetch_24h_flight_data(now_dt) -> list:
     
     all_flights = []
     try:
+        # 第一抓
         r1 = requests.get(url1, headers=headers, params=params, timeout=10)
         r1.raise_for_status()
         all_flights.extend(r1.json().get("arrivals", []))
         
+        # ⚠️ 強制暫停 1.5 秒，避開 1 request/sec 的 Rate Limit (429 錯誤)
+        time.sleep(1.5)
+        
+        # 第二抓
         r2 = requests.get(url2, headers=headers, params=params, timeout=10)
         r2.raise_for_status()
         all_flights.extend(r2.json().get("arrivals", []))
@@ -129,7 +132,7 @@ def fetch_24h_flight_data(now_dt) -> list:
     return all_flights
 
 # ─────────────────────────────────────────────
-# Logic Helpers (Integrated Claude's logic)
+# Logic Helpers
 # ─────────────────────────────────────────────
 def format_hm(total_minutes: int) -> str:
     h, m = divmod(total_minutes, 60)
@@ -151,7 +154,6 @@ def extract_best_time(node: dict, tz) -> tuple:
     return None, ""
 
 def is_strictly_international(terminal: str, country_code: str, aircraft_model: str) -> bool:
-    """Claude的優化：移除嚴格的 Unknown 城市排除，防止誤殺"""
     t, ac = terminal.strip().upper(), aircraft_model.upper()
     if t in DOMESTIC_TERMINALS: return False
     if country_code == "au": return False
@@ -167,7 +169,6 @@ def get_card_style(is_canceled, is_archived, is_landed, landed_mins, delay_hours
         return "#475569", "#94A3B8", "#0F172A", f"Landed {format_hm(landed_mins)} ago"
 
     bg = "#1E293B"
-    # Claude的優化：確保 25 分鐘內即將降落的飛機會獲得最高警示權重，並顯示延遲時數
     if mins_left < 25:
         delay_suffix = f" (+{int(delay_hours)}h late)" if delay_hours >= 1 else ""
         return "#EF4444", "#F87171", bg, f"🔥 In {format_hm(mins_left)}{delay_suffix}"
@@ -178,7 +179,7 @@ def get_card_style(is_canceled, is_archived, is_landed, landed_mins, delay_hours
     return "#3B82F6", "#60A5FA", bg, f"In {format_hm(mins_left)}"
 
 # ─────────────────────────────────────────────
-# Renderers (Restored 70px Comfort Layout)
+# Renderers
 # ─────────────────────────────────────────────
 def render_flight_card(pf: dict, index: int):
     img_url, border_col = pf["image_url"], pf["border_color"]
@@ -199,10 +200,11 @@ def render_flight_card(pf: dict, index: int):
     sch_str = f'<span class="mono">Sch {pf["sch_display"]}</span> • ' if pf["sch_display"] else ""
     next_day_tag = ' <small style="opacity:0.6;">(Next Day)</small>' if pf["is_next_day"] else ''
 
+    # 顏色修正：Act 保持天藍色，Est 改為中性冷灰色 (避免與延誤黃色混淆)
     if pf["is_landed"] or pf["time_type"] == "actual":
         act_html = f'<span class="mono" style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 6px;border-radius:4px;border:1px solid rgba(14,165,233,0.3);">Act {pf["actual_time"]}</span>{next_day_tag}'
     elif pf["time_type"] == "revised":
-        act_html = f'<span class="mono" style="color:#FBBF24;font-weight:bold;background:rgba(251,191,36,0.15);padding:2px 6px;border-radius:4px;border:1px solid rgba(251,191,36,0.3);">Est {pf["actual_time"]}</span>{next_day_tag}'
+        act_html = f'<span class="mono" style="color:#E2E8F0;font-weight:bold;background:rgba(226,232,240,0.15);padding:2px 6px;border-radius:4px;border:1px solid rgba(226,232,240,0.3);">Est {pf["actual_time"]}</span>{next_day_tag}'
     else:
         act_html = next_day_tag
 
@@ -243,7 +245,6 @@ flights = fetch_24h_flight_data(now_aest)
 if not flights:
     st.info("No data available. Re-checking..."); st.stop()
 
-# 過濾合併查詢可能產生的重複航班
 unique_flights = {f.get("number"): f for f in flights}.values()
 prefetch_images(list(unique_flights))
 processed_flights = []
@@ -270,7 +271,6 @@ for f in unique_flights:
     sch_disp = s_dt.strftime("%H:%M") if sch_raw else ""
 
     delay_hours = (best_dt - s_dt).total_seconds() / 3600 if s_dt else 0
-    # Claude的防護網：排除過於不合理的抵達資料
     if delay_hours < -2 or delay_hours > 24: continue
 
     t_diff = int((best_dt - now_aest).total_seconds() / 60)
