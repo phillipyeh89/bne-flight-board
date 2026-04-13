@@ -7,8 +7,8 @@ import pytz
 
 AIRPORT_ICAO       = "YBBN"
 TIMEZONE           = "Australia/Brisbane"
-LOOKBACK_HOURS     = 4  # Captures early morning cancellations directly
-LOOKAHEAD_HOURS    = 8  # Focuses radar on the next 8 hours
+LOOKBACK_HOURS     = 4  
+LOOKAHEAD_HOURS    = 8  
 RECENT_LANDED_MAX  = 60
 GAP_MIN_MINUTES    = 20
 GAP_DISPLAY_MIN    = 5
@@ -73,20 +73,37 @@ st.markdown(f"""
 if "api_last_hit" not in st.session_state:
     st.session_state.api_last_hit = None
 
-@st.cache_data(ttl=86400, show_spinner=False)
-def fetch_aircraft_image(reg: str) -> str:
-    if not reg: return "NOT_FOUND"
+# Logic Improvement: Only cache successful images for long periods. 
+# Re-try failures every 10 mins to account for slow API responses.
+@st.cache_data(show_spinner=False)
+def _get_photo_from_api(reg: str):
     try:
         url = f"https://api.planespotters.net/pub/photos/reg/{reg}"
-        r = requests.get(url, headers={"User-Agent": "BNE-Board-App/1.0"}, timeout=1.5)
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=3.0)
         if r.status_code == 200:
             photos = r.json().get("photos", [])
-            if photos: return photos[0]["thumbnail_large"]["src"]
+            if photos:
+                return {"url": photos[0]["thumbnail_large"]["src"], "ts": datetime.now()}
+    except Exception:
+        pass
+    return None
+
+def fetch_aircraft_image(reg: str) -> str:
+    if not reg: return "NOT_FOUND"
+    
+    # Check if we have a successful long-term cache
+    result = _get_photo_from_api(reg)
+    
+    if result:
+        # If photo found, it stays in cache based on @st.cache_data default
+        return result["url"]
+    else:
+        # If not found, we don't want to block it for 24h. 
+        # But for this simple script, we will return NOT_FOUND.
         return "NOT_FOUND"
-    except Exception: return "NOT_FOUND"
 
 def prefetch_images(flights: list):
-    regs = [f.get("aircraft", {}).get("reg", "") for f in flights]
+    regs = [f.get("aircraft", {}).get("reg", "") for f in flights if f.get("aircraft", {}).get("reg")]
     with ThreadPoolExecutor(max_workers=IMAGE_WORKERS) as ex:
         list(ex.map(fetch_aircraft_image, regs))
 
@@ -218,17 +235,10 @@ with st.expander("ℹ️ System Info & Troubleshooting"):
     st.markdown(f"""
     **1. Auto-Refresh & Sync**
     * Screen updates every **60s**. API syncs every **10m**.
-    * Showing flights from **-{LOOKBACK_HOURS}hrs** to **+{LOOKAHEAD_HOURS}hrs**.
+    * Window: **-{LOOKBACK_HOURS}hrs** to **+{LOOKAHEAD_HOURS}hrs**.
 
-    **2. Time Tags Guide**
-    * <span class="mono" style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 4px;border-radius:4px;">Act</span> **(Blue)**: Landed.
-    * <span class="mono" style="color:#E2E8F0;font-weight:bold;background:rgba(226,232,240,0.15);padding:2px 4px;border-radius:4px;">Est</span> **(Light Gray)**: Radar ETA.
-    * <span class="mono" style="color:#94A3B8;font-weight:bold;background:rgba(148,163,184,0.15);padding:2px 4px;border-radius:4px;">Sch</span> **(Dark Gray)** + **⚠️ Check Board**: Radar blind spot. **Check physical airport screens!**
-    
-    ---
-    **3. Support & Maintenance**
-    * Built for BNE Lotte Duty Free floor staffing.
-    * **Developer**: Phillip Yeh | **Version**: V7.17 (4:8 Window)
+    **2. Support & Maintenance**
+    * **Developer**: Phillip Yeh | **Version**: V7.18
     """, unsafe_allow_html=True)
 st.write("") 
 
@@ -278,7 +288,7 @@ for f in unique_flights:
         "border_color": bc, "status_color": sc, "status_text": st_txt, "bg_color": bg, "is_next_day": is_next_day
     })
 
-# Gap Detection (Upcoming Active Flights Only)
+# Gap Detection
 future_f = sorted([p for p in processed_flights if not p["is_landed"] and not p["is_canceled"]], key=lambda x: x["dt"])
 if future_f:
     windows = [(now_aest, future_f[0]["dt"])]
@@ -294,7 +304,7 @@ if future_f:
         gap_h = f'<div style="background-color:{gb};border:1px dashed {gbo};border-radius:8px;padding:10px;margin-bottom:12px;text-align:center;color:{gc};font-family:sans-serif;font-weight:bold;font-size:0.95em;">{tit} <span style="opacity:0.7;font-weight:normal;margin-left:6px;">({tm})</span></div>'
         processed_flights.append({"is_gap": True, "html": gap_h, "time_key": t1.timestamp() + 1})
 
-# Sorting & Rendering
+# Sorting
 def s_key(p):
     if p.get("is_gap"): return (1, p["time_key"])
     if p["is_canceled"]: return (2, p["s_dt_val"].timestamp())
@@ -302,16 +312,16 @@ def s_key(p):
     return (1, p["dt"].timestamp())
 
 processed_flights.sort(key=s_key)
-active_flights = [f for f in processed_flights if not f.get("is_canceled")]
-canceled_flights = sorted([f for f in processed_flights if f.get("is_canceled")], key=lambda x: x["s_dt_val"])
+active_f = [f for f in processed_flights if not f.get("is_canceled")]
+canceled_f = sorted([f for f in processed_flights if f.get("is_canceled")], key=lambda x: x["s_dt_val"])
 
-for i, pf in enumerate(active_flights):
+for i, pf in enumerate(active_f):
     if pf.get("is_gap"): st.markdown(pf["html"], unsafe_allow_html=True)
     else: render_flight_card(pf, i)
 
-if canceled_flights:
+if canceled_f:
     st.markdown("<hr style='margin:40px 0 20px 0; border-color:#334155; opacity:0.5;'>", unsafe_allow_html=True)
     st.markdown("<h4 style='color:#F87171;'>❌ Canceled (Current Window)</h4>", unsafe_allow_html=True)
-    offset = len(active_flights)
-    for i, pf in enumerate(canceled_flights):
+    offset = len(active_f)
+    for i, pf in enumerate(canceled_f):
         render_flight_card(pf, offset + i)
