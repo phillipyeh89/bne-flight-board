@@ -10,7 +10,7 @@ st.set_page_config(page_title="BNE Flight Board", page_icon="✈️", layout="ce
 # 自動更新機制：每 20 分鐘 (1200秒) 自動重整
 st.markdown('<meta http-equiv="refresh" content="1200">', unsafe_allow_html=True)
 
-# 注入高質感漸層 CSS (新增空檔橫幅設計)
+# 注入高質感漸層 CSS (包含離櫃空檔橫幅設計)
 st.markdown("""
 <style>
     .flight-card {
@@ -113,7 +113,7 @@ aest = pytz.timezone('Australia/Brisbane')
 now_aest = datetime.now(aest)
 
 from_time = (now_aest - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M")
-# 延長 API 抓取極限至 11 小時，確保能盡可能涵蓋整個班表
+# 延長 API 抓取極限至 11 小時，確保能涵蓋整個班表
 to_time = (now_aest + timedelta(hours=11)).strftime("%Y-%m-%dT%H:%M")
 
 col1, col2 = st.columns([2, 1])
@@ -278,7 +278,7 @@ for f in flights:
         'dt': dt
     })
 
-# === 新增：班表全覆蓋空檔偵測系統 (Full-Shift Gap Detector) ===
+# === 離櫃空檔偵測系統 (Off-Floor Window Detector) ===
 shift_date = now_aest.date() if now_aest.hour < 12 else now_aest.date() + timedelta(days=1)
 shift_start = aest.localize(datetime.combine(shift_date, time(4, 30)))
 shift_end = aest.localize(datetime.combine(shift_date, time(12, 0)))
@@ -321,7 +321,8 @@ for t_start, t_end in gaps:
     if gap_mins < 5: continue # 剩餘不到 5 分鐘忽略
     
     is_active = t_start <= now_aest
-    status_text = "🟢 ACTIVE BREAK NOW" if is_active else f"☕ {gap_mins}m BREAK OPPORTUNITY"
+    # 調整為 Off-Floor 相關的文字描述
+    status_text = "🟢 ACTIVE OFF-FLOOR TIME" if is_active else f"🔄 {gap_mins}m OFF-FLOOR WINDOW (Break / Duties)"
     css_ext = "" if is_active else "future"
     
     gap_html = f'''
