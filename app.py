@@ -1,138 +1,94 @@
 import streamlit as st
 import requests
 import pandas as pd
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta
 import pytz
 
-# ==========================================
-# BNE Flight Board - V4.0 "Aero-Glass" Edition
-# ==========================================
-
+# 設定頁面與手機直式螢幕最佳化
 st.set_page_config(page_title="BNE Flight Board", page_icon="✈️", layout="centered")
 
-# 注入全新 Glassmorphism CSS
+# 注入極致清晰版 CSS (實用派、高對比、無多餘特效)
 st.markdown("""
 <style>
-    /* 全域背景微調 (如果在暗色模式下效果更好) */
-    .stApp {
-        background-color: #0B1120;
-    }
-
-    /* 客製化按鈕 - 科技感霓虹邊框 */
+    /* 客製化按鈕 - 乾淨實用 */
     .stButton > button {
-        background: rgba(30, 41, 59, 0.5) !important;
-        color: #E2E8F0 !important;
-        border: 1px solid rgba(147, 197, 253, 0.3) !important;
-        border-radius: 8px !important;
+        background-color: #2563EB !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 6px !important;
         font-weight: 600 !important;
-        letter-spacing: 0.05em !important;
         padding: 0.5rem 1rem !important;
-        transition: all 0.3s ease !important;
-        backdrop-filter: blur(10px);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
     }
     .stButton > button:hover {
-        background: rgba(59, 130, 246, 0.2) !important;
-        border: 1px solid rgba(147, 197, 253, 0.8) !important;
-        box-shadow: 0 0 15px rgba(59, 130, 246, 0.3) !important;
+        background-color: #1D4ED8 !important;
     }
 
-    /* Aero-Glass 航班卡片基礎設定 */
-    .glass-card {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        background: rgba(30, 41, 59, 0.6);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border: 1px solid rgba(255, 255, 255, 0.05);
-        border-radius: 12px;
-        padding: 14px 18px;
-        margin-bottom: 14px;
-        color: #F8FAFC;
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-    }
-    .glass-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
-    }
-
-    /* 側邊狀態光條 (Status Edge) */
-    .edge-normal { border-left: 5px solid #475569; }
-    .edge-soon { border-left: 5px solid #F59E0B; }
-    .edge-urgent { border-left: 5px solid #EF4444; }
-    .edge-landed-new { border-left: 5px solid #10B981; }
-    .edge-landed-old { 
-        border-left: 5px solid #334155; 
-        opacity: 0.5; 
-        background: rgba(15, 23, 42, 0.4);
+    /* 實體色塊卡片 */
+    .flight-card {
+        padding: 18px 22px;
+        margin-bottom: 16px;
+        border-radius: 10px;
+        color: #FFFFFF;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        border: 1px solid rgba(255, 255, 255, 0.08);
     }
     
-    @keyframes edge-pulse {
-        0% { border-left: 5px solid rgba(139, 92, 246, 0.4); box-shadow: -5px 0 15px rgba(139, 92, 246, 0.1); }
-        50% { border-left: 5px solid rgba(167, 139, 250, 1); box-shadow: -8px 0 20px rgba(167, 139, 250, 0.5); }
-        100% { border-left: 5px solid rgba(139, 92, 246, 0.4); box-shadow: -5px 0 15px rgba(139, 92, 246, 0.1); }
+    /* 紮實的狀態背景色 */
+    .status-normal { background: #1E293B; } 
+    .status-soon { background: #D97706; } 
+    .status-urgent { background: #E11D48; } 
+    .status-landed-new { background: #059669; } 
+    .status-landed-old { 
+        background: #0F172A; 
+        color: #94A3B8; 
+        border: 1px dashed #475569; 
+        box-shadow: none; 
     }
-    .edge-purple { animation: edge-pulse 2s infinite; }
+    .status-purple {
+        background: #7C3AED;
+        border: 2px solid #A78BFA;
+    }
 
     /* 文字排版系統 */
-    .flight-id { font-size: 1.3em; font-weight: 700; letter-spacing: 0.02em; color: #FFFFFF; }
-    .flight-route { font-size: 1em; font-weight: 500; color: #94A3B8; margin-left: 8px; }
-    .flight-meta { font-size: 0.85em; color: #64748B; margin-top: 4px; }
-    .time-main { font-size: 1.6em; font-weight: 800; color: #F8FAFC; margin-top: 2px; }
-    .time-sub { font-size: 0.8em; font-weight: 600; color: #94A3B8; text-transform: uppercase; letter-spacing: 0.05em; }
+    .gate-text { font-size: 2.8em; font-weight: 800; line-height: 1; margin-top: 5px; }
+    .time-text { font-size: 1.6em; font-weight: 700; margin-top: 4px; }
+    .flight-num-text { font-size: 1.4em; font-weight: 700; margin-bottom: 4px; }
     
-    .gate-box {
-        text-align: center;
-        background: rgba(15, 23, 42, 0.5);
-        padding: 8px 14px;
-        border-radius: 8px;
-        border: 1px solid rgba(255, 255, 255, 0.03);
-    }
-    .gate-num { font-size: 2.2em; font-weight: 800; color: #FFFFFF; line-height: 1; }
-    .gate-label { font-size: 0.7em; color: #64748B; text-transform: uppercase; font-weight: 700; margin-bottom: 4px; letter-spacing: 0.1em; }
-
-    /* 警告標籤 */
-    .alert-tag {
-        background: rgba(239, 68, 68, 0.2);
-        color: #FCA5A5;
-        font-size: 0.75em;
-        padding: 2px 8px;
+    /* 標籤設計 */
+    .label-tag {
+        background-color: rgba(0, 0, 0, 0.25);
+        padding: 4px 10px;
         border-radius: 4px;
+        font-size: 0.85em;
         font-weight: 600;
-        margin-bottom: 6px;
+        margin-bottom: 12px;
         display: inline-block;
-        border: 1px solid rgba(239, 68, 68, 0.3);
-    }
-    .prep-tag {
-        background: rgba(139, 92, 246, 0.2);
-        color: #C4B5FD;
-        border: 1px solid rgba(139, 92, 246, 0.3);
+        text-transform: uppercase;
     }
 
-    /* 極簡空檔分隔線 (Minimal Gap Divider) */
-    .gap-divider {
-        display: flex;
-        align-items: center;
+    /* 離櫃空檔橫幅 (清晰醒目) */
+    .gap-card {
         text-align: center;
-        margin: 15px 0 20px 0;
-        color: #10B981;
+        padding: 12px;
+        margin: 10px 0 20px 0;
+        border-radius: 6px;
+        background: #064E3B; /* 深綠色背景 */
+        border: 1px solid #10B981;
+        color: #A7F3D0;
+        font-size: 1.05em;
         font-weight: 700;
-        font-size: 0.95em;
-        letter-spacing: 0.05em;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
     }
-    .gap-divider::before, .gap-divider::after {
-        content: '';
-        flex: 1;
-        border-bottom: 1px dashed rgba(16, 185, 129, 0.3);
+    .gap-card.future {
+        background: #1E293B; /* 深灰色背景 */
+        border: 1px dashed #475569;
+        color: #94A3B8;
+        box-shadow: none;
     }
-    .gap-divider:not(:empty)::before { margin-right: .5em; }
-    .gap-divider:not(:empty)::after { margin-left: .5em; }
     
-    .gap-future { color: #64748B; }
-    .gap-future::before, .gap-future::after { border-bottom: 1px dashed rgba(100, 116, 139, 0.3); }
-
-    .update-time { font-size: 0.85em; color: #64748B; text-align: center; margin-bottom: 8px; font-weight: 500; }
+    .update-time { font-size: 0.85em; color: #94A3B8; text-align: center; margin-bottom: 8px; font-weight: 500; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -213,14 +169,18 @@ for f in flights:
     aircraft_reg = aircraft_node.get('reg', '')
     
     image_url = fetch_aircraft_image(aircraft_reg)
-    ac_text = f"{aircraft_model} ({aircraft_reg})" if aircraft_model and aircraft_reg else aircraft_model or aircraft_reg
+    ac_display_parts = []
+    if aircraft_model: ac_display_parts.append(aircraft_model)
+    if aircraft_reg: ac_display_parts.append(f"({aircraft_reg})")
+    ac_text = " ".join(ac_display_parts)
     
-    # 圖片改為 80x80 方形，更契合新版版型
     if image_url:
-        image_html = f'<div style="width: 80px; height: 80px; border-radius: 8px; overflow: hidden; flex-shrink: 0;"><img src="{image_url}" style="width: 100%; height: 100%; object-fit: cover;" /></div>'
+        image_html = f'<div style="width: 100px; height: 100px; border-radius: 8px; overflow: hidden; flex-shrink: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.3); background: #000;"><img src="{image_url}" style="width: 100%; height: 100%; object-fit: cover;" /></div>'
     else:
-        image_html = '<div style="width: 80px; height: 80px; border-radius: 8px; background: rgba(255,255,255,0.05); display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><span style="font-size: 2em; opacity:0.3;">✈️</span></div>'
+        image_html = '<div style="width: 100px; height: 100px; border-radius: 8px; background: rgba(0,0,0,0.2); display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><span style="font-size: 2.5em; opacity: 0.5;">✈️</span></div>'
 
+    aircraft_display = f'<div style="font-size: 0.85em; opacity: 0.8; font-weight: 500; margin-bottom: 2px;">{ac_text}</div>' if ac_text else ''
+    
     time_candidates = []
     scheduled_time_raw = None
     for node_name in ['arrival', 'movement', 'departure']:
@@ -257,7 +217,7 @@ for f in flights:
             s_dt = pd.to_datetime(scheduled_time_raw).to_pydatetime()
             if s_dt.tzinfo is None: s_dt = aest.localize(s_dt)
             else: s_dt = s_dt.astimezone(aest)
-            sch_display = f'<span style="opacity: 0.5; margin-left: 8px; font-weight: normal; font-size: 0.85em;">Sch {s_dt.strftime("%H:%M")}</span>'
+            sch_display = f'<span style="font-size: 0.75em; opacity: 0.7; margin-left: 8px; font-weight: normal;">(Sch {s_dt.strftime("%H:%M")})</span>'
         except: pass
 
     arr_node = f.get('arrival') or f.get('movement') or {}
@@ -279,30 +239,24 @@ for f in flights:
             if not is_landed and (now_aest - s_dt_check).total_seconds() > 8 * 3600: continue  
         except: pass
     
-    edge_class = "edge-normal"
-    tags_html = ""
+    css_class = "status-normal"
+    tags = []
     landed_mins = 0
-    time_label = ""
-    time_value = ""
     
     is_early_prep = (dt.hour == 2 and dt.minute >= 30) or (dt.hour == 3) or (dt.hour == 4 and dt.minute <= 10)
-    if is_early_prep: tags_html += '<span class="alert-tag prep-tag">⏰ EARLY PREP</span> '
+    if is_early_prep: tags.append("⏰ Early Prep Required")
 
     if is_landed:
         landed_mins = max(0, -time_diff_minutes)
-        if landed_mins <= 60: edge_class = "edge-landed-new"
-        else: edge_class = "edge-landed-old"
-        time_label = "LANDED"
-        time_value = f"{format_hm(landed_mins)} ago"
+        if landed_mins <= 60: css_class = "status-landed-new"
+        else: css_class = "status-landed-old"
+        time_display = f"Landed {format_hm(landed_mins)} ago ({dt.strftime('%H:%M')})"
     else:
         minutes_left = max(0, time_diff_minutes)
-        if is_early_prep: edge_class = "edge-purple"
-        elif minutes_left < 25: 
-            edge_class = "edge-urgent"
-            tags_html += '<span class="alert-tag">🔥 IMMINENT</span> '
-        elif minutes_left <= 60: edge_class = "edge-soon"
-        time_label = "ARRIVING IN"
-        time_value = format_hm(minutes_left)
+        if is_early_prep: css_class = "status-purple"
+        elif minutes_left < 25: css_class = "status-urgent"
+        elif minutes_left <= 60: css_class = "status-soon"
+        time_display = f"In {format_hm(minutes_left)} ({dt.strftime('%H:%M')})"
             
     processed_flights.append({
         'is_gap': False,
@@ -310,15 +264,13 @@ for f in flights:
         'origin': city,
         'sch_display': sch_display,
         'image_html': image_html,
-        'ac_text': ac_text,
+        'aircraft_display': aircraft_display,
         'gate': gate,
-        'time_label': time_label,
-        'time_value': time_value,
-        'actual_time': dt.strftime('%H:%M'),
+        'display': time_display,
         'is_landed': is_landed,
         'landed_mins': landed_mins,
-        'edge': edge_class,
-        'tags': tags_html,
+        'css': css_class,
+        'tags': tags,
         'dt': dt
     })
 
@@ -347,11 +299,11 @@ for t_start, t_end in gaps:
     
     is_active = t_start <= now_aest
     gap_display = format_hm(gap_mins)
-    css_ext = "" if is_active else "gap-future"
-    icon = "🟢" if is_active else "⏱️"
     
-    # 全新的極簡分隔線設計
-    gap_html = f'<div class="gap-divider {css_ext}"> {icon} {gap_display} OFF-FLOOR WINDOW ({display_start.strftime("%H:%M")} - {t_end.strftime("%H:%M")}) </div>'
+    status_text = f"🟢 ACTIVE OFF-FLOOR TIME ({gap_display} left)" if is_active else f"🔄 {gap_display} OFF-FLOOR WINDOW (Break / Duties)"
+    css_ext = "" if is_active else "future"
+    
+    gap_html = f'<div class="gap-card {css_ext}">{status_text} <span style="opacity:0.6; margin-left:8px;">({display_start.strftime("%H:%M")} - {t_end.strftime("%H:%M")})</span></div>'
     
     processed_flights.append({
         'is_gap': True,
@@ -373,25 +325,22 @@ for pf in processed_flights:
         st.markdown(pf['html'], unsafe_allow_html=True)
         continue
         
-    # 全新的 HTML 結構：Aero-Glass Layout
-    card_html = f"""<div class="glass-card {pf['edge']}">
-<div style="display: flex; gap: 16px; align-items: center; flex: 1;">
+    tag_html = "".join([f'<div class="label-tag">{tag}</div>' for tag in pf['tags']])
+    
+    card_html = f"""<div class="flight-card {pf['css']}">
+{tag_html}
+<div style="display: flex; justify-content: space-between; align-items: center;">
+<div style="display: flex; gap: 18px; align-items: center;">
 {pf['image_html']}
-<div style="display: flex; flex-direction: column;">
-<div style="margin-bottom: 2px;">{pf['tags']}</div>
-<div><span class="flight-id">{pf['num']}</span><span class="flight-route">{pf['origin']}</span></div>
-<div class="flight-meta">✈️ {pf['ac_text']} {pf['sch_display']}</div>
+<div style="display: flex; flex-direction: column; justify-content: center;">
+<div class="flight-num-text">{pf['num']} • {pf['origin']} {pf['sch_display']}</div>
+{pf['aircraft_display']}
+<div class="time-text">{pf['display']}</div>
 </div>
 </div>
-<div style="display: flex; gap: 24px; align-items: center;">
-<div style="text-align: right;">
-<div class="time-sub">{pf['time_label']}</div>
-<div class="time-main">{pf['time_value']}</div>
-<div style="font-size: 0.85em; color: #94A3B8; margin-top: 2px;">Act {pf['actual_time']}</div>
-</div>
-<div class="gate-box">
-<div class="gate-label">Gate</div>
-<div class="gate-num">{pf['gate']}</div>
+<div style="text-align: right; padding-left: 10px;">
+<div style="font-size: 0.9em; opacity: 0.7; margin-bottom: -5px; font-weight: 600; text-transform: uppercase;">Gate</div>
+<div class="gate-text">{pf['gate']}</div>
 </div>
 </div>
 </div>"""
