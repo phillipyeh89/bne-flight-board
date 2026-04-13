@@ -75,6 +75,9 @@ st.markdown(f"""
 
 if "api_last_hit" not in st.session_state:
     st.session_state.api_last_hit = None
+# 取消航班專用的記憶體庫
+if "canceled_memory" not in st.session_state:
+    st.session_state.canceled_memory = {}
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def fetch_aircraft_image(reg: str) -> str:
@@ -223,6 +226,7 @@ with st.expander("ℹ️ System Info & Troubleshooting"):
     **1. Auto-Refresh & Sync**
     * Screen updates every **60s**. API syncs every **10m**.
     * Showing flights from **-{LOOKBACK_HOURS}hr** to **+{LOOKAHEAD_HOURS}hrs**.
+    * *Note: The system automatically remembers canceled flights for the day as long as it remains running.*
 
     **2. Missing Plane Photos?**
     * Photos require a confirmed Aircraft Registration Number. If missing, a default ✈️ shows until radar updates closer to landing.
@@ -238,7 +242,7 @@ with st.expander("ℹ️ System Info & Troubleshooting"):
     ---
     **5. Support & Maintenance**
     * Built to optimize floor staffing for BNE Lotte Duty Free.
-    * **Version**: V7.15
+    * **Version**: V7.16
     * **Developer**: Phillip Yeh
     * **Issues?** If the board freezes or data looks wrong, please take a screenshot and contact support immediately.
     """, unsafe_allow_html=True)
@@ -294,6 +298,18 @@ for f in unique_flights:
         "border_color": bc, "status_color": sc, "status_text": st_txt, "bg_color": bg, "is_next_day": is_next_day
     })
 
+# 記憶體庫資料更新邏輯 (更新今日取消航班並清除舊資料)
+now_date = now_aest.date()
+for pf in processed_flights:
+    if pf.get("is_canceled") and pf["s_dt_val"]:
+        if pf["s_dt_val"].date() == now_date:
+            st.session_state.canceled_memory[pf["num"]] = pf
+
+# 清除昨天的舊記憶體，確保不跨日累積
+old_keys = [k for k, v in st.session_state.canceled_memory.items() if v["s_dt_val"].date() != now_date]
+for k in old_keys:
+    del st.session_state.canceled_memory[k]
+
 # Extract future flights for gap detection (excluding canceled flights)
 future_f = sorted([p for p in processed_flights if not p["is_landed"] and not p["is_canceled"]], key=lambda x: x["dt"])
 if future_f:
@@ -312,7 +328,8 @@ if future_f:
 
 # Separate Active and Canceled Flights
 active_flights = [pf for pf in processed_flights if not pf.get("is_canceled")]
-canceled_flights = [pf for pf in processed_flights if pf.get("is_canceled")]
+# 這裡改由 Memory Bank 撈取整天的取消航班
+canceled_flights = list(st.session_state.canceled_memory.values())
 
 # Sort Active Flights
 def active_s_key(p):
@@ -333,9 +350,8 @@ for i, pf in enumerate(active_flights):
 # 2. Render Canceled Section (At the Bottom)
 if canceled_flights:
     st.markdown("<hr style='margin: 40px 0 20px 0; border-color: #334155; opacity: 0.5;'>", unsafe_allow_html=True)
-    st.markdown("<h4 style='color: #F87171; margin-bottom: 16px;'>❌ Canceled Flights (Tracked Window)</h4>", unsafe_allow_html=True)
+    st.markdown("<h4 style='color: #F87171; margin-bottom: 16px;'>❌ Canceled Flights (Today)</h4>", unsafe_allow_html=True)
     
     offset_index = len(active_flights)
     for i, pf in enumerate(canceled_flights):
-        # Using offset to prevent modal ID collisions between active and canceled sections
         render_flight_card(pf, offset_index + i)
