@@ -7,7 +7,7 @@ import pytz
 # 設定頁面與手機直式螢幕最佳化
 st.set_page_config(page_title="BNE Flight Board", page_icon="✈️", layout="centered")
 
-# 隱藏 Streamlit 預設的頂部空白與選單，讓畫面更像 App，並加入圖片放大的 CSS
+# 隱藏 Streamlit 預設的頂部空白與選單，加入圖片放大的 CSS
 st.markdown("""
 <style>
     #MainMenu {visibility: hidden;}
@@ -17,15 +17,15 @@ st.markdown("""
     /* 點擊放大飛機照片的特效按鈕 */
     .avatar-btn {
         cursor: pointer; 
-        margin-right: 15px; 
+        margin-right: 18px; 
         flex-shrink: 0; 
         display: block; 
         transition: transform 0.2s ease, box-shadow 0.2s ease;
-        border-radius: 30px;
+        border-radius: 35px;
     }
     .avatar-btn:hover {
-        transform: scale(1.1); 
-        box-shadow: 0 0 12px rgba(255,255,255,0.2);
+        transform: scale(1.08); 
+        box-shadow: 0 0 15px rgba(255,255,255,0.3);
     }
 
     /* 純 CSS 圖片放大燈箱 (Lightbox) */
@@ -113,7 +113,7 @@ with col1:
     st.title("✈️ Arrivals")
 with col2:
     update_display = st.session_state.last_update_time.strftime('%H:%M:%S') if st.session_state.last_update_time else "Just Now"
-    st.markdown(f'<div style="font-size: 0.85em; color: #94A3B8; text-align: center; margin-bottom: 8px;">🕒 {update_display}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div style="font-size: 0.85em; color: #94A3B8; text-align: center; margin-bottom: 8px;">🕒 Last Updated: {update_display}</div>', unsafe_allow_html=True)
     if st.button("🔄 Refresh", use_container_width=True):
         fetch_flight_data.clear()
         st.rerun()
@@ -289,6 +289,7 @@ for t_start, t_end in gaps:
     gap_border = "#10B981" if is_active else "#475569"
     gap_color = "#A7F3D0" if is_active else "#94A3B8"
     
+    # 無縮排的 HTML
     gap_html = f"""<div style="background-color: {gap_bg}; border: 1px dashed {gap_border}; border-radius: 8px; padding: 12px; margin-bottom: 12px; text-align: center; color: {gap_color}; font-family: sans-serif; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
 {title_text} <span style="opacity: 0.7; font-weight: normal; margin-left: 8px;">({time_text})</span>
 </div>"""
@@ -313,25 +314,24 @@ for i, pf in enumerate(processed_flights):
         st.markdown(pf['html'], unsafe_allow_html=True)
         continue
         
-    # 動態產生燈箱 HTML
+    # 動態產生無縮排的燈箱 HTML
     if pf['image_url']:
         modal_id = f"modal_{i}"
-        image_element = f"""
-        <label for="{modal_id}" class="avatar-btn">
-            <img src="{pf['image_url']}" style="width: 60px; height: 60px; border-radius: 30px; object-fit: cover; border: 2px solid {pf['border_color']}; display: block;" />
-        </label>
-        <input type="checkbox" id="{modal_id}" class="img-zoom-chk" style="display:none;">
-        <div class="img-zoom-modal">
-            <label for="{modal_id}" class="img-zoom-close"></label>
-            <label for="{modal_id}" class="close-btn-text">&times;</label>
-            <img src="{pf['image_url']}" />
-        </div>
-        """
+        image_element = f"""<label for="{modal_id}" class="avatar-btn">
+<img src="{pf['image_url']}" style="width: 70px; height: 70px; border-radius: 35px; object-fit: cover; border: 2px solid {pf['border_color']}; display: block;" />
+</label>
+<input type="checkbox" id="{modal_id}" class="img-zoom-chk" style="display:none;">
+<div class="img-zoom-modal">
+<label for="{modal_id}" class="img-zoom-close"></label>
+<label for="{modal_id}" class="close-btn-text">&times;</label>
+<img src="{pf['image_url']}" />
+</div>"""
     else:
-        image_element = f'<div style="width: 60px; height: 60px; border-radius: 30px; background: #334155; display: flex; align-items: center; justify-content: center; margin-right: 15px; font-size: 1.5em; border: 2px solid {pf["border_color"]}; flex-shrink: 0;">✈️</div>'
-
+        image_element = f'<div style="width: 70px; height: 70px; border-radius: 35px; background: #334155; display: flex; align-items: center; justify-content: center; margin-right: 18px; font-size: 1.6em; border: 2px solid {pf["border_color"]}; flex-shrink: 0;">✈️</div>'
+        
     sch_str = f"Sch {pf['sch_display']} • " if pf['sch_display'] else ""
     
+    # 最堅固的 HTML 排版 (絕對無縮排)
     card_html = f"""<div style="background-color: {pf['bg_color']}; border-left: 6px solid {pf['border_color']}; border-radius: 8px; padding: 16px 20px; margin-bottom: 12px; display: flex; align-items: center; color: white; font-family: sans-serif; box-shadow: 0 4px 6px rgba(0,0,0,0.15);">
 {image_element}
 <div style="flex-grow: 1;">
