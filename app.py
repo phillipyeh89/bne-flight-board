@@ -11,9 +11,10 @@ import pytz
 AIRPORT_ICAO       = "YBBN"
 TIMEZONE           = "Australia/Brisbane"
 LOOKBACK_HOURS     = 1
-# 修正：LOOKBACK(1) + LOOKAHEAD(11) = 12 小時 (API 單次查詢上限)
-LOOKAHEAD_HOURS    = 11  
+LOOKAHEAD_HOURS    = 11 # 保持在 12 小時總量內，避免 400 錯誤
 RECENT_LANDED_MAX  = 60
+GAP_MIN_MINUTES    = 20
+GAP_DISPLAY_MIN    = 5
 IMAGE_WORKERS      = 10
 DOMESTIC_TERMINALS = ('D', 'DOM', 'D-ANC', 'GAT', 'TBA')
 SMALL_AIRCRAFT_FILTER = ('BEECH', 'FAIRCHILD', 'CESSNA', 'PIPER', 'PILATUS', 'KING AIR', 'METROLINER')
@@ -28,14 +29,13 @@ CITY_MAP = {
 
 # 專業版更新頻率
 UI_REFRESH_SEC     = 60   
-API_DATA_TTL_SEC   = 600  # 每 10 分鐘自動抓取一次最新資料
+API_DATA_TTL_SEC   = 600  # 10 分鐘更新一次
 STALE_DATA_THRESHOLD_MIN = 30 
 
 # ─────────────────────────────────────────────
 # Page Config & Typography
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
-
 st.markdown(f"""
 <meta http-equiv="refresh" content="{UI_REFRESH_SEC}">
 <style>
@@ -275,12 +275,35 @@ for f in flights:
         "border_color": bc, "status_color": sc, "status_text": st_txt, "bg_color": bg, "is_next_day": is_next_day
     })
 
-# 排序並渲染
+# ── Gap Detection 邏輯回歸 ──
+future_f = sorted([p for p in processed_flights if not p["is_landed"] and not p["is_canceled"]], key=lambda x: x["dt"])
+if future_f:
+    windows = [(now_aest, future_f[0]["dt"])]
+    for i in range(len(future_f)-1): windows.append((future_f[i]["dt"], future_f[i+1]["dt"]))
+    for t1, t2 in windows:
+        if t2 <= now_aest: continue
+        ds = max(t1, now_aest); g_min = int((t2 - ds).total_seconds() / 60)
+        if (t2 - t1).total_seconds() / 60 < GAP_MIN_MINUTES or g_min < GAP_DISPLAY_MIN: continue
+        act = t1 <= now_aest
+        tit = f"🟢 ACTIVE OFF-FLOOR ({format_hm(g_min)} left)" if act else f"🔄 {format_hm(g_min)} OFF-FLOOR WINDOW"
+        tm = f"{ds.strftime('%H:%M')} – {t2.strftime('%H:%M')}"
+        gb, gbo, gc = ("#064E3B", "#10B981", "#A7F3D0") if act else ("#0F172A", "#475569", "#94A3B8")
+        gap_h = f'<div style="background-color:{gb};border:1px dashed {gbo};border-radius:8px;padding:12px;margin-bottom:12px;text-align:center;color:{gc};font-family:sans-serif;font-weight:bold;box-shadow:0 2px 4px rgba(0,0,0,0.1);">{tit} <span style="opacity:0.7;font-weight:normal;margin-left:8px;">({tm})</span></div>'
+        processed_flights.append({"is_gap": True, "html": gap_h, "time_key": t1.timestamp() + 1})
+
+# ── 排序與渲染 (修正版) ──
 def s_key(p):
-    if p["is_canceled"]: return (2, -p["s_dt_val"].timestamp()) if p.get("is_archived_canceled") else (1, p["dt"].timestamp())
-    if p["is_landed"]: return (0, -p["dt"].timestamp()) if p["landed_mins"] <= RECENT_LANDED_MAX else (2, -p["dt"].timestamp())
+    if p.get("is_gap"): 
+        return (1, p["time_key"])
+    if p["is_canceled"]: 
+        return (2, -p["s_dt_val"].timestamp()) if p.get("is_archived_canceled") else (1, p["dt"].timestamp())
+    if p["is_landed"]: 
+        return (0, -p["dt"].timestamp()) if p["landed_mins"] <= RECENT_LANDED_MAX else (2, -p["dt"].timestamp())
     return (1, p["dt"].timestamp())
 
 processed_flights.sort(key=s_key)
 for i, pf in enumerate(processed_flights):
-    render_flight_card(pf, i)
+    if pf.get("is_gap"): 
+        st.markdown(pf["html"], unsafe_allow_html=True)
+    else: 
+        render_flight_card(pf, i)
