@@ -113,7 +113,6 @@ if not flights:
 
 processed_flights = []
 
-# === 智慧時間格式化工具：隱藏 00h ===
 def format_hm(total_minutes):
     h = total_minutes // 60
     m = total_minutes % 60
@@ -139,6 +138,11 @@ for f in flights:
     elif iata: origin = iata
     elif icao: origin = icao
     else: origin = "Unknown"
+    
+    # === 抓取機型 (Aircraft Type) ===
+    aircraft_node = f.get('aircraft') or {}
+    aircraft_model = aircraft_node.get('model', '')
+    aircraft_display = f'<div style="font-size: 0.85em; opacity: 0.6; margin-top: 4px; font-weight: 500;">✈️ {aircraft_model}</div>' if aircraft_model else ''
     
     time_candidates = []
     scheduled_time_raw = None
@@ -199,7 +203,6 @@ for f in flights:
     gate = arr_node.get('gate', 'TBA')
     terminal = str(arr_node.get('terminal', '')).strip().upper()
     
-    # === 終極國內線過濾器：航廈為 D/DOM，或者國家代碼為 au (澳洲) ===
     if terminal == 'D' or terminal == 'DOM' or country_code == 'au':
         continue
         
@@ -208,13 +211,19 @@ for f in flights:
     
     is_landed = status in ['landed', 'arrived'] or time_diff_minutes <= 0
 
-    if not is_landed and scheduled_time_raw:
+    if scheduled_time_raw:
         try:
             s_dt_check = pd.to_datetime(scheduled_time_raw).to_pydatetime()
             if s_dt_check.tzinfo is None: s_dt_check = aest.localize(s_dt_check)
             else: s_dt_check = s_dt_check.astimezone(aest)
             
-            if (now_aest - s_dt_check).total_seconds() > 12 * 3600:
+            diff_hours = (dt - s_dt_check).total_seconds() / 3600
+            
+            if diff_hours < -2:
+                continue
+            if diff_hours > 12:
+                continue
+            if not is_landed and (now_aest - s_dt_check).total_seconds() > 8 * 3600:
                 continue  
         except:
             pass
@@ -251,6 +260,7 @@ for f in flights:
         'num': flight_num,
         'origin': origin,
         'sch_display': sch_display,
+        'aircraft_display': aircraft_display,
         'gate': gate,
         'display': time_display,
         'is_landed': is_landed,
@@ -280,6 +290,7 @@ for pf in processed_flights:
 <div style="display: flex; justify-content: space-between; align-items: flex-end;">
 <div>
 <div style="font-size: 1.3em; opacity: 0.95;">{pf['num']} • {pf['origin']} {pf['sch_display']}</div>
+{pf['aircraft_display']}
 <div class="time-text">{pf['display']}</div>
 </div>
 <div style="text-align: right;">
