@@ -6,10 +6,12 @@ from concurrent.futures import ThreadPoolExecutor
 import pytz
 
 # ─────────────────────────────────────────────
-# Constants (BNE Operations - 24H Vision)
+# Constants (BNE Operations - Pro Plan Stable)
 # ─────────────────────────────────────────────
 AIRPORT_ICAO       = "YBBN"
 TIMEZONE           = "Australia/Brisbane"
+LOOKBACK_HOURS     = 1
+LOOKAHEAD_HOURS    = 11 
 RECENT_LANDED_MAX  = 60
 GAP_MIN_MINUTES    = 20
 GAP_DISPLAY_MIN    = 5
@@ -26,9 +28,8 @@ CITY_MAP = {
 }
 
 UI_REFRESH_SEC     = 60   
-# 為了支撐雙重查詢，更新頻率改為 15 分鐘 (900秒)，確保一個月花費 5760 units
-API_DATA_TTL_SEC   = 900  
-STALE_DATA_THRESHOLD_MIN = 45 
+API_DATA_TTL_SEC   = 600  
+STALE_DATA_THRESHOLD_MIN = 30 
 
 # ─────────────────────────────────────────────
 # Page Config & Typography
@@ -79,7 +80,7 @@ if "api_last_hit" not in st.session_state:
     st.session_state.api_last_hit = None
 
 # ─────────────────────────────────────────────
-# Data Fetchers (Double Fetch Strategy)
+# Data Fetchers
 # ─────────────────────────────────────────────
 @st.cache_data(ttl=86400, show_spinner=False)
 def fetch_aircraft_image(reg: str) -> str:
@@ -98,36 +99,17 @@ def prefetch_images(flights: list):
         list(ex.map(fetch_aircraft_image, regs))
 
 @st.cache_data(ttl=API_DATA_TTL_SEC)
-def fetch_24h_flight_data(now_dt) -> list:
-    """連續呼叫兩次 API，突破 12 小時限制，取得 24 小時資料"""
-    headers = {"X-RapidAPI-Key": st.secrets["X_RAPIDAPI_KEY"], "X-RapidAPI-Host": "aerodatabox.p.rapidapi.com"}
+def fetch_flight_data(from_time: str, to_time: str) -> list:
+    url = f"https://aerodatabox.p.rapidapi.com/flights/airports/icao/{AIRPORT_ICAO}/{from_time}/{to_time}"
     params = {"direction": "Arrival", "withCancelled": "true", "withCodeshared": "false"}
-    
-    # 第一段：現在-1小時 ~ 未來11小時
-    t1_start = (now_dt - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M")
-    t1_end = (now_dt + timedelta(hours=11)).strftime("%Y-%m-%dT%H:%M")
-    url1 = f"https://aerodatabox.p.rapidapi.com/flights/airports/icao/{AIRPORT_ICAO}/{t1_start}/{t1_end}"
-    
-    # 第二段：未來11小時 ~ 未來23小時
-    t2_start = t1_end
-    t2_end = (now_dt + timedelta(hours=23)).strftime("%Y-%m-%dT%H:%M")
-    url2 = f"https://aerodatabox.p.rapidapi.com/flights/airports/icao/{AIRPORT_ICAO}/{t2_start}/{t2_end}"
-    
-    all_flights = []
+    headers = {"X-RapidAPI-Key": st.secrets["X_RAPIDAPI_KEY"], "X-RapidAPI-Host": "aerodatabox.p.rapidapi.com"}
     try:
-        r1 = requests.get(url1, headers=headers, params=params, timeout=10)
-        r1.raise_for_status()
-        all_flights.extend(r1.json().get("arrivals", []))
-        
-        r2 = requests.get(url2, headers=headers, params=params, timeout=10)
-        r2.raise_for_status()
-        all_flights.extend(r2.json().get("arrivals", []))
-        
+        r = requests.get(url, headers=headers, params=params, timeout=10)
+        r.raise_for_status()
         st.session_state.api_last_hit = datetime.now(pytz.timezone(TIMEZONE))
+        return r.json().get("arrivals", [])
     except Exception as e:
-        st.error(f"API Request Failed: {e}")
-        
-    return all_flights
+        st.error(f"API Request Failed: {e}"); return []
 
 # ─────────────────────────────────────────────
 # Logic Helpers
@@ -195,6 +177,7 @@ def render_flight_card(pf: dict, index: int):
 <img src="{pf['image_url']}" />
 </div>"""
     else:
+        # 找不到圖片時的預設圖示也縮小到 56px
         image_element = f'<div style="width:56px;height:56px;border-radius:28px;background:#334155;display:flex;align-items:center;justify-content:center;margin-right:14px;font-size:1.4em;border:2px solid {border_col};flex-shrink:0;box-sizing:border-box;">✈️</div>'
 
     sch_str = f'<span class="mono">Sch {pf["sch_display"]}</span> • ' if pf["sch_display"] else ""
@@ -209,6 +192,10 @@ def render_flight_card(pf: dict, index: int):
 
     origin_display = f"{pf['origin']} <span class='mono' style='font-size:0.85em; opacity:0.8;'>({pf['iata']})</span>" if pf['iata'] else pf['origin']
 
+    # 手機版排版核心修正：
+    # 1. flex-grow:1 加上 min-width:0 防止被內容撐開
+    # 2. ac_text 加上 white-space:nowrap 確保飛機機型不會強制換行折斷
+    # 3. title 區塊加上 flex-wrap 允許在極端窄螢幕下整齊換行
     card_html = f"""<div style="background-color:{pf['bg_color']};border-left:6px solid {border_col};border-radius:8px;padding:12px 16px;margin-bottom:12px;display:flex;align-items:center;color:white;box-shadow:0 4px 6px rgba(0,0,0,0.15);">
 {image_element}
 <div style="flex-grow:1; min-width:0;">
@@ -230,6 +217,8 @@ def render_flight_card(pf: dict, index: int):
 # Main Process
 # ─────────────────────────────────────────────
 aest = pytz.timezone(TIMEZONE); now_aest = datetime.now(aest)
+from_t = (now_aest - timedelta(hours=LOOKBACK_HOURS)).strftime("%Y-%m-%dT%H:%M")
+to_t = (now_aest + timedelta(hours=LOOKAHEAD_HOURS)).strftime("%Y-%m-%dT%H:%M")
 
 col1, col2 = st.columns([2, 1])
 with col1: st.title("✈️ Arrivals")
@@ -242,16 +231,14 @@ with col2:
         api_html = f'API: {api_t.strftime("%H:%M") if api_t else "--:--"}'
     st.markdown(f'<div style="font-size:0.75em;color:#64748B;text-align:center;">{api_html}</div>', unsafe_allow_html=True)
 
-flights = fetch_24h_flight_data(now_aest)
+flights = fetch_flight_data(from_t, to_t)
 if not flights:
     st.info("No data available. Re-checking..."); st.stop()
 
-# 過濾重複航班 (因為合併兩次 API 結果，邊界航班可能會重複)
-unique_flights = {f.get("number"): f for f in flights}.values()
-prefetch_images(list(unique_flights))
+prefetch_images(flights)
 processed_flights = []
 
-for f in unique_flights:
+for f in flights:
     flight_num, status = f.get("number", "N/A"), f.get("status", "").lower()
     dep, mv = f.get("departure", {}), f.get("movement", {})
     ai = dep.get("airport") or mv.get("airport") or {}
@@ -273,7 +260,7 @@ for f in unique_flights:
     sch_disp = s_dt.strftime("%H:%M") if sch_raw else ""
     
     delay_hours = (best_dt - s_dt).total_seconds() / 3600 if s_dt else 0
-    if delay_hours > 24: continue # 放寬極端延誤的過濾，因為視野變大了
+    if delay_hours > 12: continue
 
     t_diff = int((best_dt - now_aest).total_seconds() / 60)
     is_can = status in ("canceled", "cancelled")
@@ -307,6 +294,8 @@ if future_f:
         tit = f"🟢 ACTIVE OFF-FLOOR ({format_hm(g_min)} left)" if act else f"🔄 {format_hm(g_min)} OFF-FLOOR WINDOW"
         tm = f"{ds.strftime('%H:%M')} – {t2.strftime('%H:%M')}"
         gb, gbo, gc = ("#064E3B", "#10B981", "#A7F3D0") if act else ("#0F172A", "#475569", "#94A3B8")
+        
+        # Gap 橫幅的手機版微調
         gap_h = f'<div style="background-color:{gb};border:1px dashed {gbo};border-radius:8px;padding:10px;margin-bottom:12px;text-align:center;color:{gc};font-family:sans-serif;font-weight:bold;box-shadow:0 2px 4px rgba(0,0,0,0.1);font-size:0.95em;">{tit} <span style="opacity:0.7;font-weight:normal;margin-left:6px;display:inline-block;">({tm})</span></div>'
         processed_flights.append({"is_gap": True, "html": gap_h, "time_key": t1.timestamp() + 1})
 
