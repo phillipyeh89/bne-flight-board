@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 import pandas as pd
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta
 import pytz
 
 # 設定頁面與手機直式螢幕最佳化
@@ -278,37 +278,31 @@ for f in flights:
         'dt': dt
     })
 
-# === 離櫃空檔偵測系統 (Off-Floor Window Detector) ===
-shift_date = now_aest.date() if now_aest.hour < 12 else now_aest.date() + timedelta(days=1)
-shift_start = aest.localize(datetime.combine(shift_date, time(4, 30)))
-shift_end = aest.localize(datetime.combine(shift_date, time(12, 0)))
-
-# 安全邊界：防止 API 抓不到 12 點的資料而產生假空檔
-api_end = now_aest + timedelta(hours=11)
-effective_end = min(shift_end, api_end)
-
-# 篩選出落在班表內的航班時間
-shift_flights = [pf['dt'] for pf in processed_flights if not pf['is_gap'] and shift_start <= pf['dt'] <= effective_end]
-shift_flights.sort()
+# === 離櫃空檔偵測系統 (真實相鄰航班計算) ===
+# 篩選出所有「未來尚未降落」的航班
+future_flights = [pf for pf in processed_flights if not pf['is_landed']]
+future_flights.sort(key=lambda x: x['dt'])
 
 gaps = []
 
-if not shift_flights:
-    if (effective_end - shift_start).total_seconds() / 60 >= 20:
-        gaps.append((shift_start, effective_end))
-else:
-    # 偵測：從上班 (04:30) 到第一班飛機的空檔
-    if (shift_flights[0] - shift_start).total_seconds() / 60 >= 20:
-        gaps.append((shift_start, shift_flights[0]))
+if future_flights:
+    # 1. 偵測：當下時刻 (或最後一班降落後) 到「下一班未來航班」的真實空檔
+    landed_flights = [pf for pf in processed_flights if pf['is_landed']]
+    last_landed_time = max([pf['dt'] for pf in landed_flights]) if landed_flights else now_aest
+    
+    # 確保空檔起點不會早於現在時間
+    start_time = max(last_landed_time, now_aest)
+    first_future = future_flights[0]['dt']
+    
+    if (first_future - start_time).total_seconds() / 60 >= 20:
+        gaps.append((start_time, first_future))
         
-    # 偵測：飛機與飛機之間的空檔
-    for i in range(1, len(shift_flights)):
-        if (shift_flights[i] - shift_flights[i-1]).total_seconds() / 60 >= 20:
-            gaps.append((shift_flights[i-1], shift_flights[i]))
-            
-    # 偵測：最後一班飛機到下班 (12:00) 的空檔
-    if (effective_end - shift_flights[-1]).total_seconds() / 60 >= 20:
-        gaps.append((shift_flights[-1], effective_end))
+    # 2. 偵測：未來所有航班與航班之間的真實空檔
+    for i in range(len(future_flights) - 1):
+        t1 = future_flights[i]['dt']
+        t2 = future_flights[i+1]['dt']
+        if (t2 - t1).total_seconds() / 60 >= 20:
+            gaps.append((t1, t2))
 
 # 將偵測到的空檔注入到列表
 for t_start, t_end in gaps:
@@ -321,8 +315,9 @@ for t_start, t_end in gaps:
     if gap_mins < 5: continue # 剩餘不到 5 分鐘忽略
     
     is_active = t_start <= now_aest
-    # 調整為 Off-Floor 相關的文字描述
-    status_text = "🟢 ACTIVE OFF-FLOOR TIME" if is_active else f"🔄 {gap_mins}m OFF-FLOOR WINDOW (Break / Duties)"
+    gap_display = format_hm(gap_mins)
+    
+    status_text = "🟢 ACTIVE OFF-FLOOR TIME" if is_active else f"🔄 {gap_display} OFF-FLOOR WINDOW (Break / Duties)"
     css_ext = "" if is_active else "future"
     
     gap_html = f'''
@@ -334,10 +329,9 @@ for t_start, t_end in gaps:
     processed_flights.append({
         'is_gap': True,
         'html': gap_html,
-        # 將空檔強制排在尚未降落的區域，緊跟在上一班飛機後面
+        # 將空檔強制排在上一班飛機後面 (時間戳記加1秒)
         'time_key': t_start.timestamp() + 1 
     })
-
 
 # === 排序與渲染 ===
 def custom_sort(pf):
