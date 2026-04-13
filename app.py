@@ -1,23 +1,23 @@
 import streamlit as st
 import requests
 import pandas as pd
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 import pytz
 
 # ─────────────────────────────────────────────
-# Constants (BNE Operations - Optimized for Pro Plan)
+# Constants (BNE Operations - Pro Plan Stable)
 # ─────────────────────────────────────────────
 AIRPORT_ICAO       = "YBBN"
 TIMEZONE           = "Australia/Brisbane"
 LOOKBACK_HOURS     = 1
-LOOKAHEAD_HOURS    = 18  # Pro 額度充足，視野拉長到 18 小時
+# 修正：LOOKBACK(1) + LOOKAHEAD(11) = 12 小時 (API 單次查詢上限)
+LOOKAHEAD_HOURS    = 11  
 RECENT_LANDED_MAX  = 60
 IMAGE_WORKERS      = 10
 DOMESTIC_TERMINALS = ('D', 'DOM', 'D-ANC', 'GAT', 'TBA')
 SMALL_AIRCRAFT_FILTER = ('BEECH', 'FAIRCHILD', 'CESSNA', 'PIPER', 'PILATUS', 'KING AIR', 'METROLINER')
 
-# 城市別名地圖
 CITY_MAP = {
     "Lapu-Lapu City": "Cebu",
     "Denpasar-Bali Island": "Bali",
@@ -26,38 +26,33 @@ CITY_MAP = {
     "Guangzhou Baiyun": "Guangzhou"
 }
 
-# 專業版頻率設定 (6,000 units/mo)
-UI_REFRESH_SEC     = 60   # 畫面每分鐘跳動倒數
-API_DATA_TTL_SEC   = 600  # API 每 10 分鐘抓一次 (非常精準且安全)
-STALE_DATA_THRESHOLD_MIN = 30 # 資料超過 30 分鐘沒更新就警報
+# 專業版更新頻率
+UI_REFRESH_SEC     = 60   
+API_DATA_TTL_SEC   = 600  # 每 10 分鐘自動抓取一次最新資料
+STALE_DATA_THRESHOLD_MIN = 30 
 
 # ─────────────────────────────────────────────
 # Page Config & Typography
 # ─────────────────────────────────────────────
-st.set_page_config(page_title="BNE Pro Board", page_icon="✈️", layout="centered")
+st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 
 st.markdown(f"""
 <meta http-equiv="refresh" content="{UI_REFRESH_SEC}">
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=JetBrains+Mono:wght@600&display=swap');
-    
     #MainMenu {{visibility: hidden;}}
     header {{visibility: hidden;}}
     .block-container {{padding-top: 2rem; font-family: 'Inter', sans-serif;}}
-    
     div, span, label {{ font-family: 'Inter', sans-serif; }}
     .mono {{ font-family: 'JetBrains Mono', monospace; letter-spacing: -0.5px; }}
-    
     @keyframes blink {{ 50% {{ opacity: 0; }} }}
     .stale-warning {{ color: #EF4444 !important; font-weight: 700 !important; animation: blink 1.2s linear infinite; }}
-
     .avatar-btn {{
         cursor: pointer; margin-right: 18px; flex-shrink: 0;
         display: block; transition: transform 0.2s ease, box-shadow 0.2s ease;
         border-radius: 35px;
     }}
     .avatar-btn:hover {{ transform: scale(1.08); box-shadow: 0 0 15px rgba(255,255,255,0.3); }}
-    
     .img-zoom-chk:checked + .img-zoom-modal {{ display: flex; }}
     .img-zoom-modal {{
         display: none; position: fixed; top:0; left:0; right:0; bottom:0;
@@ -189,7 +184,6 @@ def render_flight_card(pf: dict, index: int):
     sch_str = f'<span class="mono">Sch {pf["sch_display"]}</span> • ' if pf["sch_display"] else ""
     next_day_tag = ' <small style="opacity:0.6;">(Next Day)</small>' if pf["is_next_day"] else ''
     
-    # 時間標籤顏色邏輯 (Sky Blue for Act/Landed, White for Est)
     if pf["is_landed"] or pf["time_type"] == "actual":
         act_html = f'<span class="mono" style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 6px;border-radius:4px;border:1px solid rgba(14,165,233,0.3);">Act {pf["actual_time"]}</span>{next_day_tag}'
     elif pf["time_type"] == "revised":
@@ -234,7 +228,7 @@ with col2:
 
 flights = fetch_flight_data(from_t, to_t)
 if not flights:
-    st.info("Refreshing data..."); st.stop()
+    st.info("No data available. Re-checking..."); st.stop()
 
 prefetch_images(flights)
 processed_flights = []
@@ -281,30 +275,12 @@ for f in flights:
         "border_color": bc, "status_color": sc, "status_text": st_txt, "bg_color": bg, "is_next_day": is_next_day
     })
 
-# ── Gap Detection ──
-future_f = sorted([p for p in processed_flights if not p["is_landed"] and not p["is_canceled"]], key=lambda x: x["dt"])
-if future_f:
-    windows = [(now_aest, future_f[0]["dt"])]
-    for i in range(len(future_f)-1): windows.append((future_f[i]["dt"], future_f[i+1]["dt"]))
-    for t1, t2 in windows:
-        if t2 <= now_aest: continue
-        ds = max(t1, now_aest); g_min = int((t2 - ds).total_seconds() / 60)
-        if (t2 - t1).total_seconds() / 60 < GAP_MIN_MINUTES or g_min < GAP_DISPLAY_MIN: continue
-        act = t1 <= now_aest
-        tit = f"🟢 ACTIVE OFF-FLOOR ({format_hm(g_min)} left)" if act else f"🔄 {format_hm(g_min)} OFF-FLOOR WINDOW"
-        tm = f"{ds.strftime('%H:%M')} – {t2.strftime('%H:%M')}"
-        gb, gbo, gc = ("#064E3B", "#10B981", "#A7F3D0") if act else ("#0F172A", "#475569", "#94A3B8")
-        gap_h = f'<div style="background-color:{gb};border:1px dashed {gbo};border-radius:8px;padding:12px;margin-bottom:12px;text-align:center;color:{gc};font-family:sans-serif;font-weight:bold;box-shadow:0 2px 4px rgba(0,0,0,0.1);">{tit} <span style="opacity:0.7;font-weight:normal;margin-left:8px;">({tm})</span></div>'
-        processed_flights.append({"is_gap": True, "html": gap_h, "time_key": t1.timestamp() + 1})
-
-# ── Final Sort & Render ──
+# 排序並渲染
 def s_key(p):
-    if p.get("is_gap"): return (1, p["time_key"])
     if p["is_canceled"]: return (2, -p["s_dt_val"].timestamp()) if p.get("is_archived_canceled") else (1, p["dt"].timestamp())
     if p["is_landed"]: return (0, -p["dt"].timestamp()) if p["landed_mins"] <= RECENT_LANDED_MAX else (2, -p["dt"].timestamp())
     return (1, p["dt"].timestamp())
 
 processed_flights.sort(key=s_key)
 for i, pf in enumerate(processed_flights):
-    if pf.get("is_gap"): st.markdown(pf["html"], unsafe_allow_html=True)
-    else: render_flight_card(pf, i)
+    render_flight_card(pf, i)
