@@ -23,7 +23,7 @@ IMAGE_WORKERS      = 8
 DOMESTIC_TERMINALS = ('D', 'DOM', 'D-ANC', 'GAT', 'TBA')
 SMALL_AIRCRAFT_FILTER = ('BEECH', 'FAIRCHILD', 'CESSNA', 'PIPER', 'PILATUS', 'KING AIR', 'METROLINER')
 
-# 城市別名對照表：將 API 原始名稱轉換為更直覺的名稱
+# 城市別名對照表
 CITY_MAP = {
     "Lapu-Lapu City": "Cebu",
     "Denpasar-Bali Island": "Bali",
@@ -191,10 +191,13 @@ def render_flight_card(pf: dict, index: int):
             act_html = f'<span class="mono" style="color:#F8FAFC;font-weight:bold;background:rgba(248,250,252,0.1);padding:2px 6px;border-radius:4px;border:1px solid rgba(248,250,252,0.3);">Est {pf["actual_time"]}</span>{next_day_tag}'
         else: act_html = f'{next_day_tag}'
 
+    # 組合城市名與 IATA Code
+    origin_display = f"{pf['origin']} <span class='mono' style='font-size:0.85em; opacity:0.8;'>({pf['iata']})</span>" if pf['iata'] else pf['origin']
+
     card_html = f"""<div style="background-color:{pf['bg_color']};border-left:6px solid {border_col};border-radius:8px;padding:16px 20px;margin-bottom:12px;display:flex;align-items:center;color:white;box-shadow:0 4px 6px rgba(0,0,0,0.15);">
 {image_element}
 <div style="flex-grow:1;">
-<div style="font-size:1.4em;font-weight:700;margin-bottom:4px;">{pf['num']}<span style="font-size:0.75em;color:#94A3B8;font-weight:400;margin-left:6px;">{pf['origin']}</span></div>
+<div style="font-size:1.4em;font-weight:700;margin-bottom:4px;">{pf['num']}<span style="font-size:0.75em;color:#94A3B8;font-weight:400;margin-left:8px;">{origin_display}</span></div>
 <div style="font-size:0.85em;color:#CBD5E1;margin-bottom:6px;">{pf['ac_text']}</div>
 <div style="font-size:0.85em;color:#CBD5E1;">{sch_str}{act_html}</div>
 </div>
@@ -228,14 +231,16 @@ prefetch_images(flights)
 processed_flights = []
 
 for f in flights:
-    # --- 變數初始化 ---
     flight_num, status = f.get("number", "N/A"), f.get("status", "").lower()
     dep, mv = f.get("departure", {}), f.get("movement", {})
     ai = dep.get("airport") or mv.get("airport") or {}
     
-    # 城市名與別名處理
+    # 城市名處理
     raw_city = ai.get("municipalityName") or ai.get("name") or ai.get("iata") or "Unknown"
-    city = CITY_MAP.get(raw_city, raw_city) # 如果在對照表內就換掉，沒有就用原名
+    city = CITY_MAP.get(raw_city, raw_city)
+    
+    # 機場代碼 (IATA)
+    iata_code = ai.get("iata", "")
     
     country = str(ai.get("countryCode", "")).strip().lower()
     arr_n = f.get("arrival") or f.get("movement") or {}
@@ -266,11 +271,11 @@ for f in flights:
     img_url = fetch_aircraft_image(ac_r)
 
     processed_flights.append({
-        "is_gap": False, "num": flight_num, "origin": city, "sch_display": sch_display_str, "ac_text": ac_text,
-        "gate": gate, "actual_time": best_dt.strftime("%H:%M"), "is_landed": is_lan, "is_canceled": is_can,
-        "is_archived_canceled": is_arch_can, "landed_mins": l_min, "dt": best_dt, "s_dt_val": s_dt,
-        "time_type": t_type, "image_url": img_url, "border_color": bc, "status_color": sc,
-        "status_text": st_txt, "bg_color": bg, "is_next_day": is_next_day
+        "is_gap": False, "num": flight_num, "origin": city, "iata": iata_code, "sch_display": sch_display_str, 
+        "ac_text": ac_text, "gate": gate, "actual_time": best_dt.strftime("%H:%M"), "is_landed": is_lan, 
+        "is_canceled": is_can, "is_archived_canceled": is_arch_can, "landed_mins": l_min, "dt": best_dt, 
+        "s_dt_val": s_dt, "time_type": t_type, "image_url": img_url, "border_color": bc, 
+        "status_color": sc, "status_text": st_txt, "bg_color": bg, "is_next_day": is_next_day
     })
 
 # ── Gap Detection ──
