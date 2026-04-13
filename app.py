@@ -41,16 +41,16 @@ st.markdown(f"""
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=JetBrains+Mono:wght@600&display=swap');
     #MainMenu {{visibility: hidden;}}
     header {{visibility: hidden;}}
-    .block-container {{padding-top: 2rem; font-family: 'Inter', sans-serif;}}
+    .block-container {{padding-top: 1.5rem; font-family: 'Inter', sans-serif;}}
     div, span, label {{ font-family: 'Inter', sans-serif; }}
     .mono {{ font-family: 'JetBrains Mono', monospace; letter-spacing: -0.5px; }}
     @keyframes blink {{ 50% {{ opacity: 0; }} }}
     .stale-warning {{ color: #EF4444 !important; font-weight: 700 !important; animation: blink 1.2s linear infinite; }}
     
     .avatar-btn {{
-        cursor: pointer; margin-right: 18px; flex-shrink: 0;
+        cursor: pointer; margin-right: 14px; flex-shrink: 0;
         display: block; transition: transform 0.2s ease, box-shadow 0.2s ease;
-        border-radius: 35px; box-sizing: border-box;
+        border-radius: 28px; box-sizing: border-box;
     }}
     .avatar-btn:hover {{ transform: scale(1.08); box-shadow: 0 0 15px rgba(255,255,255,0.3); }}
     
@@ -168,7 +168,7 @@ def render_flight_card(pf: dict, index: int):
     if img_url:
         mid = f"modal_{index}"
         image_element = f"""<label for="{mid}" class="avatar-btn">
-<img src="{img_url}" style="width:70px;height:70px;border-radius:35px;object-fit:cover;border:2px solid {border_col};display:block;" />
+<img src="{img_url}" style="width:56px;height:56px;border-radius:28px;object-fit:cover;border:2px solid {border_col};display:block;" />
 </label>
 <input type="checkbox" id="{mid}" class="img-zoom-chk" style="display:none;">
 <div class="img-zoom-modal">
@@ -177,7 +177,8 @@ def render_flight_card(pf: dict, index: int):
 <img src="{pf['image_url']}" />
 </div>"""
     else:
-        image_element = f'<div style="width:70px;height:70px;border-radius:35px;background:#334155;display:flex;align-items:center;justify-content:center;margin-right:18px;font-size:1.6em;border:2px solid {border_col};flex-shrink:0;box-sizing:border-box;">✈️</div>'
+        # 找不到圖片時的預設圖示也縮小到 56px
+        image_element = f'<div style="width:56px;height:56px;border-radius:28px;background:#334155;display:flex;align-items:center;justify-content:center;margin-right:14px;font-size:1.4em;border:2px solid {border_col};flex-shrink:0;box-sizing:border-box;">✈️</div>'
 
     sch_str = f'<span class="mono">Sch {pf["sch_display"]}</span> • ' if pf["sch_display"] else ""
     next_day_tag = ' <small style="opacity:0.6;">(Next Day)</small>' if pf["is_next_day"] else ''
@@ -191,17 +192,23 @@ def render_flight_card(pf: dict, index: int):
 
     origin_display = f"{pf['origin']} <span class='mono' style='font-size:0.85em; opacity:0.8;'>({pf['iata']})</span>" if pf['iata'] else pf['origin']
 
-    card_html = f"""<div style="background-color:{pf['bg_color']};border-left:6px solid {border_col};border-radius:8px;padding:16px 20px;margin-bottom:12px;display:flex;align-items:center;color:white;box-shadow:0 4px 6px rgba(0,0,0,0.15);">
+    # 手機版排版核心修正：
+    # 1. flex-grow:1 加上 min-width:0 防止被內容撐開
+    # 2. ac_text 加上 white-space:nowrap 確保飛機機型不會強制換行折斷
+    # 3. title 區塊加上 flex-wrap 允許在極端窄螢幕下整齊換行
+    card_html = f"""<div style="background-color:{pf['bg_color']};border-left:6px solid {border_col};border-radius:8px;padding:12px 16px;margin-bottom:12px;display:flex;align-items:center;color:white;box-shadow:0 4px 6px rgba(0,0,0,0.15);">
 {image_element}
-<div style="flex-grow:1;">
-<div style="font-size:1.4em;font-weight:700;margin-bottom:4px;">{pf['num']}<span style="font-size:0.75em;color:#94A3B8;font-weight:400;margin-left:8px;">{origin_display}</span></div>
-<div style="font-size:0.85em;color:#CBD5E1;margin-bottom:6px;">{pf['ac_text']}</div>
-<div style="font-size:0.85em;color:#CBD5E1;">{sch_str}{act_html}</div>
+<div style="flex-grow:1; min-width:0;">
+<div style="font-size:1.3em;font-weight:700;margin-bottom:2px;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px;">
+<span>{pf['num']}</span><span style="font-size:0.7em;color:#94A3B8;font-weight:400;">{origin_display}</span>
 </div>
-<div style="text-align:right;min-width:110px;">
-<div style="font-size:0.8em;color:#94A3B8;text-transform:uppercase;font-weight:700;letter-spacing:0.05em;">Gate</div>
-<div class="mono" style="font-size:2.6em;font-weight:700;line-height:1;margin-top:4px;">{pf['gate']}</div>
-<div style="font-size:1.05em;font-weight:700;color:{pf['status_color']};margin-top:6px;">{pf['status_text']}</div>
+<div style="font-size:0.8em;color:#CBD5E1;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{pf['ac_text']}</div>
+<div style="font-size:0.8em;color:#CBD5E1;">{sch_str}{act_html}</div>
+</div>
+<div style="text-align:right;flex-shrink:0;margin-left:10px;">
+<div style="font-size:0.7em;color:#94A3B8;text-transform:uppercase;font-weight:700;letter-spacing:0.05em;">Gate</div>
+<div class="mono" style="font-size:2.2em;font-weight:700;line-height:1;margin-top:2px;">{pf['gate']}</div>
+<div style="font-size:0.9em;font-weight:700;color:{pf['status_color']};margin-top:4px;">{pf['status_text']}</div>
 </div>
 </div>"""
     st.markdown(card_html, unsafe_allow_html=True)
@@ -252,7 +259,6 @@ for f in flights:
     s_dt = _parse_local_dt(sch_raw, aest) or best_dt
     sch_disp = s_dt.strftime("%H:%M") if sch_raw else ""
     
-    # [修正安全鎖]：確保 s_dt 存在才計算延誤，避免 TypeError
     delay_hours = (best_dt - s_dt).total_seconds() / 3600 if s_dt else 0
     if delay_hours > 12: continue
 
@@ -261,7 +267,6 @@ for f in flights:
     is_lan = (status in ("landed", "arrived") or t_diff <= 0) and not is_can
     l_min, m_left = max(0, -t_diff) if is_lan else 0, max(0, t_diff) if not is_lan else 0
     
-    # [修正安全鎖]：確保 s_dt 存在才計算歸檔，避免 TypeError
     is_arch_can = is_can and bool(s_dt) and (now_aest - s_dt).total_seconds() / 60 > 15
     is_next_day = best_dt.date() > now_aest.date()
     
@@ -289,7 +294,9 @@ if future_f:
         tit = f"🟢 ACTIVE OFF-FLOOR ({format_hm(g_min)} left)" if act else f"🔄 {format_hm(g_min)} OFF-FLOOR WINDOW"
         tm = f"{ds.strftime('%H:%M')} – {t2.strftime('%H:%M')}"
         gb, gbo, gc = ("#064E3B", "#10B981", "#A7F3D0") if act else ("#0F172A", "#475569", "#94A3B8")
-        gap_h = f'<div style="background-color:{gb};border:1px dashed {gbo};border-radius:8px;padding:12px;margin-bottom:12px;text-align:center;color:{gc};font-family:sans-serif;font-weight:bold;box-shadow:0 2px 4px rgba(0,0,0,0.1);">{tit} <span style="opacity:0.7;font-weight:normal;margin-left:8px;">({tm})</span></div>'
+        
+        # Gap 橫幅的手機版微調
+        gap_h = f'<div style="background-color:{gb};border:1px dashed {gbo};border-radius:8px;padding:10px;margin-bottom:12px;text-align:center;color:{gc};font-family:sans-serif;font-weight:bold;box-shadow:0 2px 4px rgba(0,0,0,0.1);font-size:0.95em;">{tit} <span style="opacity:0.7;font-weight:normal;margin-left:6px;display:inline-block;">({tm})</span></div>'
         processed_flights.append({"is_gap": True, "html": gap_h, "time_key": t1.timestamp() + 1})
 
 # ── Sort & Render ──
