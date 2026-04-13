@@ -19,39 +19,34 @@ IMMINENT_MINUTES   = 25
 SOON_MINUTES       = 60
 OLD_FLIGHT_HOURS   = 8
 IMAGE_WORKERS      = 8
-DOMESTIC_TERMINALS = ('D', 'DOM')
 
-# 網頁每 60 秒刷新一次讓數字跳動；API 每 20 分鐘更新一次保護額度
+# 擴大國內線與無效航廈的判定
+DOMESTIC_TERMINALS = ('D', 'DOM', 'D-ANC', 'GAT', 'TBA')
+# 排除不可能出現在國際線的小型機型關鍵字
+SMALL_AIRCRAFT_FILTER = ('BEECH', 'FAIRCHILD', 'CESSNA', 'PIPER', 'PILATUS', 'KING AIR', 'METROLINER')
+
 UI_REFRESH_SEC     = 60 
 API_DATA_TTL_SEC   = 1200 
 
 # ─────────────────────────────────────────────
-# Page Config & Professional UI Design
+# Page Config & Universal CSS
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Flight Board", page_icon="✈️", layout="centered")
-
 st.markdown(f"""
 <meta http-equiv="refresh" content="{UI_REFRESH_SEC}">
 <style>
-    /* 引入專業字體：Inter 用於介面，JetBrains Mono 用於數據 */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=JetBrains+Mono:wght@600&display=swap');
-
     #MainMenu {{visibility: hidden;}}
     header {{visibility: hidden;}}
     .block-container {{padding-top: 2rem; font-family: 'Inter', sans-serif;}}
-
-    /* 統一字體風格 */
     div, span, label {{ font-family: 'Inter', sans-serif; }}
-    
     .mono {{ font-family: 'JetBrains Mono', monospace; letter-spacing: -0.5px; }}
-
     .avatar-btn {{
         cursor: pointer; margin-right: 18px; flex-shrink: 0;
         display: block; transition: transform 0.2s ease, box-shadow 0.2s ease;
         border-radius: 35px;
     }}
     .avatar-btn:hover {{ transform: scale(1.08); box-shadow: 0 0 15px rgba(255,255,255,0.3); }}
-
     .img-zoom-chk:checked + .img-zoom-modal {{ display: flex; }}
     .img-zoom-modal {{
         display: none; position: fixed; top:0; left:0; right:0; bottom:0;
@@ -132,10 +127,24 @@ def extract_best_time(node: dict, tz) -> tuple:
             if dt: return dt, label
     return None, ""
 
-def is_domestic(terminal: str, country_code: str) -> bool:
+def is_strictly_international(terminal: str, country_code: str, aircraft_model: str, city: str) -> bool:
+    """更嚴格的國際線判定邏輯"""
     t = terminal.strip().upper()
-    if t in DOMESTIC_TERMINALS: return True
-    return True if not t and country_code == "au" else False
+    ac = aircraft_model.upper()
+    
+    # 1. 排除明確標註為國內線航廈的航班
+    if t in DOMESTIC_TERMINALS: return False
+    
+    # 2. 排除所有澳洲境內國家代碼 (除了 Unknown 以外)
+    if country_code == "au": return False
+    
+    # 3. 排除小型通用航空機型 (防止 Beechcraft 穿透)
+    if any(k in ac for k in SMALL_AIRCRAFT_FILTER): return False
+    
+    # 4. 如果來源地是 Unknown 且沒有明確標註為國際航廈 (I/INT/1)，則視為雜訊排除
+    if city == "Unknown" and t not in ['I', 'INT', '1']: return False
+    
+    return True
 
 def get_card_style(is_canceled, is_archived, is_landed, landed_mins, is_delayed, mins_left):
     if is_canceled:
@@ -224,12 +233,14 @@ for f in flights:
     arr_n = f.get("arrival") or f.get("movement") or {}
     term, gate = str(arr_n.get("terminal", "")).strip().upper(), arr_n.get("gate", "TBA")
 
-    if is_domestic(term, country): continue
-
     ac = f.get("aircraft", {}); ac_m, ac_r = ac.get("model", ""), ac.get("reg", "")
+    
+    # 執行更嚴格的國際線過濾
+    if not is_strictly_international(term, country, ac_m, city):
+        continue
+
     ac_text = f"{ac_m} ({ac_r})" if ac_m and ac_r else ac_m or ac_r
     img_url = fetch_aircraft_image(ac_r)
-
     best_dt, t_type = extract_best_time(arr_n, aest)
     if best_dt is None: continue
 
@@ -253,7 +264,7 @@ for f in flights:
         "status_text": st_txt, "bg_color": bg
     })
 
-# ── Gap Detection Logic ──
+# ── Gap Detection ──
 future_f = sorted([p for p in processed_flights if not p["is_landed"] and not p["is_canceled"]], key=lambda x: x["dt"])
 if future_f:
     windows = [(now_aest, future_f[0]["dt"])]
