@@ -5,10 +5,10 @@ from datetime import datetime, timedelta
 import pytz
 
 # 設定頁面與手機直式螢幕最佳化
-st.set_page_config(page_title="BNE 免稅看板", page_icon="✈️", layout="centered")
+st.set_page_config(page_title="BNE 航班看板", page_icon="✈️", layout="centered")
 
-# 自動更新機制：每 10 分鐘自動重整
-st.markdown('<meta http-equiv="refresh" content="600">', unsafe_allow_html=True)
+# 自動更新機制：每 20 分鐘 (1200秒) 自動重整
+st.markdown('<meta http-equiv="refresh" content="1200">', unsafe_allow_html=True)
 
 # 注入自訂 CSS
 st.markdown("""
@@ -57,10 +57,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-@st.cache_data(ttl=600)
+# 快取設定為 1200 秒 (20分鐘)
+@st.cache_data(ttl=1200)
 def fetch_flight_data(from_time, to_time):
     url = f"https://aerodatabox.p.rapidapi.com/flights/airports/icao/YBBN/{from_time}/{to_time}"
-    querystring = {"direction": "Arrival", "withCancelled": "false", "withCodeshared": "true"}
+    # 關閉 Codeshare，排除聯營航班
+    querystring = {"direction": "Arrival", "withCancelled": "false", "withCodeshared": "false"}
     headers = {
         "X-RapidAPI-Key": st.secrets["X_RAPIDAPI_KEY"],
         "X-RapidAPI-Host": "aerodatabox.p.rapidapi.com"
@@ -98,18 +100,14 @@ processed_flights = []
 for f in flights:
     flight_num = f.get('number', 'N/A')
     
-    # 解析起飛地
     dep = f.get('departure', {})
     origin = dep.get('airport', {}).get('shortName') or dep.get('airport', {}).get('name') or dep.get('airport', {}).get('iata') or 'Unknown'
     
-    # === 終極時間抓取器 (適應各種 API 結構) ===
     time_candidates = []
     for node_name in ['arrival', 'movement', 'departure']:
         node = f.get(node_name, {})
         if not isinstance(node, dict): continue
-        # 舊版格式
         time_candidates.extend([node.get('actualTimeLocal'), node.get('scheduledTimeLocal')])
-        # 新版巢狀格式
         for t_key in ['actualTime', 'scheduledTime', 'revisedTime']:
             t_obj = node.get(t_key)
             if isinstance(t_obj, dict):
@@ -117,7 +115,6 @@ for f in flights:
                 
     time_candidates.extend([f.get('actualTimeLocal'), f.get('scheduledTimeLocal')])
     
-    # 取出第一個有效時間
     valid_times = [t for t in time_candidates if isinstance(t, str) and len(t) > 5]
     if not valid_times:
         continue
@@ -131,12 +128,11 @@ for f in flights:
     except:
         continue
 
-    # 解析登機門與航廈
     arr_node = f.get('arrival') or f.get('movement') or {}
     gate = arr_node.get('gate', 'TBA')
     terminal = str(arr_node.get('terminal', '')).strip().upper()
     
-    # 【過濾國內線】自動排除 Terminal D 或 DOM 的航班
+    # 保留過濾國內線的邏輯，但不再把 Terminal 加進顯示字串中
     if terminal == 'D' or terminal == 'DOM':
         continue
         
@@ -153,7 +149,8 @@ for f in flights:
     if is_landed:
         css_class = "status-landed"
         landed_mins = max(0, -time_diff_minutes)
-        time_display = f"已降落 {landed_mins} 分鐘 ({dt.strftime('%H:%M')})"
+        # 更新已降落的文字顯示
+        time_display = f"Landed {landed_mins} 分鐘 ago ({dt.strftime('%H:%M')})"
     else:
         minutes_left = max(0, time_diff_minutes)
         if dt.hour < 4 or (dt.hour == 4 and dt.minute <= 10):
@@ -164,13 +161,10 @@ for f in flights:
             css_class = "status-orange"
         time_display = f"倒數 {minutes_left} 分鐘 ({dt.strftime('%H:%M')})"
             
-    # 如果有提供航廈代號，一併顯示在 Gate 前面
-    gate_display = f"T{terminal} / {gate}" if terminal else gate
-            
     processed_flights.append({
         'num': flight_num,
         'origin': origin,
-        'gate': gate_display,
+        'gate': gate,  # 只顯示 Gate，拿掉 TI /
         'display': time_display,
         'is_landed': is_landed,
         'css': css_class,
@@ -178,16 +172,13 @@ for f in flights:
         'dt': dt
     })
 
-# 若過濾後還是沒東西，這次我讓它直接把「第一台飛機」的明細展開印出來
 if len(processed_flights) == 0:
-    st.error("⚠️ 航班時間解析失敗。以下是【第一筆航班】的原始資料，請截圖給我看它的時間欄位藏在哪裡：")
+    st.error("⚠️ 航班時間解析失敗。以下是【第一筆航班】的原始資料：")
     st.json(flights[0])
     st.stop()
 
-# 排序邏輯
 processed_flights.sort(key=lambda x: (1 if x['is_landed'] else 0, -x['dt'].timestamp() if x['is_landed'] else x['dt'].timestamp()))
 
-# 渲染卡片 (已修正 Markdown 縮排誤判問題)
 for pf in processed_flights:
     tag_html = "".join([f'<div class="label-tag">{tag}</div>' for tag in pf['tags']])
     
