@@ -15,7 +15,6 @@ LOOKAHEAD_HOURS          = 8
 RECENT_LANDED_MAX        = 60
 GAP_MIN_MINUTES          = 20
 GAP_DISPLAY_MIN          = 5
-PAX_TO_STORE_MINS        = 25  # 降落後抓 25 分鐘抵達免稅店
 IMAGE_WORKERS            = 15
 DOMESTIC_TERMINALS       = ('D', 'DOM', 'D-ANC', 'GAT')
 SMALL_AIRCRAFT_FILTER    = ('BEECH', 'FAIRCHILD', 'CESSNA', 'PIPER', 'PILATUS', 'KING AIR', 'METROLINER', 'SAAB')
@@ -29,6 +28,7 @@ CITY_MAP = {
 UI_REFRESH_SEC           = 60
 API_DATA_TTL_SEC         = 600
 STALE_DATA_THRESHOLD_MIN = 30
+
 
 # ─────────────────────────────────────────────
 #  2. CORE LOGIC 
@@ -89,6 +89,7 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
         st.session_state.api_error = str(e)
         return []
 
+
 # ─────────────────────────────────────────────
 #  3. UI SETUP & CSS 
 # ─────────────────────────────────────────────
@@ -139,6 +140,7 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
+
 # ─────────────────────────────────────────────
 #  4. EXECUTION
 # ─────────────────────────────────────────────
@@ -167,8 +169,8 @@ with st.expander(" 👋👋👋 (Operational Guide)"):
     * <span class="mono" style="color:#E2E8F0;font-weight:bold;">Est</span>: **Estimated** arrival based on live radar. Very reliable.
     * <span class="mono" style="color:#94A3B8;font-weight:bold;">Sch</span>: **Scheduled** time only. 
 
-    **Store Arrival Alerts:**
-    * 🏃 **At Store ~Xm**: The flight has landed and passengers are making their way to the store. Be ready!
+    **Flight Status Tags:**
+    * ⚠️ **Check Board**: Flight hasn't departed yet or radar is missing. Check physical airport boards.
 
     *Developed by Phillip Yeh to support the BNE Lotte Team.*
     """, unsafe_allow_html=True)
@@ -227,23 +229,15 @@ for f in unique_flights:
     is_can = f.get("status", "").lower() in ("canceled", "cancelled")
     is_lan = (f.get("status", "").lower() in ("landed", "arrived") or t_diff <= 0) and not is_can
     
-    # ── 視覺層級與進店倒數 (Pax ETA) ──
+    # ── 視覺層級 (Visual Hierarchy) ──
     if is_can:
         bc, sc, bg, st_txt = ("#475569", "#94A3B8", "#0F172A", "CANCELED") if (now_aest - s_dt).total_seconds() / 60 > 15 else ("#EF4444", "#F87171", "#1E293B", "CANCELED")
         card_opacity, img_filter = "0.5", "grayscale(100%)"
     elif is_lan:
         l_min = max(0, -t_diff)
-        time_to_store = PAX_TO_STORE_MINS - l_min
-        
-        # 剛降落，旅客還在移動中 -> 亮琥珀色警示
-        if time_to_store > 0:
-            bc, sc, bg, st_txt = "#F59E0B", "#FBBF24", "#0F172A", f"🏃 At Store ~{time_to_store}m"
-            card_opacity, img_filter = "1.0", "none"  # 保持 100% 亮度
-        # 旅客已進入店內區域 -> 退為綠色並淡出
-        elif l_min <= RECENT_LANDED_MAX:
+        if l_min <= RECENT_LANDED_MAX:
             bc, sc, bg, st_txt = "#059669", "#34D399", "#0F172A", f"Landed {format_hm(l_min)} ago"
             card_opacity, img_filter = "0.75", "grayscale(40%)"
-        # 降落很久 -> 深度淡出
         else:
             bc, sc, bg, st_txt = "#475569", "#94A3B8", "#0F172A", f"Landed {format_hm(l_min)} ago"
             card_opacity, img_filter = "0.4", "grayscale(80%)"
@@ -367,4 +361,4 @@ if cans:
             </div>
         </div>""", unsafe_allow_html=True)
 
-st.markdown("<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V9.15</div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V9.16</div>", unsafe_allow_html=True)
