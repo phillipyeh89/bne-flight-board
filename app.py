@@ -33,8 +33,11 @@ STALE_DATA_THRESHOLD_MIN = 30
 #  2. CORE LOGIC FUNCTIONS
 # ─────────────────────────────────────────────
 def format_hm(total_minutes: int) -> str:
+    """Formats minutes into 00h 00m or just 00m."""
     h, m = divmod(total_minutes, 60)
-    return f"{m:02d}m" if h == 0 else f"{h:02d}h {m:02d}m"
+    if h == 0:
+        return f"{m:02d}m"
+    return f"{h:02d}h {m:02d}m"
 
 def extract_best_time(node: dict, tz) -> tuple:
     for key, label in (("actualTime", "actual"), ("revisedTime", "revised"), ("scheduledTime", "scheduled")):
@@ -81,7 +84,7 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
     except: return []
 
 # ─────────────────────────────────────────────
-#  3. COMPACT UI & MODAL FIX (V9.2)
+#  3. UI SETUP & COMPACT CSS (V9.3)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 
@@ -95,10 +98,10 @@ st.markdown(f"""
     .mono {{ font-family: 'JetBrains Mono', monospace; letter-spacing: -0.5px; }}
     
     .flip-container {{ position: relative; width: 55px; height: 55px; margin-right: 12px; flex-shrink: 0; }}
-    .flip-img {{ position: absolute; top: 0; left: 0; width: 55px; height: 55px; border-radius: 28px; border: 2px solid #475569; transition: opacity 1s ease-in-out; }}
+    .flip-img {{ position: absolute; top: 0; left: 0; width: 55px; height: 55px; border-radius: 28px; border: 2.5px solid #475569; transition: opacity 1s ease-in-out; }}
     @keyframes logoFade {{ 0%, 45% {{ opacity: 1; }} 55%, 100% {{ opacity: 0; }} }}
     @keyframes photoFade {{ 0%, 45% {{ opacity: 0; }} 55%, 95% {{ opacity: 1; }} 100% {{ opacity: 0; }} }}
-    .logo-layer {{ animation: logoFade 10s infinite; background: #FFFFFF; padding: 4px; object-fit: contain; border-radius: 8px; z-index: 2; }}
+    .logo-layer {{ animation: logoFade 10s infinite; background: #FFFFFF; padding: 4px; object-fit: contain; border-radius: 6px; z-index: 2; }}
     .photo-layer {{ animation: photoFade 10s infinite; object-fit: cover; z-index: 1; }}
     
     .flight-card {{
@@ -107,7 +110,7 @@ st.markdown(f"""
         box-shadow: 0 4px 10px rgba(0,0,0,0.2); border-left: 5px solid #3B82F6;
     }}
     .info-col {{ flex-grow: 1; min-width: 0; }}
-    .status-col {{ text-align: right; min-width: 105px; display: flex; flex-direction: column; justify-content: center; }}
+    .status-col {{ text-align: right; min-width: 115px; display: flex; flex-direction: column; justify-content: center; }}
     
     .gap-bar {{
         background-color: #0F172A; border: 1px dashed #475569; border-left: 5px solid transparent;
@@ -143,8 +146,7 @@ with c2:
     api_txt = f'API: {api_t.strftime("%H:%M")}' if api_t else 'API: --:--'
     st.markdown(f'<div style="font-size:0.7em;color:#64748B;text-align:right;">{api_txt}</div>', unsafe_allow_html=True)
 
-# NEW: Staff-Oriented Operational Guide
-with st.expander("👋 (Operational Guide)"):
+with st.expander(" 👋👋👋 (Operational Guide)"):
     st.markdown(f"""
     **Why use this app?**
     I built this dashboard to help us manage our daily shifts more easily. Use it to predict peak traffic, coordinate floor tasks, and plan your break windows (Gaps) with confidence.
@@ -152,9 +154,9 @@ with st.expander("👋 (Operational Guide)"):
     **How to read the times:**
     * <span class="mono" style="color:#7DD3FC;font-weight:bold;">Act</span>: **Actual** landing time. The crowd is on their way!
     * <span class="mono" style="color:#E2E8F0;font-weight:bold;">Est</span>: **Estimated** arrival based on live radar. Very reliable.
-    * <span class="mono" style="color:#94A3B8;font-weight:bold;">Sch</span>: **Scheduled** time only. Radar is still searching, please check physical boards for accuracy.
+    * <span class="mono" style="color:#94A3B8;font-weight:bold;">Sch</span>: **Scheduled** time only.
     
-    **Staff Tip:** Check the **'OFF-FLOOR GAP'** bars to see quiet periods between flights—perfect for restocking or taking a quick 15.
+    **Staff Tip:** Check the **'OFF-FLOOR GAP'** bars to see quiet periods between flights.
     
     *Developed by Phillip Yeh to support the BNE Lotte Team.*
     """, unsafe_allow_html=True)
@@ -189,15 +191,18 @@ for f in {f.get("number"): f for f in raw_flights}.values():
     is_lan = (f.get("status", "").lower() in ("landed", "arrived") or t_diff <= 0) and not is_can
     
     delay = (best_dt - s_dt).total_seconds() / 3600
-    if is_can: bc, sc, bg, st_txt = ("#475569", "#94A3B8", "#0F172A", "CANCELED") if (now_aest-s_dt).total_seconds()/60 > 15 else ("#EF4444", "#F87171", "#1E293B", "CANCELED")
+    
+    # Time Styling with h/m format
+    if is_can: 
+        bc, sc, bg, st_txt = ("#475569", "#94A3B8", "#0F172A", "CANCELED") if (now_aest-s_dt).total_seconds()/60 > 15 else ("#EF4444", "#F87171", "#1E293B", "CANCELED")
     elif is_lan:
         l_min = max(0, -t_diff)
-        bc, sc, bg, st_txt = ("#10B981", "#34D399", "#1E293B", f"Landed {l_min}m ago") if l_min <= RECENT_LANDED_MAX else ("#475569", "#94A3B8", "#0F172A", f"Landed {l_min}m ago")
+        bc, sc, bg, st_txt = ("#10B981", "#34D399", "#1E293B", f"Landed {format_hm(l_min)} ago") if l_min <= RECENT_LANDED_MAX else ("#475569", "#94A3B8", "#0F172A", f"Landed {format_hm(l_min)} ago")
     else:
         m_left = max(0, t_diff)
         if delay >= 12: bc, sc, bg, st_txt = "#7F1D1D", "#FCA5A5", "#1E293B", "SEVERE DELAY"
-        elif m_left < 25: bc, sc, bg, st_txt = "#EF4444", "#F87171", "#1E293B", f"In {m_left}m"
-        else: bc, sc, bg, st_txt = "#3B82F6", "#60A5FA", "#1E293B", f"In {m_left}m"
+        elif m_left < 25: bc, sc, bg, st_txt = "#EF4444", "#F87171", "#1E293B", f"In {format_hm(m_left)}"
+        else: bc, sc, bg, st_txt = "#3B82F6", "#60A5FA", "#1E293B", f"In {format_hm(m_left)}"
 
     processed.append({
         "num": flight_num, "origin": CITY_MAP.get(dep_ap.get("municipalityName") or dep_ap.get("name"), dep_ap.get("municipalityName") or dep_ap.get("name") or "Unknown"),
@@ -243,7 +248,7 @@ for i, pf in enumerate(processed):
         <div class="status-col">
             <div style="font-size:0.6em; color:#94A3B8; font-weight:700; letter-spacing:1px;">GATE</div>
             <div class="mono" style="font-size:1.85em; font-weight:700; line-height:1;">{pf['gate']}</div>
-            <div style="font-size:0.8em; font-weight:700; color:{pf['status_color']}; margin-top:2px;">{pf['status_text']}</div>
+            <div style="font-size:0.85em; font-weight:700; color:{pf['status_color']}; margin-top:2px;">{pf['status_text']}</div>
         </div>
     </div>
     <input type="checkbox" id="{mid}" class="img-zoom-chk" style="display:none;">
@@ -262,4 +267,4 @@ if cans:
         img_html = f'<div class="flip-container"><img src="{pf["logo_url"]}" class="flip-img" style="border-color:{pf["border_color"]}; background:#FFF; padding:4px; object-fit:contain; border-radius:8px;"/></div>'
         st.markdown(f"""<div class="flight-card" style="border-left-color:{pf['border_color']}; background-color:{pf['bg_color']};">{img_html}<div class="info-col"><div style="font-size:1em; font-weight:700;">{pf['num']} <span style="font-size:0.75em; color:#94A3B8;">{pf['origin']}</span></div><div style="font-size:0.75em; color:#94A3B8;"><span class="mono">Sch {pf['sch_time']}</span></div></div><div class="status-col"><div style="font-size:0.8em; font-weight:700; color:{pf['status_color']};">{pf['status_text']}</div></div></div>""", unsafe_allow_html=True)
 
-st.markdown(f"<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V9.2</div>", unsafe_allow_html=True)
+st.markdown(f"<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V9.3</div>", unsafe_allow_html=True)
