@@ -29,7 +29,6 @@ UI_REFRESH_SEC           = 60
 API_DATA_TTL_SEC         = 600
 STALE_DATA_THRESHOLD_MIN = 30
 
-
 # ─────────────────────────────────────────────
 #  2. CORE LOGIC 
 # ─────────────────────────────────────────────
@@ -89,7 +88,6 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
         st.session_state.api_error = str(e)
         return []
 
-
 # ─────────────────────────────────────────────
 #  3. UI SETUP & CSS 
 # ─────────────────────────────────────────────
@@ -138,7 +136,6 @@ st.markdown(f"""
     .close-btn {{ position: absolute; top: 20px; right: 30px; color: white; font-size: 3.5em; font-weight: bold; cursor: pointer; z-index: 10002; line-height: 1; }}
 </style>
 """, unsafe_allow_html=True)
-
 
 # ─────────────────────────────────────────────
 #  4. EXECUTION
@@ -229,20 +226,17 @@ for f in unique_flights:
     is_can = f.get("status", "").lower() in ("canceled", "cancelled")
     is_lan = (f.get("status", "").lower() in ("landed", "arrived") or t_diff <= 0) and not is_can
     
-    # ── 戰術覆寫：Airborne 智能偵測 ──
+    # ── 戰術覆寫：Airborne 智能偵測 (V9.11 修正版) ──
     is_airborne = False
     if not is_lan and not is_can:
         status_raw = f.get("status", "").lower()
         has_dep_time = f.get("departure", {}).get("actualTime") is not None
         
-        # 1. API 明確回報已升空
         if status_raw in ["en route", "enroute", "departed", "approaching", "active", "airborne"]:
             is_airborne = True
-        # 2. API 有給實際起飛時間
         elif has_dep_time:
             is_airborne = True
-        # 3. 智能推斷：只要有雷達動態時間 (Est) 且距離抵達小於 6 小時 (360分鐘)，強制判定為已升空
-        elif t_type == "revised" and t_diff <= 360:
+        elif t_type == "revised" and t_diff <= 150:
             is_airborne = True
 
     if is_can:
@@ -325,7 +319,6 @@ for i, pf in enumerate(processed):
     tag        = "Act" if (pf["is_landed"] or pf["time_type"] == "actual") else ("Est" if pf["time_type"] == "revised" else "Sch")
     time_color = "#7DD3FC" if tag == "Act" else ("#E2E8F0" if tag == "Est" else "#94A3B8")
     
-    # State Tags: Airborne vs Check Board
     if not pf["is_landed"] and not pf["is_canceled"]:
         if pf["is_airborne"]:
             state_tag = ' <span style="color:#10B981; font-size:0.75em; font-weight:700;">🛫 Airborne</span>'
@@ -378,4 +371,4 @@ if cans:
             </div>
         </div>""", unsafe_allow_html=True)
 
-st.markdown("<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V9.10</div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V9.11</div>", unsafe_allow_html=True)
