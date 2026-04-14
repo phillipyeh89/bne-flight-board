@@ -82,7 +82,7 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
     except: return []
 
 # ─────────────────────────────────────────────
-#  3. COMPACT UI & MODAL FIX (V9.0)
+#  3. COMPACT UI & MODAL FIX (V9.1)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 
@@ -95,7 +95,6 @@ st.markdown(f"""
     .block-container {{padding-top: 1rem; font-family: 'Inter', sans-serif; max-width: 700px;}}
     .mono {{ font-family: 'JetBrains Mono', monospace; letter-spacing: -0.5px; }}
     
-    /* Image Containers */
     .flip-container {{ position: relative; width: 55px; height: 55px; margin-right: 12px; flex-shrink: 0; }}
     .flip-img {{ position: absolute; top: 0; left: 0; width: 55px; height: 55px; border-radius: 28px; border: 2px solid #475569; transition: opacity 1s ease-in-out; }}
     @keyframes logoFade {{ 0%, 45% {{ opacity: 1; }} 55%, 100% {{ opacity: 0; }} }}
@@ -103,7 +102,6 @@ st.markdown(f"""
     .logo-layer {{ animation: logoFade 10s infinite; background: #FFFFFF; padding: 4px; object-fit: contain; border-radius: 6px; z-index: 2; }}
     .photo-layer {{ animation: photoFade 10s infinite; object-fit: cover; z-index: 1; }}
     
-    /* Card Styling */
     .flight-card {{
         background-color: #1E293B; border-radius: 10px; padding: 10px 14px; 
         margin-bottom: 6px; display: flex; align-items: center; color: white;
@@ -112,7 +110,6 @@ st.markdown(f"""
     .info-col {{ flex-grow: 1; min-width: 0; }}
     .status-col {{ text-align: right; min-width: 105px; display: flex; flex-direction: column; justify-content: center; }}
     
-    /* Gap Bar */
     .gap-bar {{
         background-color: #0F172A; border: 1px dashed #475569; border-left: 5px solid transparent;
         border-radius: 8px; padding: 8px 14px; margin: 4px 0 10px 0; text-align: center; color: #94A3B8;
@@ -120,7 +117,6 @@ st.markdown(f"""
     }}
     .gap-active {{ background-color: #064E3B; border-color: #10B981; border-left-color: #10B981; color: #A7F3D0; }}
 
-    /* ZOOM MODAL FIX */
     .img-zoom-modal {{ 
         display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
         background: rgba(15,23,42,0.92); z-index: 10000; align-items: center; 
@@ -220,10 +216,10 @@ for i, pf in enumerate(processed):
     if pf.get("is_gap"): st.markdown(pf["html"], unsafe_allow_html=True); continue
     
     mid = f"z_{i}"
-    img_html = f'<div class="flip-container"><label for="{mid}" style="cursor:pointer;"><img src="{pf["logo_url"]}" class="flip-img logo-layer" style="border-color:{pf["border_color"]};"/><img src="{pf["photo_url"]}" class="flip-img photo-layer" style="border-color:{pf["border_color"]};"/></label></div>' if pf["photo_url"] != "NOT_FOUND" else f'<div class="flip-container"><img src="{pf["logo_url"]}" class="flip-img" style="border-color:{pf["border_color"]}; background:#FFF; padding:5px; object-fit:contain; border-radius:8px;"/></div>'
+    img_html = f'<div class="flip-container"><label for="{mid}" style="cursor:pointer;"><img src="{pf["logo_url"]}" class="flip-img logo-layer" style="border-color:{pf["border_color"]};"/><img src="{pf["photo_url"]}" class="flip-img photo-layer" style="border-color:{pf["border_color"]};"/></label></div>' if pf["photo_url"] != "NOT_FOUND" else f'<div class="flip-container"><img src="{pf["logo_url"]}" class="flip-img" style="border-color:{pf["border_color"]}; background:#FFF; padding:4px; object-fit:contain; border-radius:8px;"/></div>'
     tag = "Act" if pf["is_landed"] or pf["time_type"] == "actual" else ("Est" if pf["time_type"] == "revised" else "Sch")
     time_color = "#7DD3FC" if tag == "Act" else ("#E2E8F0" if tag == "Est" else "#94A3B8")
-    cb = ' <span style="color:#FBBF24; font-size:0.75em;">⚠️ Check</span>' if (tag == "Sch" and not pf["is_canceled"]) else ""
+    cb = ' <span style="color:#FBBF24; font-size:0.75em;">⚠️ Check Board</span>' if (tag == "Sch" and not pf["is_canceled"]) else ""
 
     st.markdown(f"""
     <div class="flight-card" style="border-left-color:{pf['border_color']}; background-color:{pf['bg_color']};">
@@ -252,7 +248,7 @@ cans = sorted([f for f in processed if f.get("is_canceled")], key=lambda x: x["s
 if cans:
     st.markdown("<hr style='margin:15px 0 8px 0; opacity:0.2;'><div style='color:#F87171; font-size:0.85em; font-weight:700; margin-bottom:5px;'>❌ Canceled</div>", unsafe_allow_html=True)
     for i, pf in enumerate(cans):
-        img_html = f'<div class="flip-container"><img src="{pf["logo_url"]}" class="flip-img" style="border-color:{pf["border_color"]}; background:#FFF; padding:7px; object-fit:contain; border-radius:8px;"/></div>'
+        img_html = f'<div class="flip-container"><img src="{pf["logo_url"]}" class="flip-img" style="border-color:{pf["border_color"]}; background:#FFF; padding:4px; object-fit:contain; border-radius:8px;"/></div>'
         st.markdown(f"""<div class="flight-card" style="border-left-color:{pf['border_color']}; background-color:{pf['bg_color']};">{img_html}<div class="info-col"><div style="font-size:1em; font-weight:700;">{pf['num']} <span style="font-size:0.7em; color:#94A3B8;">{pf['origin']}</span></div><div style="font-size:0.75em; color:#94A3B8;"><span class="mono">Sch {pf['sch_time']}</span></div></div><div class="status-col"><div style="font-size:0.8em; font-weight:700; color:{pf['status_color']};">{pf['status_text']}</div></div></div>""", unsafe_allow_html=True)
 
-st.markdown(f"<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V9.0</div>", unsafe_allow_html=True)
+st.markdown(f"<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V9.1</div>", unsafe_allow_html=True)
