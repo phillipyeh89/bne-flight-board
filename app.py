@@ -45,6 +45,14 @@ THEMES = {
 }
 
 # =====================================================================
+# GLOBAL UTILITIES
+# =====================================================================
+def format_hm(total_minutes: int) -> str:
+    """Formats minutes into 00h 00m or just 00m."""
+    h, m = divmod(abs(total_minutes), 60)
+    return f"{m:02d}m" if h == 0 else f"{h:02d}h {m:02d}m"
+
+# =====================================================================
 # 2. DATA MODELS 
 # =====================================================================
 class Flight:
@@ -89,10 +97,6 @@ class Flight:
         if any(k in self.ac_model.upper() for k in SMALL_AIRCRAFT_FILTER): return False
         return True
 
-    def format_time(self, total_minutes: int) -> str:
-        h, m = divmod(abs(total_minutes), 60)
-        return f"{m:02d}m" if h == 0 else f"{h:02d}h {m:02d}m"
-
     def _parse_times(self, arr_node: dict) -> Tuple[datetime, datetime, str]:
         s_dt_raw = arr_node.get("scheduledTime", {}).get("local")
         s_dt = pd.to_datetime(s_dt_raw).replace(tzinfo=None) if s_dt_raw else datetime.min
@@ -106,8 +110,6 @@ class Flight:
                 best_dt, t_type = dt, label
                 break
 
-        # Note: Fake estimate filter removed. We trust the API's revisedTime (Est) 
-        # so flights perfectly on time don't get buried with "Check Board".
         return s_dt, best_dt, t_type
 
     def _determine_if_landed(self, arr_node: dict) -> bool:
@@ -126,9 +128,9 @@ class Flight:
         if self.is_landed:
             mins_ago = abs(self.mins_to_arrival)
             if mins_ago <= RECENT_LANDED_MAX:
-                return {"theme": THEMES["LANDED_FRESH"], "text": f"Landed {self.format_time(mins_ago)} ago"}
+                return {"theme": THEMES["LANDED_FRESH"], "text": f"Landed {format_hm(mins_ago)} ago"}
             else:
-                return {"theme": THEMES["LANDED_OLD"], "text": f"Landed {self.format_time(mins_ago)} ago"}
+                return {"theme": THEMES["LANDED_OLD"], "text": f"Landed {format_hm(mins_ago)} ago"}
 
         # Ghost flight (Past Scheduled time but zero radar/actual update)
         if self.time_type == "scheduled" and self.mins_to_arrival <= 0:
@@ -141,9 +143,9 @@ class Flight:
         if self.delay_hours >= 12:
             return {"theme": THEMES["SEVERE_DELAY"], "text": "SEVERE DELAY"}
         if self.mins_to_arrival < 25:
-            return {"theme": THEMES["INCOMING_HOT"], "text": f"In {self.format_time(self.mins_to_arrival)}"}
+            return {"theme": THEMES["INCOMING_HOT"], "text": f"In {format_hm(self.mins_to_arrival)}"}
         
-        return {"theme": THEMES["INCOMING"], "text": f"In {self.format_time(self.mins_to_arrival)}"}
+        return {"theme": THEMES["INCOMING"], "text": f"In {format_hm(self.mins_to_arrival)}"}
 
     def _generate_logo_url(self) -> str:
         prefix = "".join(c for c in self.number if c.isalpha())[:2].upper()
@@ -359,7 +361,7 @@ def main():
         for i, f in enumerate(cancelled_flights):
             render_flight_card(f, i + 999) 
 
-    st.markdown("<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V10.2 (Clean Radar)</div>", unsafe_allow_html=True)
+    st.markdown("<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V10.3 (Clean Radar)</div>", unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
