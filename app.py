@@ -30,7 +30,7 @@ API_DATA_TTL_SEC        = 600
 STALE_DATA_THRESHOLD_MIN = 30
 
 # ─────────────────────────────────────────────
-#  PAGE CONFIG & DYNAMIC CSS
+#  PAGE CONFIG & DYNAMIC CSS (FLIP EFFECT)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 st.markdown(f"""
@@ -41,14 +41,14 @@ st.markdown(f"""
     header {{visibility: hidden;}}
     .block-container {{padding-top: 1.5rem; font-family: 'Inter', sans-serif;}}
     .mono {{ font-family: 'JetBrains Mono', monospace; letter-spacing: -0.5px; }}
+    @keyframes blink {{ 50% {{ opacity: 0; }} }}
+    .stale-warning {{ color: #EF4444 !important; font-weight: 700 !important; animation: blink 1.2s linear infinite; }}
     
-    /* Flip Container Logic */
+    /* Flip Container */
     .flip-container {{ position: relative; width: 70px; height: 70px; margin-right: 18px; flex-shrink: 0; }}
     .flip-img {{ position: absolute; top: 0; left: 0; width: 70px; height: 70px; transition: opacity 1s ease-in-out; border-radius: 35px; border: 2px solid #475569; }}
-    
     @keyframes logoFade {{ 0%, 45% {{ opacity: 1; }} 55%, 100% {{ opacity: 0; }} }}
     @keyframes photoFade {{ 0%, 45% {{ opacity: 0; }} 55%, 95% {{ opacity: 1; }} 100% {{ opacity: 0; }} }}
-    
     .logo-layer {{ animation: logoFade 10s infinite; background: #FFFFFF; padding: 6px; object-fit: contain; border-radius: 8px; box-sizing: border-box; z-index: 2; }}
     .photo-layer {{ animation: photoFade 10s infinite; object-fit: cover; z-index: 1; }}
     
@@ -62,7 +62,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-#  CORE FUNCTIONS (Defined Global to prevent NameError)
+#  CORE FUNCTIONS
 # ─────────────────────────────────────────────
 @st.cache_data(show_spinner=False)
 def get_photo_from_api(reg: str):
@@ -81,12 +81,15 @@ def get_airline_logo_url(flight_number: str) -> str:
     return f"https://pics.avs.io/200/200/{prefix}.png" if len(prefix) == 2 else ""
 
 def is_strictly_international(terminal: str, country_code: str, aircraft_model: str) -> bool:
-    t = terminal.strip().upper()
-    ac = aircraft_model.upper()
+    t, ac = terminal.strip().upper(), aircraft_model.upper()
     if t in DOMESTIC_TERMINALS: return False
     if country_code.lower() == "au": return False
     if any(k in ac for k in SMALL_AIRCRAFT_FILTER): return False
     return True
+
+def format_hm(total_minutes: int) -> str:
+    h, m = divmod(total_minutes, 60)
+    return f"{m:02d}m" if h == 0 else f"{h:02d}h {m:02d}m"
 
 def extract_best_time(node: dict, tz) -> tuple:
     for key, label in (("actualTime", "actual"), ("revisedTime", "revised"), ("scheduledTime", "scheduled")):
@@ -113,14 +116,46 @@ def get_card_style(is_canceled, is_archived, is_landed, landed_mins, delay_hours
     if is_canceled:
         return ("#475569", "#94A3B8", "#0F172A", "❌ CANCELED") if is_archived else ("#EF4444", "#F87171", "#1E293B", "❌ CANCELED")
     if is_landed:
-        h, m = divmod(landed_mins, 60)
-        time_str = f"{m:02d}m" if h == 0 else f"{h:02d}h {m:02d}m"
-        return ("#10B981", "#34D399", "#1E293B", f"Landed {time_str} ago") if landed_mins <= RECENT_LANDED_MAX else ("#475569", "#94A3B8", "#0F172A", f"Landed {time_str} ago")
+        return ("#10B981", "#34D399", "#1E293B", f"Landed {format_hm(landed_mins)} ago") if landed_mins <= RECENT_LANDED_MAX else ("#475569", "#94A3B8", "#0F172A", f"Landed {format_hm(landed_mins)} ago")
     bg = "#1E293B"
     if delay_hours >= 12: return "#7F1D1D", "#FCA5A5", bg, "🚨 SEVERE DELAY"
-    if mins_left < 25: return "#EF4444", "#F87171", bg, f"🔥 In {mins_left}m"
+    if mins_left < 25: return "#EF4444", "#F87171", bg, f"🔥 In {format_hm(mins_left)}"
     if delay_hours >= 3: return "#EF4444", "#F87171", bg, "⚠️ HEAVY DELAY"
-    return "#3B82F6", "#60A5FA", bg, f"In {mins_left}m"
+    return "#3B82F6", "#60A5FA", bg, f"In {format_hm(mins_left)}"
+
+def render_flight_card(pf: dict, index: int):
+    mid = f"modal_{index}"
+    # Dynamic Image Flip Logic
+    if pf["photo_url"] != "NOT_FOUND":
+        image_html = f'<div class="flip-container"><label for="{mid}" class="avatar-btn"><img src="{pf["logo_url"]}" class="flip-img logo-layer" style="border-color:{pf["border_color"]};" /><img src="{pf["photo_url"]}" class="flip-img photo-layer" style="border-color:{pf["border_color"]};" /></label></div>'
+    else:
+        image_html = f'<div class="flip-container"><img src="{pf["logo_url"]}" class="flip-img" style="border-color:{pf["border_color"]}; background:#FFF; padding:6px; object-fit:contain; border-radius:8px;" /></div>'
+
+    # Time Labels Logic
+    check_board_tag = ' <span style="color:#FBBF24; font-size:0.85em; font-weight:700;">⚠️ Check Board</span>' if (not pf["is_landed"] and not pf["is_canceled"] and pf["time_type"] == "scheduled") else ""
+    if pf["is_landed"] or pf["time_type"] == "actual":
+        time_label = f'<span class="mono" style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 6px;border-radius:4px;">Act {pf["actual_time"]}</span>'
+    elif pf["time_type"] == "revised":
+        time_label = f'<span class="mono" style="color:#E2E8F0;font-weight:bold;background:rgba(226,232,240,0.15);padding:2px 6px;border-radius:4px;">Est {pf["actual_time"]}</span>{check_board_tag}'
+    else:
+        time_label = f'<span class="mono" style="color:#94A3B8;font-weight:bold;background:rgba(148,163,184,0.15);padding:2px 6px;border-radius:4px;">Sch {pf["actual_time"]}</span>{check_board_tag}'
+
+    st.markdown(f"""
+    <div style="background-color:{pf['bg_color']};border-left:6px solid {pf['border_color']};border-radius:8px;padding:16px 20px;margin-bottom:12px;display:flex;align-items:center;color:white;box-shadow:0 4px 6px rgba(0,0,0,0.15);">
+        {image_html}
+        <div style="flex-grow:1;">
+            <div style="font-size:1.4em;font-weight:700;">{pf['num']}<span style="font-size:0.75em;color:#94A3B8;margin-left:8px;">{pf['origin']} ({pf['iata']})</span></div>
+            <div style="font-size:0.85em;color:#CBD5E1;">{pf['ac_text']}</div>
+            <div style="font-size:0.85em;color:#CBD5E1;"><span class="mono">Sch {pf['s_dt_val'].strftime('%H:%M')}</span> • {time_label}</div>
+        </div>
+        <div style="text-align:right;min-width:110px;">
+            <div style="font-size:0.8em;color:#94A3B8;font-weight:700;">GATE</div>
+            <div class="mono" style="font-size:2.6em;font-weight:700;line-height:1;">{pf['gate']}</div>
+            <div style="font-size:1.05em;font-weight:700;color:{pf['status_color']};">{pf['status_text']}</div>
+        </div>
+    </div>
+    <input type="checkbox" id="{mid}" class="img-zoom-chk" style="display:none;"><div class="img-zoom-modal"><label for="{mid}" class="img-zoom-close"></label><label for="{mid}" class="close-btn-text">&times;</label><img src="{pf['photo_url'] if pf['photo_url'] != 'NOT_FOUND' else pf['logo_url']}" /></div>
+    """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
 #  EXECUTION
@@ -138,10 +173,24 @@ with c2:
     api_html = f'<span class="stale-warning">API: {api_t.strftime("%H:%M")} (STALE)</span>' if (api_t and (now_aest - api_t).total_seconds()/60 > STALE_DATA_THRESHOLD_MIN) else f'API: {api_t.strftime("%H:%M") if api_t else "--:--"}'
     st.markdown(f'<div style="font-size:0.75em;color:#64748B;text-align:center;">{api_html}</div>', unsafe_allow_html=True)
 
+with st.expander("ℹ️ System Info & Legend"):
+    st.markdown(f"""
+    **1. Time Tags**
+    * <span class="mono" style="color:#7DD3FC;font-weight:bold;background:rgba(14,165,233,0.15);padding:2px 4px;border-radius:4px;">Act</span> **Actual**: Flight has landed.
+    * <span class="mono" style="color:#E2E8F0;font-weight:bold;background:rgba(226,232,240,0.15);padding:2px 4px;border-radius:4px;">Est</span> **Estimated**: Live radar ETA.
+    * <span class="mono" style="color:#94A3B8;font-weight:bold;background:rgba(148,163,184,0.15);padding:2px 4px;border-radius:4px;">Sch</span> **Scheduled**: No radar data yet. **Check physical boards.**
+
+    **2. Display Window**
+    * Showing flights from **-{LOOKBACK_HOURS}h** to **+{LOOKAHEAD_HOURS}h**.
+    * Auto-refresh UI every 60s. API syncs every 10m.
+    
+    **3. Support**
+    * Developer: Phillip Yeh | Version: V8.3
+    """, unsafe_allow_html=True)
+
 flights = fetch_flight_data(anchor, from_t, to_t)
 if not flights: st.info("No data available..."); st.stop()
 
-# Process & Render
 unique_flights = {f.get("number"): f for f in flights}.values()
 processed_flights = []
 
@@ -150,9 +199,7 @@ for f in unique_flights:
     dep_ap = f.get("departure", {}).get("airport") or f.get("movement", {}).get("airport") or {}
     arr_info = f.get("arrival") or f.get("movement") or {}
     ac = f.get("aircraft", {}); ac_m, ac_r = ac.get("model", ""), ac.get("reg", "")
-    
     if not is_strictly_international(str(arr_info.get("terminal", "")), str(dep_ap.get("countryCode", "")), ac_m): continue
-    
     best_dt, t_type = extract_best_time(arr_info, aest)
     if not best_dt: continue
     s_dt = pd.to_datetime(arr_info.get("scheduledTime", {}).get("local") if isinstance(arr_info.get("scheduledTime"), dict) else best_dt)
@@ -160,41 +207,41 @@ for f in unique_flights:
     t_diff = int((best_dt - now_aest).total_seconds() / 60)
     is_can = f.get("status", "").lower() in ("canceled", "cancelled")
     is_lan = (f.get("status", "").lower() in ("landed", "arrived") or t_diff <= 0) and not is_can
-    
     bc, sc, bg, st_txt = get_card_style(is_can, (is_can and (now_aest-best_dt).total_seconds()/60 > 15), is_lan, max(0,-t_diff), (best_dt-s_dt).total_seconds()/3600, max(0,t_diff))
     
-    pf = {
+    processed_flights.append({
         "num": flight_num, "origin": CITY_MAP.get(dep_ap.get("municipalityName") or dep_ap.get("name"), dep_ap.get("municipalityName") or dep_ap.get("name") or "Unknown"),
         "iata": dep_ap.get("iata", ""), "gate": arr_info.get("gate", "TBA"), "ac_text": f"{ac_m} ({ac_r})" if ac_m and ac_r else ac_m or ac_r,
         "actual_time": best_dt.strftime("%H:%M"), "is_landed": is_lan, "is_canceled": is_can, "landed_mins": max(0,-t_diff),
         "dt": best_dt, "s_dt_val": s_dt, "time_type": t_type, "logo_url": get_airline_logo_url(flight_num),
         "photo_url": get_photo_from_api(ac_r), "border_color": bc, "status_color": sc, "status_text": st_txt, "bg_color": bg
-    }
-    processed_flights.append(pf)
+    })
 
-# Sort and Render Cards
-processed_flights.sort(key=lambda p: (2, p["s_dt_val"].timestamp()) if p["is_canceled"] else ((0, -p["dt"].timestamp()) if p["is_landed"] and p["landed_mins"] <= RECENT_LANDED_MAX else ((2, -p["dt"].timestamp()) if p["is_landed"] else (1, p["dt"].timestamp()))))
+# ── GAP DETECTION ─────────────────────────────
+future_f = sorted([p for p in processed_flights if not p["is_landed"] and not p["is_canceled"]], key=lambda x: x["dt"])
+if future_f:
+    windows = [(now_aest, future_f[0]["dt"])]
+    for i in range(len(future_f)-1): windows.append((future_f[i]["dt"], future_f[i+1]["dt"]))
+    for t1, t2 in windows:
+        if t2 <= now_aest: continue
+        ds = max(t1, now_aest); g_min = int((t2 - ds).total_seconds() / 60)
+        if (t2-t1).total_seconds()/60 < GAP_MIN_MINUTES or g_min < GAP_DISPLAY_MIN: continue
+        act = t1 <= now_aest; tit = f"🟢 ACTIVE OFF-FLOOR ({format_hm(g_min)} left)" if act else f"🔄 {format_hm(g_min)} OFF-FLOOR WINDOW"
+        gb, gbo, gc = ("#064E3B", "#10B981", "#A7F3D0") if act else ("#0F172A", "#475569", "#94A3B8")
+        processed_flights.append({"is_gap": True, "html": f'<div style="background-color:{gb};border:1px dashed {gbo};border-radius:8px;padding:10px;margin-bottom:12px;text-align:center;color:{gc};font-weight:bold;">{tit} <span style="opacity:0.7;font-weight:normal;">({ds.strftime("%H:%M")}–{t2.strftime("%H:%M")})</span></div>', "time_key": t1.timestamp() + 1})
 
-for i, pf in enumerate(processed_flights):
-    if pf["is_canceled"]: continue
-    mid = f"modal_{i}"
-    image_html = f'<div class="flip-container"><label for="{mid}" class="avatar-btn"><img src="{pf["logo_url"]}" class="flip-img logo-layer" style="border-color:{pf["border_color"]};" /><img src="{pf["photo_url"]}" class="flip-img photo-layer" style="border-color:{pf["border_color"]};" /></label></div>' if pf["photo_url"] != "NOT_FOUND" else f'<div class="flip-container"><img src="{pf["logo_url"]}" class="flip-img" style="border-color:{pf["border_color"]}; background:#FFF; padding:6px; object-fit:contain; border-radius:8px;" /></div>'
-    
-    st.markdown(f"""
-    <div style="background-color:{pf['bg_color']};border-left:6px solid {pf['border_color']};border-radius:8px;padding:16px 20px;margin-bottom:12px;display:flex;align-items:center;color:white;box-shadow:0 4px 6px rgba(0,0,0,0.15);">
-        {image_html}
-        <div style="flex-grow:1;">
-            <div style="font-size:1.4em;font-weight:700;">{pf['num']}<span style="font-size:0.75em;color:#94A3B8;margin-left:8px;">{pf['origin']} ({pf['iata']})</span></div>
-            <div style="font-size:0.85em;color:#CBD5E1;">{pf['ac_text']}</div>
-            <div style="font-size:0.85em;color:#CBD5E1;"><span class="mono">Sch {pf['s_dt_val'].strftime('%H:%M')}</span> • <span class="mono" style="font-weight:bold;color:#7DD3FC;">{pf['actual_time']}</span></div>
-        </div>
-        <div style="text-align:right;min-width:110px;">
-            <div style="font-size:0.8em;color:#94A3B8;font-weight:700;">GATE</div>
-            <div class="mono" style="font-size:2.6em;font-weight:700;line-height:1;">{pf['gate']}</div>
-            <div style="font-size:1.05em;font-weight:700;color:{pf['status_color']};">{pf['status_text']}</div>
-        </div>
-    </div>
-    <input type="checkbox" id="{mid}" class="img-zoom-chk" style="display:none;"><div class="img-zoom-modal"><label for="{mid}" class="img-zoom-close"></label><label for="{mid}" class="close-btn-text">&times;</label><img src="{pf['photo_url'] if pf['photo_url'] != 'NOT_FOUND' else pf['logo_url']}" /></div>
-    """, unsafe_allow_html=True)
+# Sorting
+processed_flights.sort(key=lambda p: (1, p["time_key"]) if p.get("is_gap") else ((2, p["s_dt_val"].timestamp()) if p["is_canceled"] else ((0, -p["dt"].timestamp()) if p["is_landed"] and p["landed_mins"] <= RECENT_LANDED_MAX else ((2, -p["dt"].timestamp()) if p["is_landed"] else (1, p["dt"].timestamp())))))
 
-st.markdown(f"<div style='text-align:center; color:#475569; font-size:0.8em; margin-top:50px;'>Developer: Phillip Yeh | V8.2</div>", unsafe_allow_html=True)
+# Render Active
+for i, pf in enumerate([f for f in processed_flights if not f.get("is_canceled")]):
+    if pf.get("is_gap"): st.markdown(pf["html"], unsafe_allow_html=True)
+    else: render_flight_card(pf, i)
+
+# Render Canceled
+canceled_f = sorted([f for f in processed_flights if f.get("is_canceled")], key=lambda x: x["s_dt_val"])
+if canceled_f:
+    st.markdown("<hr style='margin:40px 0 20px 0; opacity:0.3;'><h4 style='color:#F87171;'>❌ Canceled</h4>", unsafe_allow_html=True)
+    for i, pf in enumerate(canceled_f): render_flight_card(pf, 900 + i)
+
+st.markdown(f"<div style='text-align:center; color:#475569; font-size:0.8em; margin-top:50px;'>Developer: Phillip Yeh | V8.3</div>", unsafe_allow_html=True)
