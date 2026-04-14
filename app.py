@@ -29,6 +29,7 @@ UI_REFRESH_SEC           = 60
 API_DATA_TTL_SEC         = 600
 STALE_DATA_THRESHOLD_MIN = 30
 
+
 # ─────────────────────────────────────────────
 #  2. CORE LOGIC 
 # ─────────────────────────────────────────────
@@ -88,6 +89,7 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
         st.session_state.api_error = str(e)
         return []
 
+
 # ─────────────────────────────────────────────
 #  3. UI SETUP & CSS 
 # ─────────────────────────────────────────────
@@ -111,9 +113,10 @@ st.markdown(f"""
     .photo-layer {{ animation: photoFade 10s infinite; object-fit: cover !important; z-index: 1; }}
 
     .flight-card {{
-        background-color: #1E293B; border-radius: 10px; padding: 10px 14px;
+        border-radius: 10px; padding: 10px 14px;
         margin-bottom: 6px; display: flex; align-items: center; color: white;
         box-shadow: 0 4px 10px rgba(0,0,0,0.2); border-left: 5px solid #3B82F6;
+        transition: opacity 0.3s ease;
     }}
     .info-col {{ flex-grow: 1; min-width: 0; }}
     .status-col {{ text-align: right; min-width: 115px; display: flex; flex-direction: column; justify-content: center; }}
@@ -136,6 +139,7 @@ st.markdown(f"""
     .close-btn {{ position: absolute; top: 20px; right: 30px; color: white; font-size: 3.5em; font-weight: bold; cursor: pointer; z-index: 10002; line-height: 1; }}
 </style>
 """, unsafe_allow_html=True)
+
 
 # ─────────────────────────────────────────────
 #  4. EXECUTION
@@ -226,25 +230,28 @@ for f in unique_flights:
     is_can = f.get("status", "").lower() in ("canceled", "cancelled")
     is_lan = (f.get("status", "").lower() in ("landed", "arrived") or t_diff <= 0) and not is_can
     
-    # ── 戰術覆寫：Airborne 智能偵測 (V9.11 修正版) ──
     is_airborne = False
     if not is_lan and not is_can:
         status_raw = f.get("status", "").lower()
         has_dep_time = f.get("departure", {}).get("actualTime") is not None
-        
-        if status_raw in ["en route", "enroute", "departed", "approaching", "active", "airborne"]:
-            is_airborne = True
-        elif has_dep_time:
-            is_airborne = True
-        elif t_type == "revised" and t_diff <= 150:
-            is_airborne = True
+        if status_raw in ["en route", "enroute", "departed", "approaching", "active", "airborne"]: is_airborne = True
+        elif has_dep_time: is_airborne = True
+        elif t_type == "revised" and t_diff <= 150: is_airborne = True
 
+    # ── 視覺層級 (Visual Hierarchy) 設定 ──
     if is_can:
         bc, sc, bg, st_txt = ("#475569", "#94A3B8", "#0F172A", "CANCELED") if (now_aest - s_dt).total_seconds() / 60 > 15 else ("#EF4444", "#F87171", "#1E293B", "CANCELED")
+        card_opacity, img_filter = "0.5", "grayscale(100%)"
     elif is_lan:
         l_min = max(0, -t_diff)
-        bc, sc, bg, st_txt = ("#10B981", "#34D399", "#1E293B", f"Landed {format_hm(l_min)} ago") if l_min <= RECENT_LANDED_MAX else ("#475569", "#94A3B8", "#0F172A", f"Landed {format_hm(l_min)} ago")
+        if l_min <= RECENT_LANDED_MAX:
+            bc, sc, bg, st_txt = "#059669", "#34D399", "#0F172A", f"Landed {format_hm(l_min)} ago"
+            card_opacity, img_filter = "0.75", "grayscale(40%)"
+        else:
+            bc, sc, bg, st_txt = "#475569", "#94A3B8", "#0F172A", f"Landed {format_hm(l_min)} ago"
+            card_opacity, img_filter = "0.4", "grayscale(80%)"
     else:
+        card_opacity, img_filter = "1.0", "none"
         m_left = max(0, t_diff)
         if   delay >= 12:  bc, sc, bg, st_txt = "#7F1D1D", "#FCA5A5", "#1E293B", "SEVERE DELAY"
         elif m_left < 25:  bc, sc, bg, st_txt = "#EF4444", "#F87171", "#1E293B", f"In {format_hm(m_left)}"
@@ -272,6 +279,8 @@ for f in unique_flights:
         "status_color": sc,
         "status_text":  st_txt,
         "bg_color":     bg,
+        "card_opacity": card_opacity,
+        "img_filter":   img_filter,
         "landed_mins":  max(0, -t_diff),
     })
 
@@ -305,13 +314,13 @@ for i, pf in enumerate(processed):
     has_photo = pf["photo_url"] != "NOT_FOUND"
 
     img_html = (
-        f'<div class="flip-container">'
+        f'<div class="flip-container" style="filter:{pf["img_filter"]};">'
         f'<label for="{mid}" style="cursor:pointer; display:block; width:100%; height:100%;">'
         f'<img src="{pf["logo_url"]}" class="flip-img logo-layer" style="border-color:{pf["border_color"]};"/>'
         f'<img src="{pf["photo_url"]}" class="flip-img photo-layer" style="border-color:{pf["border_color"]};"/>'
         f'</label></div>'
         if has_photo else
-        f'<div class="flip-container">'
+        f'<div class="flip-container" style="filter:{pf["img_filter"]};">'
         f'<img src="{pf["logo_url"]}" class="flip-img" style="border-color:{pf["border_color"]}; background:#FFF; padding:4px; object-fit:contain; border-radius:8px;"/>'
         f'</div>'
     )
@@ -320,19 +329,16 @@ for i, pf in enumerate(processed):
     time_color = "#7DD3FC" if tag == "Act" else ("#E2E8F0" if tag == "Est" else "#94A3B8")
     
     if not pf["is_landed"] and not pf["is_canceled"]:
-        if pf["is_airborne"]:
-            state_tag = ' <span style="color:#10B981; font-size:0.75em; font-weight:700;">🛫 Airborne</span>'
-        elif tag == "Sch":
-            state_tag = ' <span style="color:#FBBF24; font-size:0.75em; font-weight:700;">⚠️ Check Board</span>'
-        else:
-            state_tag = ""
+        if pf["is_airborne"]: state_tag = ' <span style="color:#10B981; font-size:0.75em; font-weight:700;">🛫 Airborne</span>'
+        elif tag == "Sch":    state_tag = ' <span style="color:#FBBF24; font-size:0.75em; font-weight:700;">⚠️ Check Board</span>'
+        else:                 state_tag = ""
     else:
         state_tag = ""
 
     zoom_src   = pf["photo_url"] if has_photo else pf["logo_url"]
 
     st.markdown(f"""
-    <div class="flight-card" style="border-left-color:{pf['border_color']}; background-color:{pf['bg_color']};">
+    <div class="flight-card" style="border-left-color:{pf['border_color']}; background-color:{pf['bg_color']}; opacity:{pf['card_opacity']};">
         {img_html}
         <div class="info-col">
             <div style="font-size:1.1em; font-weight:700;">{pf['num']}<span style="font-size:0.7em; color:#94A3B8; margin-left:8px;">{pf['origin']}</span></div>
@@ -358,9 +364,9 @@ cans = sorted([p for p in processed if p.get("is_canceled")], key=lambda x: x["s
 if cans:
     st.markdown("<hr style='margin:15px 0 8px 0; opacity:0.2;'><div style='color:#F87171; font-size:0.85em; font-weight:700; margin-bottom:5px;'>❌ Canceled</div>", unsafe_allow_html=True)
     for i, pf in enumerate(cans):
-        img_html = f'<div class="flip-container"><img src="{pf["logo_url"]}" class="flip-img" style="border-color:{pf["border_color"]}; background:#FFF; padding:4px; object-fit:contain; border-radius:8px;"/></div>'
+        img_html = f'<div class="flip-container" style="filter:{pf["img_filter"]};"><img src="{pf["logo_url"]}" class="flip-img" style="border-color:{pf["border_color"]}; background:#FFF; padding:4px; object-fit:contain; border-radius:8px;"/></div>'
         st.markdown(f"""
-        <div class="flight-card" style="border-left-color:{pf['border_color']}; background-color:{pf['bg_color']};">
+        <div class="flight-card" style="border-left-color:{pf['border_color']}; background-color:{pf['bg_color']}; opacity:{pf['card_opacity']};">
             {img_html}
             <div class="info-col">
                 <div style="font-size:1em; font-weight:700;">{pf['num']} <span style="font-size:0.75em; color:#94A3B8;">{pf['origin']}</span></div>
@@ -371,4 +377,4 @@ if cans:
             </div>
         </div>""", unsafe_allow_html=True)
 
-st.markdown("<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V9.11</div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V9.12</div>", unsafe_allow_html=True)
