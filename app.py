@@ -15,6 +15,7 @@ LOOKAHEAD_HOURS          = 8
 RECENT_LANDED_MAX        = 60
 GAP_MIN_MINUTES          = 20
 GAP_DISPLAY_MIN          = 5
+PAX_TO_STORE_MINS        = 25  
 IMAGE_WORKERS            = 15
 DOMESTIC_TERMINALS       = ('D', 'DOM', 'D-ANC', 'GAT')
 SMALL_AIRCRAFT_FILTER    = ('BEECH', 'FAIRCHILD', 'CESSNA', 'PIPER', 'PILATUS', 'KING AIR', 'METROLINER', 'SAAB')
@@ -200,7 +201,8 @@ with ThreadPoolExecutor(max_workers=IMAGE_WORKERS) as executor:
 processed = []
 for f in unique_flights:
     flight_num = f.get("number", "N/A")
-    dep_ap     = f.get("departure", {}).get("airport") or f.get("movement", {}).get("airport") or {}
+    dep_node   = f.get("departure") or {}
+    dep_ap     = dep_node.get("airport") or f.get("movement", {}).get("airport") or {}
     arr        = f.get("arrival") or f.get("movement") or {}
     ac_m       = f.get("aircraft", {}).get("model", "")
     ac_r       = f.get("aircraft", {}).get("reg", "")
@@ -219,13 +221,19 @@ for f in unique_flights:
         except: s_dt = best_dt
     else: s_dt = best_dt
 
+    # ── 核心修正：假預估時間過濾 (Fake Estimate Filter) ──
+    status_raw = f.get("status", "").lower()
+    has_dep_time = dep_node.get("actualTime") is not None
+    is_airborne = status_raw in ["en route", "enroute", "departed", "approaching", "active", "airborne"] or has_dep_time
+
+    # 如果 API 給了 revisedTime，但時間跟表定一模一樣，且飛機還沒起飛，這就是假雷達資料 -> 降級回 scheduled
+    if t_type == "revised" and abs((best_dt - s_dt).total_seconds()) < 60 and not is_airborne:
+        t_type = "scheduled"
+
     delay = (best_dt - s_dt).total_seconds() / 3600
     if delay < -2 or delay > 24: continue
 
     t_diff = int((best_dt - now_aest).total_seconds() / 60)
-    
-    # ── 嚴格判定 Landed 狀態 (防禦幽靈航班) ──
-    status_raw = f.get("status", "").lower()
     is_can = status_raw in ("canceled", "cancelled")
     
     is_lan = False
@@ -331,7 +339,12 @@ for i, pf in enumerate(processed):
     tag        = "Act" if (pf["is_landed"] or pf["time_type"] == "actual") else ("Est" if pf["time_type"] == "revised" else "Sch")
     time_color = "#7DD3FC" if tag == "Act" else ("#E2E8F0" if tag == "Est" else "#94A3B8")
     
-    state_tag = ' <span style="color:#FBBF24; font-size:0.75em; font-weight:700;">⚠️ Check Board</span>' if (tag == "Sch" and not pf["is_canceled"]) else ""
+    # 清除重複文字，直接在沒有真實預估時顯示 Sch 15:20 ⚠️ Check Board
+    if tag == "Sch" and not pf["is_canceled"]:
+        time_display = f'<span class="mono" style="color:#94A3B8;">Sch {pf["sch_time"]}</span> <span style="color:#FBBF24; font-size:0.75em; font-weight:700; margin-left:6px;">⚠️ Check Board</span>'
+    else:
+        time_display = f'<span class="mono" style="color:#94A3B8;">Sch {pf["sch_time"]}</span> • <span class="mono" style="color:{time_color}; font-weight:700;">{tag} {pf["actual_time"]}</span>'
+
     zoom_src  = pf["photo_url"] if has_photo else pf["logo_url"]
 
     st.markdown(f"""
@@ -340,7 +353,7 @@ for i, pf in enumerate(processed):
         <div class="info-col">
             <div style="font-size:1.1em; font-weight:700;">{pf['num']}<span style="font-size:0.7em; color:#94A3B8; margin-left:8px;">{pf['origin']}</span></div>
             <div style="font-size:0.7em; color:#CBD5E1; margin: 1px 0;">{pf['ac_text'][:25]}</div>
-            <div style="font-size:0.8em; color:#94A3B8;"><span class="mono">Sch {pf['sch_time']}</span> • <span class="mono" style="color:{time_color}; font-weight:700;">{tag} {pf['actual_time']}</span>{state_tag}</div>
+            <div style="font-size:0.8em; color:#94A3B8;">{time_display}</div>
         </div>
         <div class="status-col">
             <div style="font-size:0.6em; color:#94A3B8; font-weight:700; letter-spacing:1px;">GATE</div>
@@ -374,4 +387,4 @@ if cans:
             </div>
         </div>""", unsafe_allow_html=True)
 
-st.markdown("<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V9.17</div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V9.18</div>", unsafe_allow_html=True)
