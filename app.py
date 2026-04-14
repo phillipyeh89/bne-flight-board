@@ -17,8 +17,6 @@ GAP_MIN_MINUTES          = 20
 GAP_DISPLAY_MIN          = 5
 IMAGE_WORKERS            = 15
 DOMESTIC_TERMINALS       = ('D', 'DOM', 'D-ANC', 'GAT')
-
-# V9.8 修正：解除 DASH 8 與 FOKKER 封鎖 (保護太平洋島國航班)，保留 SAAB 與私人輕型機封鎖
 SMALL_AIRCRAFT_FILTER    = ('BEECH', 'FAIRCHILD', 'CESSNA', 'PIPER', 'PILATUS', 'KING AIR', 'METROLINER', 'SAAB')
 
 CITY_MAP = {
@@ -55,20 +53,12 @@ def extract_best_time(node: dict, tz) -> tuple:
                 continue
     return None, ""
 
-# V9.8 修正：加入 origin_iata 參數，建立白名單機制
 def is_strictly_international(terminal: str, country_code: str, aircraft_model: str, origin_iata: str) -> bool:
     t, ac, cc, iata = terminal.strip().upper(), aircraft_model.upper(), country_code.lower(), origin_iata.upper()
-    
-    # 1. 絕對豁免白名單 (Norfolk Island 強制顯示)
     if iata == "NLK": return True
-    
-    # 2. 國內航廈與國家代碼過濾
     if t in DOMESTIC_TERMINALS: return False
     if cc == "au":              return False
-    
-    # 3. 私人/微型飛機過濾
     if any(k in ac for k in SMALL_AIRCRAFT_FILTER): return False
-    
     return True
 
 def get_airline_logo_url(flight_number: str) -> str:
@@ -176,9 +166,11 @@ with st.expander(" 👋👋👋 (Operational Guide)"):
     **How to read the times:**
     * <span class="mono" style="color:#7DD3FC;font-weight:bold;">Act</span>: **Actual** landing time. The crowd is on their way!
     * <span class="mono" style="color:#E2E8F0;font-weight:bold;">Est</span>: **Estimated** arrival based on live radar. Very reliable.
-    * <span class="mono" style="color:#94A3B8;font-weight:bold;">Sch</span>: **Scheduled** time only.
+    * <span class="mono" style="color:#94A3B8;font-weight:bold;">Sch</span>: **Scheduled** time only. 
 
-    **Staff Tip:** Check the **'OFF-FLOOR GAP'** bars to see quiet periods between flights.
+    **Flight Status Tags:**
+    * 🛫 **Airborne**: The flight has officially departed its origin and is in the sky.
+    * ⚠️ **Check Board**: Flight hasn't departed yet or radar is missing. Check physical airport boards.
 
     *Developed by Phillip Yeh to support the BNE Lotte Team.*
     """, unsafe_allow_html=True)
@@ -215,8 +207,8 @@ for f in unique_flights:
     arr        = f.get("arrival") or f.get("movement") or {}
     ac_m       = f.get("aircraft", {}).get("model", "")
     ac_r       = f.get("aircraft", {}).get("reg", "")
+    status_raw = f.get("status", "").lower()
     
-    # V9.8 傳入 origin_iata 進行白名單檢查
     origin_iata = str(dep_ap.get("iata", ""))
     if not is_strictly_international(str(arr.get("terminal", "")), str(dep_ap.get("countryCode", "")), ac_m, origin_iata):
         continue
@@ -235,8 +227,15 @@ for f in unique_flights:
     if delay < -2 or delay > 24: continue
 
     t_diff = int((best_dt - now_aest).total_seconds() / 60)
-    is_can = f.get("status", "").lower() in ("canceled", "cancelled")
-    is_lan = (f.get("status", "").lower() in ("landed", "arrived") or t_diff <= 0) and not is_can
+    is_can = status_raw in ("canceled", "cancelled")
+    is_lan = (status_raw in ("landed", "arrived") or t_diff <= 0) and not is_can
+    
+    # Airborne Detection Logic
+    is_airborne = False
+    if not is_lan and not is_can:
+        has_dep_time = f.get("departure", {}).get("actualTime") is not None
+        if status_raw in ["en route", "enroute", "departed", "approaching", "active"] or has_dep_time:
+            is_airborne = True
 
     if is_can:
         bc, sc, bg, st_txt = ("#475569", "#94A3B8", "#0F172A", "CANCELED") if (now_aest - s_dt).total_seconds() / 60 > 15 else ("#EF4444", "#F87171", "#1E293B", "CANCELED")
@@ -261,6 +260,7 @@ for f in unique_flights:
         "sch_time":     s_dt.strftime("%H:%M"),
         "is_landed":    is_lan,
         "is_canceled":  is_can,
+        "is_airborne":  is_airborne,
         "dt":           best_dt,
         "s_dt_val":     s_dt,
         "time_type":    t_type,
@@ -316,7 +316,18 @@ for i, pf in enumerate(processed):
 
     tag        = "Act" if (pf["is_landed"] or pf["time_type"] == "actual") else ("Est" if pf["time_type"] == "revised" else "Sch")
     time_color = "#7DD3FC" if tag == "Act" else ("#E2E8F0" if tag == "Est" else "#94A3B8")
-    cb         = ' <span style="color:#FBBF24; font-size:0.75em;">⚠️ Check Board</span>' if (tag == "Sch" and not pf["is_canceled"]) else ""
+    
+    # State Tags: Airborne vs Check Board
+    if not pf["is_landed"] and not pf["is_canceled"]:
+        if pf["is_airborne"]:
+            state_tag = ' <span style="color:#10B981; font-size:0.75em; font-weight:700;">🛫 Airborne</span>'
+        elif tag == "Sch":
+            state_tag = ' <span style="color:#FBBF24; font-size:0.75em; font-weight:700;">⚠️ Check Board</span>'
+        else:
+            state_tag = ""
+    else:
+        state_tag = ""
+
     zoom_src   = pf["photo_url"] if has_photo else pf["logo_url"]
 
     st.markdown(f"""
@@ -325,7 +336,7 @@ for i, pf in enumerate(processed):
         <div class="info-col">
             <div style="font-size:1.1em; font-weight:700;">{pf['num']}<span style="font-size:0.7em; color:#94A3B8; margin-left:8px;">{pf['origin']}</span></div>
             <div style="font-size:0.7em; color:#CBD5E1; margin: 1px 0;">{pf['ac_text'][:25]}</div>
-            <div style="font-size:0.8em; color:#94A3B8;"><span class="mono">Sch {pf['sch_time']}</span> • <span class="mono" style="color:{time_color}; font-weight:700;">{tag} {pf['actual_time']}</span>{cb}</div>
+            <div style="font-size:0.8em; color:#94A3B8;"><span class="mono">Sch {pf['sch_time']}</span> • <span class="mono" style="color:{time_color}; font-weight:700;">{tag} {pf['actual_time']}</span>{state_tag}</div>
         </div>
         <div class="status-col">
             <div style="font-size:0.6em; color:#94A3B8; font-weight:700; letter-spacing:1px;">GATE</div>
@@ -345,7 +356,7 @@ for i, pf in enumerate(processed):
 cans = sorted([p for p in processed if p.get("is_canceled")], key=lambda x: x["s_dt_val"])
 if cans:
     st.markdown("<hr style='margin:15px 0 8px 0; opacity:0.2;'><div style='color:#F87171; font-size:0.85em; font-weight:700; margin-bottom:5px;'>❌ Canceled</div>", unsafe_allow_html=True)
-    for pf in cans:
+    for i, pf in enumerate(cans):
         img_html = f'<div class="flip-container"><img src="{pf["logo_url"]}" class="flip-img" style="border-color:{pf["border_color"]}; background:#FFF; padding:4px; object-fit:contain; border-radius:8px;"/></div>'
         st.markdown(f"""
         <div class="flight-card" style="border-left-color:{pf['border_color']}; background-color:{pf['bg_color']};">
@@ -359,4 +370,4 @@ if cans:
             </div>
         </div>""", unsafe_allow_html=True)
 
-st.markdown("<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V9.8</div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V9.9</div>", unsafe_allow_html=True)
