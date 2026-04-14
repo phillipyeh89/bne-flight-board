@@ -15,7 +15,6 @@ LOOKAHEAD_HOURS          = 8
 RECENT_LANDED_MAX        = 60
 GAP_MIN_MINUTES          = 20
 GAP_DISPLAY_MIN          = 5
-PAX_TO_STORE_MINS        = 25  # 降落後抓 25 分鐘抵達免稅店
 IMAGE_WORKERS            = 15
 DOMESTIC_TERMINALS       = ('D', 'DOM', 'D-ANC', 'GAT')
 SMALL_AIRCRAFT_FILTER    = ('BEECH', 'FAIRCHILD', 'CESSNA', 'PIPER', 'PILATUS', 'KING AIR', 'METROLINER', 'SAAB')
@@ -167,8 +166,8 @@ with st.expander(" 👋👋👋 (Operational Guide)"):
     * <span class="mono" style="color:#E2E8F0;font-weight:bold;">Est</span>: **Estimated** arrival based on live radar. Very reliable.
     * <span class="mono" style="color:#94A3B8;font-weight:bold;">Sch</span>: **Scheduled** time only. 
 
-    **Store Arrival Alerts:**
-    * 🏃 **At Store ~Xm**: The flight has landed and passengers are making their way to the store. Be ready!
+    **Flight Status Tags:**
+    * ⚠️ **Check Board**: Flight hasn't departed yet or radar is missing. Check physical airport boards.
 
     *Developed by Phillip Yeh to support the BNE Lotte Team.*
     """, unsafe_allow_html=True)
@@ -225,12 +224,11 @@ for f in unique_flights:
 
     t_diff = int((best_dt - now_aest).total_seconds() / 60)
     
-    # ── V9.16 幽靈航班防禦：嚴格判定 Landed 狀態 ──
+    # ── 嚴格判定 Landed 狀態 (防禦幽靈航班) ──
     status_raw = f.get("status", "").lower()
     is_can = status_raw in ("canceled", "cancelled")
     
     is_lan = False
-    # 只有 API 明確說降落，或者有「雷達/實際」訊號且時間過了，才算降落。絕對不相信 scheduled time。
     if status_raw in ("landed", "arrived"):
         is_lan = True
     elif t_diff <= 0 and t_type in ("actual", "revised"):
@@ -238,17 +236,13 @@ for f in unique_flights:
         
     is_lan = is_lan and not is_can
     
-    # ── 視覺層級與進店倒數 ──
+    # ── 視覺層級設定 ──
     if is_can:
         bc, sc, bg, st_txt = ("#475569", "#94A3B8", "#0F172A", "CANCELED") if (now_aest - s_dt).total_seconds() / 60 > 15 else ("#EF4444", "#F87171", "#1E293B", "CANCELED")
         card_opacity, img_filter = "0.5", "grayscale(100%)"
     elif is_lan:
         l_min = max(0, -t_diff)
-        time_to_store = PAX_TO_STORE_MINS - l_min
-        if time_to_store > 0:
-            bc, sc, bg, st_txt = "#F59E0B", "#FBBF24", "#0F172A", f"🏃 At Store ~{time_to_store}m"
-            card_opacity, img_filter = "1.0", "none"
-        elif l_min <= RECENT_LANDED_MAX:
+        if l_min <= RECENT_LANDED_MAX:
             bc, sc, bg, st_txt = "#059669", "#34D399", "#0F172A", f"Landed {format_hm(l_min)} ago"
             card_opacity, img_filter = "0.75", "grayscale(40%)"
         else:
@@ -258,7 +252,6 @@ for f in unique_flights:
         card_opacity, img_filter = "1.0", "none"
         m_left = max(0, t_diff)
         
-        # 幽靈航班 (Overdue Ghost Flight)：時間到了，既沒降落，也沒雷達訊號
         if t_type == "scheduled" and t_diff <= 0:
             bc, sc, bg, st_txt = "#F59E0B", "#FBBF24", "#0F172A", "NO UPDATE"
         elif delay >= 12:  
@@ -381,4 +374,4 @@ if cans:
             </div>
         </div>""", unsafe_allow_html=True)
 
-st.markdown("<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V9.16</div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V9.17</div>", unsafe_allow_html=True)
