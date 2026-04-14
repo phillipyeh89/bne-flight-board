@@ -80,7 +80,7 @@ def is_strictly_international(terminal: str, country_code: str, aircraft_model: 
     if iata == "NLK":                                    return True   # Norfolk Island override
     if t in DOMESTIC_TERMINALS:                          return False
     if cc == "au":                                       return False
-    if any(k in ac for k in SMALL_AIRCRAFT_FILTER):     return False
+    if any(k in ac for k in SMALL_AIRCRAFT_FILTER):      return False
     return True
 
 
@@ -137,7 +137,7 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
 
 
 # ─────────────────────────────────────────────
-#  3. UI SETUP & CSS  (V10.0)
+#  3. UI SETUP & CSS  (V10.1)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 st.markdown(f"""
@@ -231,9 +231,6 @@ with st.expander(" 👋👋👋 (Operational Guide)"):
     """, unsafe_allow_html=True)
 
 # ── Fetch ──────────────────────────────────────────────────────────────────────
-# Anchor: floor now_aest to nearest API_DATA_TTL_SEC boundary.
-# This makes the cache key stable for the full TTL window so @st.cache_data
-# actually hits — without it, the key changes every minute and the cache never fires.
 _epoch  = datetime(2000, 1, 1, tzinfo=aest)
 anchor  = (_epoch + timedelta(seconds=(int((now_aest - _epoch).total_seconds()) // API_DATA_TTL_SEC) * API_DATA_TTL_SEC)).strftime("%Y-%m-%dT%H:%M")
 
@@ -295,18 +292,6 @@ for f in unique_flights:
     else:
         s_dt = best_dt
 
-    # ── Fake Estimate Filter ───────────────────────────────────────────────────
-    # AeroDataBox sometimes returns a revisedTime that is identical to
-    # scheduledTime for flights that haven't departed yet — this is not real
-    # radar data. Detect this and downgrade the label back to "scheduled" so the
-    # ⚠️ Check Board warning fires correctly.
-    #
-    # Condition: type is "revised" AND rev == sch (within 60s) AND aircraft
-    # has NOT departed origin (no actual departure time, status not airborne).
-    has_departed = (dep_node.get("actualTime") is not None) or (status_raw in AIRBORNE_STATUSES)
-    if t_type == "revised" and abs((best_dt - s_dt).total_seconds()) < 60 and not has_departed:
-        t_type = "scheduled"
-
     # Sanity guard: skip records with implausible delay (API tz mismatch / stale data)
     delay = (best_dt - s_dt).total_seconds() / 3600
     if delay < -2 or delay > 24:
@@ -317,7 +302,6 @@ for f in unique_flights:
 
     # Stricter landing detection:
     # Only mark landed if the API confirms it OR if actual/revised time has passed.
-    # A flight past its SCHEDULED time only → show "NO UPDATE" (radar not connected).
     is_lan = False
     if status_raw in ("landed", "arrived"):
         is_lan = True
@@ -347,10 +331,12 @@ for f in unique_flights:
         if t_type == "scheduled" and t_diff <= 0:
             # Past scheduled time but no actual/revised confirmation → unknown
             bc, sc, bg, st_txt = "#F59E0B", "#FBBF24", "#0F172A", "NO UPDATE"
+        elif t_diff < 0 and t_type == "revised":
+            # Passed the estimated time but hasn't landed yet
+            bc, sc, bg, st_txt = "#F59E0B", "#FBBF24", "#0F172A", "APPROACHING"
         elif delay >= SEVERE_DELAY_HOURS:
             bc, sc, bg, st_txt = "#7F1D1D", "#FCA5A5", "#1E293B", "SEVERE DELAY"
         elif delay >= HEAVY_DELAY_HOURS:
-            # FIX: restored from V7/V8 — was missing in V9.18
             bc, sc, bg, st_txt = "#92400E", "#FBBF24", "#1E293B", f"🟠 Delayed {format_hm(m_left)}"
         elif m_left < IMMINENT_MINS:
             bc, sc, bg, st_txt = "#EF4444", "#F87171", "#1E293B", f"In {format_hm(m_left)}"
@@ -414,7 +400,7 @@ processed.sort(key=lambda p:
     (1, p["time_key"])              if p.get("is_gap")                                         else
     (2, p["s_dt_val"].timestamp())  if p["is_canceled"]                                        else
     (0, -p["dt"].timestamp())       if p["is_landed"] and p["landed_mins"] <= RECENT_LANDED_MAX else
-    (2, -p["dt"].timestamp())       if p["is_landed"]                                           else
+    (2, -p["dt"].timestamp())       if p["is_landed"]                                          else
     (1, p["dt"].timestamp())
 )
 
@@ -507,6 +493,6 @@ if cans:
         </div>""", unsafe_allow_html=True)
 
 st.markdown(
-    "<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V10.0</div>",
+    "<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V10.1 (Radar Trusted)</div>",
     unsafe_allow_html=True,
 )
