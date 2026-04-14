@@ -31,7 +31,7 @@ STALE_DATA_THRESHOLD_MIN = 30
 
 
 # ─────────────────────────────────────────────
-#  2. CORE LOGIC  (unchanged from V9.3 baseline)
+#  2. CORE LOGIC 
 # ─────────────────────────────────────────────
 def format_hm(total_minutes: int) -> str:
     h, m = divmod(total_minutes, 60)
@@ -87,7 +87,6 @@ def get_photo_from_api(reg: str) -> str:
     return "NOT_FOUND"
 
 
-# FIX: expose API errors instead of swallowing them silently
 @st.cache_data(ttl=API_DATA_TTL_SEC, show_spinner=False)
 def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
     url = f"https://aerodatabox.p.rapidapi.com/flights/airports/icao/{AIRPORT_ICAO}/{from_time}/{to_time}"
@@ -105,13 +104,12 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
         st.session_state.api_last_hit = datetime.now(pytz.timezone(TIMEZONE))
         return r.json().get("arrivals", [])
     except Exception as e:
-        # Save error to session state so it can be displayed outside the cached function
         st.session_state.api_error = str(e)
         return []
 
 
 # ─────────────────────────────────────────────
-#  3. UI SETUP & CSS  (V9.5)
+#  3. UI SETUP & CSS 
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 st.markdown(f"""
@@ -124,10 +122,11 @@ st.markdown(f"""
     .mono {{ font-family: 'JetBrains Mono', monospace; letter-spacing: -0.5px; }}
 
     .flip-container {{ position: relative; width: 55px; height: 55px; margin-right: 12px; flex-shrink: 0; }}
-    .flip-img {{ position: absolute; top: 0; left: 0; width: 55px; height: 55px; border-radius: 28px; border: 2.5px solid #475569; transition: opacity 1s ease-in-out; }}
+    /* Unified to 8px border-radius for both logo and photo */
+    .flip-img {{ position: absolute; top: 0; left: 0; width: 55px; height: 55px; border-radius: 8px; border: 2.5px solid #475569; transition: opacity 1s ease-in-out; }}
     @keyframes logoFade {{ 0%, 45% {{ opacity: 1; }} 55%, 100% {{ opacity: 0; }} }}
     @keyframes photoFade {{ 0%, 45% {{ opacity: 0; }} 55%, 95% {{ opacity: 1; }} 100% {{ opacity: 0; }} }}
-    .logo-layer {{ animation: logoFade 10s infinite; background: #FFFFFF; padding: 4px; object-fit: contain; border-radius: 6px; z-index: 2; }}
+    .logo-layer {{ animation: logoFade 10s infinite; background: #FFFFFF; padding: 4px; object-fit: contain; border-radius: 8px; z-index: 2; }}
     .photo-layer {{ animation: photoFade 10s infinite; object-fit: cover; z-index: 1; }}
 
     .flight-card {{
@@ -162,7 +161,7 @@ st.markdown(f"""
 #  4. EXECUTION
 # ─────────────────────────────────────────────
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
-if "api_error"   not in st.session_state: st.session_state.api_error    = None
+if "api_error"    not in st.session_state: st.session_state.api_error    = None
 
 aest     = pytz.timezone(TIMEZONE)
 now_aest = datetime.now(aest)
@@ -199,7 +198,7 @@ with st.expander(" 👋👋👋 (Operational Guide)"):
     *Developed by Phillip Yeh to support the BNE Lotte Team.*
     """, unsafe_allow_html=True)
 
-# ── Fetch  (anchor from V9.3 — known correct) ─────────────────────────────────
+# ── Fetch  ─────────────────────────────────
 anchor = (
     datetime(2000, 1, 1, tzinfo=aest)
     + timedelta(seconds=(
@@ -214,7 +213,6 @@ raw_flights = fetch_flight_data(
     (now_aest + timedelta(hours=LOOKAHEAD_HOURS)).strftime("%Y-%m-%dT%H:%M"),
 )
 
-# Show API error if one was captured on this or the previous run
 if st.session_state.api_error:
     st.error(f"⚠️ API Error — {st.session_state.api_error}")
     st.session_state.api_error = None
@@ -223,9 +221,7 @@ if not raw_flights:
     st.info("⏳ Synchronizing radar... data will appear on next refresh.")
     st.stop()
 
-# ── Deduplicate: keep FIRST occurrence per flight number ──────────────────────
-# V9.3 used a dict comprehension which silently kept the LAST duplicate.
-# The first record from AeroDataBox is the more stable/original one.
+# ── Deduplicate ──────────────────────
 seen: dict = {}
 for f in raw_flights:
     num = f.get("number")
@@ -255,8 +251,6 @@ for f in unique_flights:
     if not best_dt:
         continue
 
-    # FIX: guard against passing an already-tz-aware datetime into pd.to_datetime
-    # when scheduledTime is absent and we fall back to best_dt.
     sch_val = arr.get("scheduledTime")
     sch_raw = sch_val.get("local") if isinstance(sch_val, dict) else None
     if sch_raw:
@@ -269,7 +263,6 @@ for f in unique_flights:
 
     delay = (best_dt - s_dt).total_seconds() / 3600
 
-    # FIX: skip records with implausible delay values (API data errors / tz mismatches)
     if delay < -2 or delay > 24:
         continue
 
@@ -436,6 +429,6 @@ if cans:
 
 st.markdown(
     "<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>"
-    "Dev: Phillip Yeh | V9.5</div>",
+    "Dev: Phillip Yeh | V9.6</div>",
     unsafe_allow_html=True,
 )
