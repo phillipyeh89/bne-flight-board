@@ -44,13 +44,20 @@ def format_hm(total_minutes: int) -> str:
 def _parse_dt(raw: str | None, tz) -> datetime | None:
     """
     Parse an ISO-ish local datetime string from AeroDataBox and attach tz.
-    Replaces pd.to_datetime — ~15x faster, no pandas dependency.
-    Handles both 'YYYY-MM-DDTHH:MM' and 'YYYY-MM-DD HH:MM' variants.
+    Replaces pd.to_datetime — no pandas dependency.
+
+    AeroDataBox returns 'YYYY-MM-DDTHH:MM' (no seconds).
+    Python <= 3.10 fromisoformat() requires full 'HH:MM:SS', so we pad to 19
+    chars before parsing. Python 3.11+ is lenient, but the pad is harmless.
+    Handles both 'T' and space-separated variants.
     """
     if not raw:
         return None
     try:
-        dt = datetime.fromisoformat(raw.replace(" ", "T")[:19])
+        normalised = raw.strip().replace(" ", "T")[:19]
+        if len(normalised) == 16:   # 'YYYY-MM-DDTHH:MM' — missing seconds
+            normalised += ":00"
+        dt = datetime.fromisoformat(normalised)
         return tz.localize(dt)
     except (ValueError, AttributeError):
         return None
@@ -491,6 +498,6 @@ if canceled:
         </div>""", unsafe_allow_html=True)
 
 st.markdown(
-    "<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V9.4</div>",
+    "<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V9.4.1</div>",
     unsafe_allow_html=True,
 )
