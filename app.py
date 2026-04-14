@@ -20,6 +20,11 @@ GAP_MIN_MINUTES    = 20
 GAP_DISPLAY_MIN    = 5
 IMAGE_WORKERS      = 15
 
+# Restored Timer Constants
+UI_REFRESH_SEC           = 60
+API_DATA_TTL_SEC         = 600
+STALE_DATA_THRESHOLD_MIN = 30
+
 DOMESTIC_TERMINALS    = {'D', 'DOM', 'D-ANC', 'GAT'}
 SMALL_AIRCRAFT_FILTER = {'BEECH', 'FAIRCHILD', 'CESSNA', 'PIPER', 'PILATUS', 'KING AIR', 'METROLINER', 'SAAB'}
 CITY_MAP = {
@@ -29,7 +34,6 @@ CITY_MAP = {
 }
 
 # --- UI Theme Dictionary ---
-# Centralized styling makes it easy to change colors later without digging into logic.
 THEMES = {
     "CANCELED":    {"bg": "#0F172A", "border": "#475569", "text": "#94A3B8", "opacity": "0.5", "filter": "grayscale(100%)"},
     "CANCELED_NEW":{"bg": "#1E293B", "border": "#EF4444", "text": "#F87171", "opacity": "0.5", "filter": "grayscale(100%)"},
@@ -43,15 +47,13 @@ THEMES = {
 }
 
 # =====================================================================
-# 2. DATA MODELS (The Object-Oriented Approach)
+# 2. DATA MODELS 
 # =====================================================================
 class Flight:
-    """Encapsulates all logic and data for a single flight."""
     def __init__(self, raw_data: dict, now_tz: datetime):
         self.raw = raw_data
         self.now = now_tz
         
-        # Basic Extraction
         self.number = self.raw.get("number", "N/A")
         self.status_raw = self.raw.get("status", "").lower()
         
@@ -71,22 +73,18 @@ class Flight:
         self.ac_reg = ac.get("reg", "")
         self.ac_text = f"{self.ac_model} ({self.ac_reg})" if self.ac_model and self.ac_reg else self.ac_model or self.ac_reg
 
-        # Time Calculation
         self.s_dt, self.best_dt, self.time_type = self._parse_times(arr, dep)
         self.mins_to_arrival = int((self.best_dt - self.now).total_seconds() / 60)
         self.delay_hours = (self.best_dt - self.s_dt).total_seconds() / 3600
 
-        # State Flags
         self.is_canceled = self.status_raw in ("canceled", "cancelled")
         self.is_landed = self._determine_if_landed()
         
-        # Display & UI properties
         self.logo_url = self._generate_logo_url()
-        self.photo_url = "NOT_FOUND" # Populated later via threading
+        self.photo_url = "NOT_FOUND" 
         self.ui_state = self._determine_ui_state()
 
     def is_valid_international(self) -> bool:
-        """The strict gatekeeper logic."""
         if self.origin_iata == "NLK": return True
         if self.terminal in DOMESTIC_TERMINALS: return False
         if self.country_code == "au": return False
@@ -97,7 +95,6 @@ class Flight:
         h, m = divmod(abs(total_minutes), 60)
         return f"{m:02d}m" if h == 0 else f"{h:02d}h {m:02d}m"
 
-    # --- Internal Logic Methods ---
     def _parse_times(self, arr_node: dict, dep_node: dict) -> Tuple[datetime, datetime, str]:
         s_dt_raw = arr_node.get("scheduledTime", {}).get("local")
         s_dt = pd.to_datetime(s_dt_raw).replace(tzinfo=None) if s_dt_raw else datetime.min
@@ -111,7 +108,6 @@ class Flight:
                 best_dt, t_type = dt, label
                 break
 
-        # Fake Estimate Defense
         is_airborne = self.status_raw in ["en route", "enroute", "departed", "approaching", "active", "airborne"] or dep_node.get("actualTime")
         if t_type == "revised" and abs((best_dt - s_dt).total_seconds()) < 60 and not is_airborne:
             t_type = "scheduled"
@@ -125,7 +121,6 @@ class Flight:
         return False
 
     def _determine_ui_state(self) -> dict:
-        """Maps business logic directly to a UI theme."""
         if self.is_canceled:
             is_old_cancel = (self.now - self.s_dt).total_seconds() / 60 > 15
             theme = THEMES["CANCELED"] if is_old_cancel else THEMES["CANCELED_NEW"]
@@ -142,7 +137,6 @@ class Flight:
             else:
                 return {"theme": THEMES["LANDED_OLD"], "text": f"Landed {self.format_time(mins_ago)} ago"}
 
-        # Not Landed, Not Cancelled
         if self.time_type == "scheduled" and self.mins_to_arrival <= 0:
             return {"theme": THEMES["NO_UPDATE"], "text": "NO UPDATE"}
         if self.delay_hours >= 12:
@@ -183,7 +177,6 @@ def fetch_aircraft_photo(reg: str) -> str:
     return "NOT_FOUND"
 
 def get_anchor_time(now: datetime) -> str:
-    """Generates a stable cache key string based on TTL intervals."""
     epoch = datetime(2000, 1, 1, tzinfo=TIMEZONE)
     delta_seconds = int((now - epoch).total_seconds())
     bucket = (delta_seconds // API_DATA_TTL_SEC) * API_DATA_TTL_SEC
@@ -193,20 +186,17 @@ def get_anchor_time(now: datetime) -> str:
 # 4. PRESENTATION LAYER (UI Rendering)
 # =====================================================================
 def render_flight_card(f: Flight, index: int):
-    """Generates the HTML for a single flight."""
     mid = f"z_{index}"
     t = f.ui_state["theme"]
     tag = "Act" if (f.is_landed or f.time_type == "actual") else ("Est" if f.time_type == "revised" else "Sch")
     time_color = "#7DD3FC" if tag == "Act" else ("#E2E8F0" if tag == "Est" else "#94A3B8")
     
-    # Text displays
-    check_board_html = ' <span style="color:#FBBF24; font-size:0.75em; font-weight:700;">⚠️ Check Board</span>' if (tag == "Sch" and not f.is_canceled) else ""
+    check_board_html = ' <span style="color:#FBBF24; font-size:0.75em; font-weight:700; margin-left:6px;">⚠️ Check Board</span>' if (tag == "Sch" and not f.is_canceled) else ""
     if tag == "Sch" and not f.is_canceled:
         time_display = f'<span class="mono" style="color:#94A3B8;">Sch {f.s_dt.strftime("%H:%M")}</span>{check_board_html}'
     else:
         time_display = f'<span class="mono" style="color:#94A3B8;">Sch {f.s_dt.strftime("%H:%M")}</span> • <span class="mono" style="color:{time_color}; font-weight:700;">{tag} {f.best_dt.strftime("%H:%M")}</span>'
 
-    # Image processing
     has_photo = f.photo_url != "NOT_FOUND"
     img_html = (
         f'<div class="flip-container" style="filter:{t["filter"]};">'
@@ -249,8 +239,6 @@ def render_flight_card(f: Flight, index: int):
 def main():
     st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
     
-    # Apply CSS
-    with open("style.css", "w") as f: pass # Placeholder if external CSS is used. Inline below:
     st.markdown(f"""
     <meta http-equiv="refresh" content="{UI_REFRESH_SEC}">
     <style>
@@ -277,7 +265,6 @@ def main():
     </style>
     """, unsafe_allow_html=True)
 
-    # State & Header
     if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
     if "api_error" not in st.session_state: st.session_state.api_error = None
     now = datetime.now(TIMEZONE)
@@ -289,7 +276,23 @@ def main():
         api_t = st.session_state.get("api_last_hit")
         st.markdown(f'<div style="font-size:0.7em;color:#64748B;text-align:right;">API: {api_t.strftime("%H:%M") if api_t else "--:--"}</div>', unsafe_allow_html=True)
 
-    # Fetch Data
+    with st.expander(" 👋👋👋 (Operational Guide)"):
+        st.markdown("""
+        **Why use this app?**
+        I built this dashboard to help us manage our daily shifts more easily. Use it to predict peak traffic, coordinate floor tasks, and plan your break windows (Gaps) with confidence.
+
+        **How to read the times:**
+        * <span class="mono" style="color:#7DD3FC;font-weight:bold;">Act</span>: **Actual** landing time. The crowd is on their way!
+        * <span class="mono" style="color:#E2E8F0;font-weight:bold;">Est</span>: **Estimated** arrival based on live radar. Very reliable.
+        * <span class="mono" style="color:#94A3B8;font-weight:bold;">Sch</span>: **Scheduled** time only. 
+
+        **Store Arrival Alerts:**
+        * 🏃 **At Store ~Xm**: The flight has landed and passengers are making their way to the store. Be ready!
+        * ⚠️ **Check Board**: Flight hasn't departed yet or radar is missing. Check physical airport boards.
+
+        *Developed by Phillip Yeh to support the BNE Lotte Team.*
+        """, unsafe_allow_html=True)
+
     anchor = get_anchor_time(now)
     from_str = (now - timedelta(hours=LOOKBACK_HOURS)).strftime("%Y-%m-%dT%H:%M")
     to_str = (now + timedelta(hours=LOOKAHEAD_HOURS)).strftime("%Y-%m-%dT%H:%M")
@@ -304,7 +307,6 @@ def main():
         st.info("⏳ Synchronizing radar... data will appear on next refresh.")
         st.stop()
 
-    # Parse, Filter & Deduplicate
     flight_dict = {}
     for raw_f in raw_data:
         f = Flight(raw_f, now)
@@ -313,7 +315,6 @@ def main():
     
     flights = list(flight_dict.values())
 
-    # Concurrent Photo Fetching
     unique_regs = {f.ac_reg for f in flights if f.ac_reg}
     with ThreadPoolExecutor(max_workers=IMAGE_WORKERS) as executor:
         photo_results = list(executor.map(fetch_aircraft_photo, unique_regs))
@@ -322,7 +323,6 @@ def main():
     for f in flights:
         f.photo_url = photo_map.get(f.ac_reg, "NOT_FOUND")
 
-    # Generate Gaps
     active_flights = sorted([f for f in flights if not f.is_landed and not f.is_canceled], key=lambda x: x.best_dt)
     gaps = []
     if active_flights:
@@ -336,7 +336,6 @@ def main():
                 html = f'<div class="{cls}">{lbl} {format_hm(g_mins)} GAP <span style="opacity:0.6; font-weight:400; margin-left:8px;">({max(t1, now).strftime("%H:%M")}–{t2.strftime("%H:%M")})</span></div>'
                 gaps.append({"is_gap": True, "dt": t1, "html": html})
 
-    # Master Sort
     display_items = [{"is_gap": False, "obj": f} for f in flights] + gaps
     
     def sort_key(item):
@@ -349,7 +348,6 @@ def main():
 
     display_items.sort(key=sort_key)
 
-    # Render Screen
     for i, item in enumerate(display_items):
         if item["is_gap"]:
             st.markdown(item["html"], unsafe_allow_html=True)
@@ -357,14 +355,13 @@ def main():
             f = item["obj"]
             if not f.is_canceled: render_flight_card(f, i)
 
-    # Render Cancelled Section
     cancelled_flights = [item["obj"] for item in display_items if not item["is_gap"] and item["obj"].is_canceled]
     if cancelled_flights:
         st.markdown("<hr style='margin:15px 0 8px 0; opacity:0.2;'><div style='color:#F87171; font-size:0.85em; font-weight:700; margin-bottom:5px;'>❌ Canceled</div>", unsafe_allow_html=True)
         for i, f in enumerate(cancelled_flights):
-            render_flight_card(f, i + 999) # Offset index for unique modal IDs
+            render_flight_card(f, i + 999) 
 
-    st.markdown("<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V10.0 (Clean Architecture)</div>", unsafe_allow_html=True)
+    st.markdown("<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V10.1 (Clean Architecture)</div>", unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
