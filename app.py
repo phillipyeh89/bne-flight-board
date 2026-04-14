@@ -207,7 +207,6 @@ for f in unique_flights:
     arr        = f.get("arrival") or f.get("movement") or {}
     ac_m       = f.get("aircraft", {}).get("model", "")
     ac_r       = f.get("aircraft", {}).get("reg", "")
-    status_raw = f.get("status", "").lower()
     
     origin_iata = str(dep_ap.get("iata", ""))
     if not is_strictly_international(str(arr.get("terminal", "")), str(dep_ap.get("countryCode", "")), ac_m, origin_iata):
@@ -227,14 +226,23 @@ for f in unique_flights:
     if delay < -2 or delay > 24: continue
 
     t_diff = int((best_dt - now_aest).total_seconds() / 60)
-    is_can = status_raw in ("canceled", "cancelled")
-    is_lan = (status_raw in ("landed", "arrived") or t_diff <= 0) and not is_can
+    is_can = f.get("status", "").lower() in ("canceled", "cancelled")
+    is_lan = (f.get("status", "").lower() in ("landed", "arrived") or t_diff <= 0) and not is_can
     
-    # Airborne Detection Logic
+    # ── 戰術覆寫：Airborne 智能偵測 ──
     is_airborne = False
     if not is_lan and not is_can:
+        status_raw = f.get("status", "").lower()
         has_dep_time = f.get("departure", {}).get("actualTime") is not None
-        if status_raw in ["en route", "enroute", "departed", "approaching", "active"] or has_dep_time:
+        
+        # 1. API 明確回報已升空
+        if status_raw in ["en route", "enroute", "departed", "approaching", "active", "airborne"]:
+            is_airborne = True
+        # 2. API 有給實際起飛時間
+        elif has_dep_time:
+            is_airborne = True
+        # 3. 智能推斷：只要有雷達動態時間 (Est) 且距離抵達小於 6 小時 (360分鐘)，強制判定為已升空
+        elif t_type == "revised" and t_diff <= 360:
             is_airborne = True
 
     if is_can:
@@ -370,4 +378,4 @@ if cans:
             </div>
         </div>""", unsafe_allow_html=True)
 
-st.markdown("<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V9.9</div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V9.10</div>", unsafe_allow_html=True)
