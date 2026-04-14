@@ -122,12 +122,15 @@ st.markdown(f"""
     .mono {{ font-family: 'JetBrains Mono', monospace; letter-spacing: -0.5px; }}
 
     .flip-container {{ position: relative; width: 55px; height: 55px; margin-right: 12px; flex-shrink: 0; }}
-    /* Unified to 8px border-radius for both logo and photo */
-    .flip-img {{ position: absolute; top: 0; left: 0; width: 55px; height: 55px; border-radius: 8px; border: 2.5px solid #475569; transition: opacity 1s ease-in-out; }}
+    /* Box-sizing ensures border doesn't shrink the image unexpectedly */
+    .flip-img {{ position: absolute; top: 0; left: 0; width: 55px; height: 55px; border-radius: 8px; border: 2.5px solid #475569; transition: opacity 1s ease-in-out; box-sizing: border-box; }}
+    
     @keyframes logoFade {{ 0%, 45% {{ opacity: 1; }} 55%, 100% {{ opacity: 0; }} }}
     @keyframes photoFade {{ 0%, 45% {{ opacity: 0; }} 55%, 95% {{ opacity: 1; }} 100% {{ opacity: 0; }} }}
-    .logo-layer {{ animation: logoFade 10s infinite; background: #FFFFFF; padding: 4px; object-fit: contain; border-radius: 8px; z-index: 2; }}
-    .photo-layer {{ animation: photoFade 10s infinite; object-fit: cover; z-index: 1; }}
+    
+    /* Logo uses contain (with padding), Photo uses cover (fills the whole square) */
+    .logo-layer {{ animation: logoFade 10s infinite; background: #FFFFFF; padding: 4px; object-fit: contain !important; border-radius: 8px; z-index: 2; }}
+    .photo-layer {{ animation: photoFade 10s infinite; object-fit: cover !important; z-index: 1; }}
 
     .flight-card {{
         background-color: #1E293B; border-radius: 10px; padding: 10px 14px;
@@ -360,9 +363,10 @@ for i, pf in enumerate(processed):
     mid       = f"z_{i}"
     has_photo = pf["photo_url"] != "NOT_FOUND"
 
+    # Explicit inline object-fit covers any potential CSS overrides
     img_html = (
         f'<div class="flip-container">'
-        f'<label for="{mid}" style="cursor:pointer;">'
+        f'<label for="{mid}" style="cursor:pointer; display:block; width:100%; height:100%;">'
         f'<img src="{pf["logo_url"]}" class="flip-img logo-layer" style="border-color:{pf["border_color"]};"/>'
         f'<img src="{pf["photo_url"]}" class="flip-img photo-layer" style="border-color:{pf["border_color"]};"/>'
         f'</label></div>'
