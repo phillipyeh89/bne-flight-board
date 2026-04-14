@@ -15,6 +15,7 @@ LOOKAHEAD_HOURS          = 8
 RECENT_LANDED_MAX        = 60
 GAP_MIN_MINUTES          = 20
 GAP_DISPLAY_MIN          = 5
+PAX_TO_STORE_MINS        = 25  # 降落後抓 25 分鐘抵達免稅店
 IMAGE_WORKERS            = 15
 DOMESTIC_TERMINALS       = ('D', 'DOM', 'D-ANC', 'GAT')
 SMALL_AIRCRAFT_FILTER    = ('BEECH', 'FAIRCHILD', 'CESSNA', 'PIPER', 'PILATUS', 'KING AIR', 'METROLINER', 'SAAB')
@@ -28,7 +29,6 @@ CITY_MAP = {
 UI_REFRESH_SEC           = 60
 API_DATA_TTL_SEC         = 600
 STALE_DATA_THRESHOLD_MIN = 30
-
 
 # ─────────────────────────────────────────────
 #  2. CORE LOGIC 
@@ -89,7 +89,6 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
         st.session_state.api_error = str(e)
         return []
 
-
 # ─────────────────────────────────────────────
 #  3. UI SETUP & CSS 
 # ─────────────────────────────────────────────
@@ -140,7 +139,6 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-
 # ─────────────────────────────────────────────
 #  4. EXECUTION
 # ─────────────────────────────────────────────
@@ -169,8 +167,8 @@ with st.expander(" 👋👋👋 (Operational Guide)"):
     * <span class="mono" style="color:#E2E8F0;font-weight:bold;">Est</span>: **Estimated** arrival based on live radar. Very reliable.
     * <span class="mono" style="color:#94A3B8;font-weight:bold;">Sch</span>: **Scheduled** time only. 
 
-    **Flight Status Tags:**
-    * ⚠️ **Check Board**: Flight hasn't departed yet or radar is missing. Check physical airport boards.
+    **Store Arrival Alerts:**
+    * 🏃 **At Store ~Xm**: The flight has landed and passengers are making their way to the store. Be ready!
 
     *Developed by Phillip Yeh to support the BNE Lotte Team.*
     """, unsafe_allow_html=True)
@@ -226,16 +224,31 @@ for f in unique_flights:
     if delay < -2 or delay > 24: continue
 
     t_diff = int((best_dt - now_aest).total_seconds() / 60)
-    is_can = f.get("status", "").lower() in ("canceled", "cancelled")
-    is_lan = (f.get("status", "").lower() in ("landed", "arrived") or t_diff <= 0) and not is_can
     
-    # ── 視覺層級 (Visual Hierarchy) ──
+    # ── V9.16 幽靈航班防禦：嚴格判定 Landed 狀態 ──
+    status_raw = f.get("status", "").lower()
+    is_can = status_raw in ("canceled", "cancelled")
+    
+    is_lan = False
+    # 只有 API 明確說降落，或者有「雷達/實際」訊號且時間過了，才算降落。絕對不相信 scheduled time。
+    if status_raw in ("landed", "arrived"):
+        is_lan = True
+    elif t_diff <= 0 and t_type in ("actual", "revised"):
+        is_lan = True
+        
+    is_lan = is_lan and not is_can
+    
+    # ── 視覺層級與進店倒數 ──
     if is_can:
         bc, sc, bg, st_txt = ("#475569", "#94A3B8", "#0F172A", "CANCELED") if (now_aest - s_dt).total_seconds() / 60 > 15 else ("#EF4444", "#F87171", "#1E293B", "CANCELED")
         card_opacity, img_filter = "0.5", "grayscale(100%)"
     elif is_lan:
         l_min = max(0, -t_diff)
-        if l_min <= RECENT_LANDED_MAX:
+        time_to_store = PAX_TO_STORE_MINS - l_min
+        if time_to_store > 0:
+            bc, sc, bg, st_txt = "#F59E0B", "#FBBF24", "#0F172A", f"🏃 At Store ~{time_to_store}m"
+            card_opacity, img_filter = "1.0", "none"
+        elif l_min <= RECENT_LANDED_MAX:
             bc, sc, bg, st_txt = "#059669", "#34D399", "#0F172A", f"Landed {format_hm(l_min)} ago"
             card_opacity, img_filter = "0.75", "grayscale(40%)"
         else:
@@ -244,9 +257,16 @@ for f in unique_flights:
     else:
         card_opacity, img_filter = "1.0", "none"
         m_left = max(0, t_diff)
-        if   delay >= 12:  bc, sc, bg, st_txt = "#7F1D1D", "#FCA5A5", "#1E293B", "SEVERE DELAY"
-        elif m_left < 25:  bc, sc, bg, st_txt = "#EF4444", "#F87171", "#1E293B", f"In {format_hm(m_left)}"
-        else:              bc, sc, bg, st_txt = "#3B82F6", "#60A5FA", "#1E293B", f"In {format_hm(m_left)}"
+        
+        # 幽靈航班 (Overdue Ghost Flight)：時間到了，既沒降落，也沒雷達訊號
+        if t_type == "scheduled" and t_diff <= 0:
+            bc, sc, bg, st_txt = "#F59E0B", "#FBBF24", "#0F172A", "NO UPDATE"
+        elif delay >= 12:  
+            bc, sc, bg, st_txt = "#7F1D1D", "#FCA5A5", "#1E293B", "SEVERE DELAY"
+        elif m_left < 25:  
+            bc, sc, bg, st_txt = "#EF4444", "#F87171", "#1E293B", f"In {format_hm(m_left)}"
+        else:              
+            bc, sc, bg, st_txt = "#3B82F6", "#60A5FA", "#1E293B", f"In {format_hm(m_left)}"
 
     city = CITY_MAP.get(dep_ap.get("municipalityName") or dep_ap.get("name"), dep_ap.get("municipalityName") or dep_ap.get("name") or "Unknown")
 
