@@ -144,7 +144,7 @@ with c2:
     st.markdown(f'<div style="font-size:0.7em;color:#64748B;text-align:right;">{api_txt}</div>', unsafe_allow_html=True)
 
 # NEW: Staff-Oriented Operational Guide
-with st.expander("👋 Team, read this first (Operational Guide)"):
+with st.expander("👋 (Operational Guide)"):
     st.markdown(f"""
     **Why use this app?**
     I built this dashboard to help us manage our daily shifts more easily. Use it to predict peak traffic, coordinate floor tasks, and plan your break windows (Gaps) with confidence.
