@@ -95,14 +95,16 @@ def is_strictly_international(terminal: str, country_code: str, aircraft_model: 
     return True
 
 
-def _get_cache_anchor(now_aest: datetime) -> str:
+def _get_cache_anchor(now_aest: datetime, tz) -> str:
     """
     Floor 'now' to the nearest API_DATA_TTL_SEC boundary so the cache key is
     stable for the full TTL window.  Without this, from_t/to_t tick every minute
-    and @st.cache_data never gets a hit — effectively disabling the cache and
-    burning through the 6k/month RapidAPI quota at ~60 calls/hr instead of ~6.
+    and @st.cache_data never gets a hit — burning the 6k/month RapidAPI quota.
+    Uses datetime(2000,1,1, tzinfo=tz) — the pytz-safe way to create a fixed
+    aware epoch. Do NOT use naive_dt.replace(tzinfo=tz) with pytz; it bypasses
+    localize() and can produce the wrong UTC offset.
     """
-    epoch   = _ANCHOR_EPOCH.replace(tzinfo=now_aest.tzinfo)
+    epoch   = datetime(2000, 1, 1, tzinfo=tz)
     elapsed = int((now_aest - epoch).total_seconds())
     floored = epoch + timedelta(seconds=(elapsed // API_DATA_TTL_SEC) * API_DATA_TTL_SEC)
     return floored.strftime("%Y-%m-%dT%H:%M")
@@ -165,7 +167,8 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
         r.raise_for_status()
         st.session_state.api_last_hit = datetime.now(pytz.timezone(TIMEZONE))
         return r.json().get("arrivals", [])
-    except Exception:
+    except Exception as e:
+        st.session_state.api_error = str(e)
         return []
 
 
@@ -222,6 +225,8 @@ st.markdown(f"""
 # ─────────────────────────────────────────────
 if "api_last_hit" not in st.session_state:
     st.session_state.api_last_hit = None
+if "api_error" not in st.session_state:
+    st.session_state.api_error = None
 
 aest     = pytz.timezone(TIMEZONE)
 now_aest = datetime.now(aest)
@@ -259,13 +264,18 @@ with st.expander(" 👋👋👋 (Operational Guide)"):
     """, unsafe_allow_html=True)
 
 # ── Fetch ─────────────────────────────────────
-anchor      = _get_cache_anchor(now_aest)
+anchor      = _get_cache_anchor(now_aest, aest)
 from_t      = (now_aest - timedelta(hours=LOOKBACK_HOURS)).strftime("%Y-%m-%dT%H:%M")
 to_t        = (now_aest + timedelta(hours=LOOKAHEAD_HOURS)).strftime("%Y-%m-%dT%H:%M")
 raw_flights = fetch_flight_data(anchor, from_t, to_t)
 
+# Show any API error so it's diagnosable (not silently blank)
+if err := st.session_state.get("api_error"):
+    st.error(f"⚠️ API Error: {err}")
+    st.session_state.api_error = None
+
 if not raw_flights:
-    st.info("Synchronizing Radar...")
+    st.warning("⏳ No flight data returned — retrying on next refresh.")
     st.stop()
 
 # ── Deduplicate: keep FIRST occurrence per flight number ──────────────────────
@@ -498,6 +508,6 @@ if canceled:
         </div>""", unsafe_allow_html=True)
 
 st.markdown(
-    "<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V9.4.1</div>",
+    "<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V9.4.2</div>",
     unsafe_allow_html=True,
 )
