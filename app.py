@@ -17,7 +17,9 @@ GAP_MIN_MINUTES          = 20
 GAP_DISPLAY_MIN          = 5
 IMAGE_WORKERS            = 15
 DOMESTIC_TERMINALS       = ('D', 'DOM', 'D-ANC', 'GAT')
-SMALL_AIRCRAFT_FILTER    = ('BEECH', 'FAIRCHILD', 'CESSNA', 'PIPER', 'PILATUS', 'KING AIR', 'METROLINER')
+
+# V9.8 修正：解除 DASH 8 與 FOKKER 封鎖 (保護太平洋島國航班)，保留 SAAB 與私人輕型機封鎖
+SMALL_AIRCRAFT_FILTER    = ('BEECH', 'FAIRCHILD', 'CESSNA', 'PIPER', 'PILATUS', 'KING AIR', 'METROLINER', 'SAAB')
 
 CITY_MAP = {
     "Lapu-Lapu City": "Cebu", "Denpasar-Bali Island": "Bali",
@@ -37,7 +39,6 @@ def format_hm(total_minutes: int) -> str:
     h, m = divmod(total_minutes, 60)
     return f"{m:02d}m" if h == 0 else f"{h:02d}h {m:02d}m"
 
-
 def extract_best_time(node: dict, tz) -> tuple:
     for key, label in (
         ("actualTime",    "actual"),
@@ -54,52 +55,43 @@ def extract_best_time(node: dict, tz) -> tuple:
                 continue
     return None, ""
 
-
-def is_strictly_international(terminal: str, country_code: str, aircraft_model: str) -> bool:
-    t, ac, cc = terminal.strip().upper(), aircraft_model.upper(), country_code.lower()
-    if t in DOMESTIC_TERMINALS:                      return False
-    if cc == "au":                                   return False
+# V9.8 修正：加入 origin_iata 參數，建立白名單機制
+def is_strictly_international(terminal: str, country_code: str, aircraft_model: str, origin_iata: str) -> bool:
+    t, ac, cc, iata = terminal.strip().upper(), aircraft_model.upper(), country_code.lower(), origin_iata.upper()
+    
+    # 1. 絕對豁免白名單 (Norfolk Island 強制顯示)
+    if iata == "NLK": return True
+    
+    # 2. 國內航廈與國家代碼過濾
+    if t in DOMESTIC_TERMINALS: return False
+    if cc == "au":              return False
+    
+    # 3. 私人/微型飛機過濾
     if any(k in ac for k in SMALL_AIRCRAFT_FILTER): return False
+    
     return True
-
 
 def get_airline_logo_url(flight_number: str) -> str:
     prefix = "".join(c for c in flight_number if c.isalpha())[:2].upper()
     return f"https://pics.avs.io/200/200/{prefix}.png" if len(prefix) == 2 else ""
 
-
 @st.cache_data(show_spinner=False)
 def get_photo_from_api(reg: str) -> str:
-    if not reg:
-        return "NOT_FOUND"
+    if not reg: return "NOT_FOUND"
     try:
-        r = requests.get(
-            f"https://api.planespotters.net/pub/photos/reg/{reg}",
-            headers={"User-Agent": "BNE-Board-App/1.1"},
-            timeout=3.0,
-        )
+        r = requests.get(f"https://api.planespotters.net/pub/photos/reg/{reg}", headers={"User-Agent": "BNE-Board-App/1.1"}, timeout=3.0)
         if r.status_code == 200:
             photos = r.json().get("photos", [])
-            if photos:
-                return photos[0]["thumbnail_large"]["src"]
-    except:
-        pass
+            if photos: return photos[0]["thumbnail_large"]["src"]
+    except: pass
     return "NOT_FOUND"
-
 
 @st.cache_data(ttl=API_DATA_TTL_SEC, show_spinner=False)
 def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
     url = f"https://aerodatabox.p.rapidapi.com/flights/airports/icao/{AIRPORT_ICAO}/{from_time}/{to_time}"
-    headers = {
-        "X-RapidAPI-Key":  st.secrets["X_RAPIDAPI_KEY"],
-        "X-RapidAPI-Host": "aerodatabox.p.rapidapi.com",
-    }
+    headers = {"X-RapidAPI-Key": st.secrets["X_RAPIDAPI_KEY"], "X-RapidAPI-Host": "aerodatabox.p.rapidapi.com"}
     try:
-        r = requests.get(
-            url, headers=headers,
-            params={"direction": "Arrival", "withCancelled": "true", "withCodeshared": "false"},
-            timeout=10,
-        )
+        r = requests.get(url, headers=headers, params={"direction": "Arrival", "withCancelled": "true", "withCodeshared": "false"}, timeout=10)
         r.raise_for_status()
         st.session_state.api_last_hit = datetime.now(pytz.timezone(TIMEZONE))
         return r.json().get("arrivals", [])
@@ -122,13 +114,11 @@ st.markdown(f"""
     .mono {{ font-family: 'JetBrains Mono', monospace; letter-spacing: -0.5px; }}
 
     .flip-container {{ position: relative; width: 55px; height: 55px; margin-right: 12px; flex-shrink: 0; }}
-    /* Box-sizing ensures border doesn't shrink the image unexpectedly */
     .flip-img {{ position: absolute; top: 0; left: 0; width: 55px; height: 55px; border-radius: 8px; border: 2.5px solid #475569; transition: opacity 1s ease-in-out; box-sizing: border-box; }}
     
     @keyframes logoFade {{ 0%, 45% {{ opacity: 1; }} 55%, 100% {{ opacity: 0; }} }}
     @keyframes photoFade {{ 0%, 45% {{ opacity: 0; }} 55%, 95% {{ opacity: 1; }} 100% {{ opacity: 0; }} }}
     
-    /* Logo uses contain (with padding), Photo uses cover (fills the whole square) */
     .logo-layer {{ animation: logoFade 10s infinite; background: #FFFFFF; padding: 4px; object-fit: contain !important; border-radius: 8px; z-index: 2; }}
     .photo-layer {{ animation: photoFade 10s infinite; object-fit: cover !important; z-index: 1; }}
 
@@ -169,22 +159,14 @@ if "api_error"    not in st.session_state: st.session_state.api_error    = None
 aest     = pytz.timezone(TIMEZONE)
 now_aest = datetime.now(aest)
 
-# ── Header ────────────────────────────────────
+# Header
 c1, c2 = st.columns([2, 1])
-with c1:
-    st.subheader("✈️ Arrivals")
+with c1: st.subheader("✈️ Arrivals")
 with c2:
-    st.markdown(
-        f'<div style="font-size:0.8em;color:#94A3B8;text-align:right;margin-top:5px;">'
-        f'🕒 Live: {now_aest.strftime("%H:%M:%S")}</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown(f'<div style="font-size:0.8em;color:#94A3B8;text-align:right;margin-top:5px;">🕒 Live: {now_aest.strftime("%H:%M:%S")}</div>', unsafe_allow_html=True)
     api_t   = st.session_state.get("api_last_hit")
     api_txt = f'API: {api_t.strftime("%H:%M")}' if api_t else "API: --:--"
-    st.markdown(
-        f'<div style="font-size:0.7em;color:#64748B;text-align:right;">{api_txt}</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown(f'<div style="font-size:0.7em;color:#64748B;text-align:right;">{api_txt}</div>', unsafe_allow_html=True)
 
 with st.expander(" 👋👋👋 (Operational Guide)"):
     st.markdown("""
@@ -201,20 +183,9 @@ with st.expander(" 👋👋👋 (Operational Guide)"):
     *Developed by Phillip Yeh to support the BNE Lotte Team.*
     """, unsafe_allow_html=True)
 
-# ── Fetch  ─────────────────────────────────
-anchor = (
-    datetime(2000, 1, 1, tzinfo=aest)
-    + timedelta(seconds=(
-        int((now_aest - datetime(2000, 1, 1, tzinfo=aest)).total_seconds())
-        // API_DATA_TTL_SEC
-    ) * API_DATA_TTL_SEC)
-).strftime("%Y-%m-%dT%H:%M")
-
-raw_flights = fetch_flight_data(
-    anchor,
-    (now_aest - timedelta(hours=LOOKBACK_HOURS)).strftime("%Y-%m-%dT%H:%M"),
-    (now_aest + timedelta(hours=LOOKAHEAD_HOURS)).strftime("%Y-%m-%dT%H:%M"),
-)
+# Fetch
+anchor = (datetime(2000, 1, 1, tzinfo=aest) + timedelta(seconds=(int((now_aest - datetime(2000, 1, 1, tzinfo=aest)).total_seconds()) // API_DATA_TTL_SEC) * API_DATA_TTL_SEC)).strftime("%Y-%m-%dT%H:%M")
+raw_flights = fetch_flight_data(anchor, (now_aest - timedelta(hours=LOOKBACK_HOURS)).strftime("%Y-%m-%dT%H:%M"), (now_aest + timedelta(hours=LOOKAHEAD_HOURS)).strftime("%Y-%m-%dT%H:%M"))
 
 if st.session_state.api_error:
     st.error(f"⚠️ API Error — {st.session_state.api_error}")
@@ -224,83 +195,66 @@ if not raw_flights:
     st.info("⏳ Synchronizing radar... data will appear on next refresh.")
     st.stop()
 
-# ── Deduplicate ──────────────────────
+# Deduplicate
 seen: dict = {}
 for f in raw_flights:
     num = f.get("number")
-    if num and num not in seen:
-        seen[num] = f
+    if num and num not in seen: seen[num] = f
 unique_flights = list(seen.values())
 
-# ── Prefetch reg photos ────────────────────────────────────────────────────────
+# Prefetch reg photos
 all_regs = list({f.get("aircraft", {}).get("reg", "") for f in unique_flights if f.get("aircraft", {}).get("reg")})
 with ThreadPoolExecutor(max_workers=IMAGE_WORKERS) as executor:
     executor.map(get_photo_from_api, all_regs)
 
-# ── Process ───────────────────────────────────────────────────────────────────
+# Process
 processed = []
-
 for f in unique_flights:
     flight_num = f.get("number", "N/A")
     dep_ap     = f.get("departure", {}).get("airport") or f.get("movement", {}).get("airport") or {}
     arr        = f.get("arrival") or f.get("movement") or {}
     ac_m       = f.get("aircraft", {}).get("model", "")
     ac_r       = f.get("aircraft", {}).get("reg", "")
-
-    if not is_strictly_international(str(arr.get("terminal", "")), str(dep_ap.get("countryCode", "")), ac_m):
+    
+    # V9.8 傳入 origin_iata 進行白名單檢查
+    origin_iata = str(dep_ap.get("iata", ""))
+    if not is_strictly_international(str(arr.get("terminal", "")), str(dep_ap.get("countryCode", "")), ac_m, origin_iata):
         continue
 
     best_dt, t_type = extract_best_time(arr, aest)
-    if not best_dt:
-        continue
+    if not best_dt: continue
 
     sch_val = arr.get("scheduledTime")
     sch_raw = sch_val.get("local") if isinstance(sch_val, dict) else None
     if sch_raw:
-        try:
-            s_dt = aest.localize(pd.to_datetime(sch_raw).replace(tzinfo=None))
-        except:
-            s_dt = best_dt
-    else:
-        s_dt = best_dt
+        try: s_dt = aest.localize(pd.to_datetime(sch_raw).replace(tzinfo=None))
+        except: s_dt = best_dt
+    else: s_dt = best_dt
 
     delay = (best_dt - s_dt).total_seconds() / 3600
-
-    if delay < -2 or delay > 24:
-        continue
+    if delay < -2 or delay > 24: continue
 
     t_diff = int((best_dt - now_aest).total_seconds() / 60)
     is_can = f.get("status", "").lower() in ("canceled", "cancelled")
     is_lan = (f.get("status", "").lower() in ("landed", "arrived") or t_diff <= 0) and not is_can
 
     if is_can:
-        bc, sc, bg, st_txt = (
-            ("#475569", "#94A3B8", "#0F172A", "CANCELED")
-            if (now_aest - s_dt).total_seconds() / 60 > 15
-            else ("#EF4444", "#F87171", "#1E293B", "CANCELED")
-        )
+        bc, sc, bg, st_txt = ("#475569", "#94A3B8", "#0F172A", "CANCELED") if (now_aest - s_dt).total_seconds() / 60 > 15 else ("#EF4444", "#F87171", "#1E293B", "CANCELED")
     elif is_lan:
         l_min = max(0, -t_diff)
-        bc, sc, bg, st_txt = (
-            ("#10B981", "#34D399", "#1E293B", f"Landed {format_hm(l_min)} ago")
-            if l_min <= RECENT_LANDED_MAX
-            else ("#475569", "#94A3B8", "#0F172A", f"Landed {format_hm(l_min)} ago")
-        )
+        bc, sc, bg, st_txt = ("#10B981", "#34D399", "#1E293B", f"Landed {format_hm(l_min)} ago") if l_min <= RECENT_LANDED_MAX else ("#475569", "#94A3B8", "#0F172A", f"Landed {format_hm(l_min)} ago")
     else:
         m_left = max(0, t_diff)
         if   delay >= 12:  bc, sc, bg, st_txt = "#7F1D1D", "#FCA5A5", "#1E293B", "SEVERE DELAY"
         elif m_left < 25:  bc, sc, bg, st_txt = "#EF4444", "#F87171", "#1E293B", f"In {format_hm(m_left)}"
         else:              bc, sc, bg, st_txt = "#3B82F6", "#60A5FA", "#1E293B", f"In {format_hm(m_left)}"
 
-    city = CITY_MAP.get(
-        dep_ap.get("municipalityName") or dep_ap.get("name"),
-        dep_ap.get("municipalityName") or dep_ap.get("name") or "Unknown",
-    )
+    city = CITY_MAP.get(dep_ap.get("municipalityName") or dep_ap.get("name"), dep_ap.get("municipalityName") or dep_ap.get("name") or "Unknown")
 
     processed.append({
         "num":          flight_num,
         "origin":       city,
-        "iata":         dep_ap.get("iata", ""),
+        "iata":         origin_iata,
         "gate":         arr.get("gate", "TBA"),
         "ac_text":      f"{ac_m} ({ac_r})" if ac_m and ac_r else ac_m or ac_r,
         "actual_time":  best_dt.strftime("%H:%M"),
@@ -320,23 +274,15 @@ for f in unique_flights:
     })
 
 # ── Gap Detection ──────────────────────────────────────────────────────────────
-future = sorted(
-    [p for p in processed if not p["is_landed"] and not p["is_canceled"]],
-    key=lambda x: x["dt"],
-)
+future = sorted([p for p in processed if not p["is_landed"] and not p["is_canceled"]], key=lambda x: x["dt"])
 if future:
-    wins = [(now_aest, future[0]["dt"])] + [
-        (future[i]["dt"], future[i + 1]["dt"]) for i in range(len(future) - 1)
-    ]
+    wins = [(now_aest, future[0]["dt"])] + [(future[i]["dt"], future[i + 1]["dt"]) for i in range(len(future) - 1)]
     for t1, t2 in wins:
-        if t2 <= now_aest:
-            continue
+        if t2 <= now_aest: continue
         g_min = int((t2 - max(t1, now_aest)).total_seconds() / 60)
-        if (t2 - t1).total_seconds() / 60 < GAP_MIN_MINUTES or g_min < GAP_DISPLAY_MIN:
-            continue
+        if (t2 - t1).total_seconds() / 60 < GAP_MIN_MINUTES or g_min < GAP_DISPLAY_MIN: continue
         act = t1 <= now_aest
-        cls = "gap-bar gap-active" if act else "gap-bar"
-        lbl = "🟢 ACTIVE" if act else "🔄"
+        cls, lbl = ("gap-bar gap-active", "🟢 ACTIVE") if act else ("gap-bar", "🔄")
         processed.append({
             "is_gap":   True,
             "html":     f'<div class="{cls}">{lbl} {format_hm(g_min)} GAP <span style="opacity:0.6; font-weight:400; margin-left:8px;">({max(t1, now_aest).strftime("%H:%M")}–{t2.strftime("%H:%M")})</span></div>',
@@ -344,26 +290,18 @@ if future:
         })
 
 # ── Sort ──────────────────────────────────────────────────────────────────────
-processed.sort(key=lambda p:
-    (1, p["time_key"]) if p.get("is_gap") else
-    ((2, p["s_dt_val"].timestamp()) if p["is_canceled"] else
-     ((0, -p["dt"].timestamp()) if p["is_landed"] and p["landed_mins"] <= RECENT_LANDED_MAX else
-      ((2, -p["dt"].timestamp()) if p["is_landed"] else
-       (1, p["dt"].timestamp()))))
-)
+processed.sort(key=lambda p: (1, p["time_key"]) if p.get("is_gap") else ((2, p["s_dt_val"].timestamp()) if p["is_canceled"] else ((0, -p["dt"].timestamp()) if p["is_landed"] and p["landed_mins"] <= RECENT_LANDED_MAX else ((2, -p["dt"].timestamp()) if p["is_landed"] else (1, p["dt"].timestamp())))))
 
 # ── Render Active Cards ────────────────────────────────────────────────────────
 for i, pf in enumerate(processed):
-    if pf.get("is_canceled"):
-        continue
-    if pf.get("is_gap"):
+    if pf.get("is_canceled"): continue
+    if pf.get("is_gap"): 
         st.markdown(pf["html"], unsafe_allow_html=True)
         continue
 
     mid       = f"z_{i}"
     has_photo = pf["photo_url"] != "NOT_FOUND"
 
-    # Explicit inline object-fit covers any potential CSS overrides
     img_html = (
         f'<div class="flip-container">'
         f'<label for="{mid}" style="cursor:pointer; display:block; width:100%; height:100%;">'
@@ -372,8 +310,7 @@ for i, pf in enumerate(processed):
         f'</label></div>'
         if has_photo else
         f'<div class="flip-container">'
-        f'<img src="{pf["logo_url"]}" class="flip-img" style="border-color:{pf["border_color"]}; '
-        f'background:#FFF; padding:4px; object-fit:contain; border-radius:8px;"/>'
+        f'<img src="{pf["logo_url"]}" class="flip-img" style="border-color:{pf["border_color"]}; background:#FFF; padding:4px; object-fit:contain; border-radius:8px;"/>'
         f'</div>'
     )
 
@@ -407,18 +344,9 @@ for i, pf in enumerate(processed):
 # ── Render Canceled ───────────────────────────────────────────────────────────
 cans = sorted([p for p in processed if p.get("is_canceled")], key=lambda x: x["s_dt_val"])
 if cans:
-    st.markdown(
-        "<hr style='margin:15px 0 8px 0; opacity:0.2;'>"
-        "<div style='color:#F87171; font-size:0.85em; font-weight:700; margin-bottom:5px;'>❌ Canceled</div>",
-        unsafe_allow_html=True,
-    )
+    st.markdown("<hr style='margin:15px 0 8px 0; opacity:0.2;'><div style='color:#F87171; font-size:0.85em; font-weight:700; margin-bottom:5px;'>❌ Canceled</div>", unsafe_allow_html=True)
     for pf in cans:
-        img_html = (
-            f'<div class="flip-container">'
-            f'<img src="{pf["logo_url"]}" class="flip-img" style="border-color:{pf["border_color"]}; '
-            f'background:#FFF; padding:4px; object-fit:contain; border-radius:8px;"/>'
-            f'</div>'
-        )
+        img_html = f'<div class="flip-container"><img src="{pf["logo_url"]}" class="flip-img" style="border-color:{pf["border_color"]}; background:#FFF; padding:4px; object-fit:contain; border-radius:8px;"/></div>'
         st.markdown(f"""
         <div class="flight-card" style="border-left-color:{pf['border_color']}; background-color:{pf['bg_color']};">
             {img_html}
@@ -431,8 +359,4 @@ if cans:
             </div>
         </div>""", unsafe_allow_html=True)
 
-st.markdown(
-    "<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>"
-    "Dev: Phillip Yeh | V9.6</div>",
-    unsafe_allow_html=True,
-)
+st.markdown("<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V9.8</div>", unsafe_allow_html=True)
