@@ -33,7 +33,6 @@ STALE_DATA_THRESHOLD_MIN = 30
 #  2. CORE LOGIC FUNCTIONS
 # ─────────────────────────────────────────────
 def format_hm(total_minutes: int) -> str:
-    """Formats minutes into 00h 00m or just 00m."""
     h, m = divmod(total_minutes, 60)
     return f"{m:02d}m" if h == 0 else f"{h:02d}h {m:02d}m"
 
@@ -82,7 +81,7 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
     except: return []
 
 # ─────────────────────────────────────────────
-#  3. COMPACT UI & MODAL FIX (V9.1)
+#  3. COMPACT UI & MODAL FIX (V9.2)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 
@@ -99,7 +98,7 @@ st.markdown(f"""
     .flip-img {{ position: absolute; top: 0; left: 0; width: 55px; height: 55px; border-radius: 28px; border: 2px solid #475569; transition: opacity 1s ease-in-out; }}
     @keyframes logoFade {{ 0%, 45% {{ opacity: 1; }} 55%, 100% {{ opacity: 0; }} }}
     @keyframes photoFade {{ 0%, 45% {{ opacity: 0; }} 55%, 95% {{ opacity: 1; }} 100% {{ opacity: 0; }} }}
-    .logo-layer {{ animation: logoFade 10s infinite; background: #FFFFFF; padding: 4px; object-fit: contain; border-radius: 6px; z-index: 2; }}
+    .logo-layer {{ animation: logoFade 10s infinite; background: #FFFFFF; padding: 4px; object-fit: contain; border-radius: 8px; z-index: 2; }}
     .photo-layer {{ animation: photoFade 10s infinite; object-fit: cover; z-index: 1; }}
     
     .flight-card {{
@@ -144,8 +143,21 @@ with c2:
     api_txt = f'API: {api_t.strftime("%H:%M")}' if api_t else 'API: --:--'
     st.markdown(f'<div style="font-size:0.7em;color:#64748B;text-align:right;">{api_txt}</div>', unsafe_allow_html=True)
 
-with st.expander("📋 Guide"):
-    st.markdown(f"**Settings:** Ref: 60s | Win: -{LOOKBACK_HOURS}h to +{LOOKAHEAD_HOURS}h")
+# NEW: Staff-Oriented Operational Guide
+with st.expander("👋 Team, read this first (Operational Guide)"):
+    st.markdown(f"""
+    **Why use this app?**
+    I built this dashboard to help us manage our daily shifts more easily. Use it to predict peak traffic, coordinate floor tasks, and plan your break windows (Gaps) with confidence.
+    
+    **How to read the times:**
+    * <span class="mono" style="color:#7DD3FC;font-weight:bold;">Act</span>: **Actual** landing time. The crowd is on their way!
+    * <span class="mono" style="color:#E2E8F0;font-weight:bold;">Est</span>: **Estimated** arrival based on live radar. Very reliable.
+    * <span class="mono" style="color:#94A3B8;font-weight:bold;">Sch</span>: **Scheduled** time only. Radar is still searching, please check physical boards for accuracy.
+    
+    **Staff Tip:** Check the **'OFF-FLOOR GAP'** bars to see quiet periods between flights—perfect for restocking or taking a quick 15.
+    
+    *Developed by Phillip Yeh to support the BNE Lotte Team.*
+    """, unsafe_allow_html=True)
 
 # Fetch
 anchor = (datetime(2000, 1, 1, tzinfo=aest) + timedelta(seconds=(int((now_aest - datetime(2000, 1, 1, tzinfo=aest)).total_seconds()) // API_DATA_TTL_SEC) * API_DATA_TTL_SEC)).strftime("%Y-%m-%dT%H:%M")
@@ -164,7 +176,6 @@ for f in {f.get("number"): f for f in raw_flights}.values():
     dep_ap = f.get("departure", {}).get("airport") or f.get("movement", {}).get("airport") or {}
     arr = f.get("arrival") or f.get("movement") or {}
     ac_m, ac_r = f.get("aircraft", {}).get("model", ""), f.get("aircraft", {}).get("reg", "")
-    
     if not is_strictly_international(str(arr.get("terminal", "")), str(dep_ap.get("countryCode", "")), ac_m): continue
     
     best_dt, t_type = extract_best_time(arr, aest)
@@ -249,6 +260,6 @@ if cans:
     st.markdown("<hr style='margin:15px 0 8px 0; opacity:0.2;'><div style='color:#F87171; font-size:0.85em; font-weight:700; margin-bottom:5px;'>❌ Canceled</div>", unsafe_allow_html=True)
     for i, pf in enumerate(cans):
         img_html = f'<div class="flip-container"><img src="{pf["logo_url"]}" class="flip-img" style="border-color:{pf["border_color"]}; background:#FFF; padding:4px; object-fit:contain; border-radius:8px;"/></div>'
-        st.markdown(f"""<div class="flight-card" style="border-left-color:{pf['border_color']}; background-color:{pf['bg_color']};">{img_html}<div class="info-col"><div style="font-size:1em; font-weight:700;">{pf['num']} <span style="font-size:0.7em; color:#94A3B8;">{pf['origin']}</span></div><div style="font-size:0.75em; color:#94A3B8;"><span class="mono">Sch {pf['sch_time']}</span></div></div><div class="status-col"><div style="font-size:0.8em; font-weight:700; color:{pf['status_color']};">{pf['status_text']}</div></div></div>""", unsafe_allow_html=True)
+        st.markdown(f"""<div class="flight-card" style="border-left-color:{pf['border_color']}; background-color:{pf['bg_color']};">{img_html}<div class="info-col"><div style="font-size:1em; font-weight:700;">{pf['num']} <span style="font-size:0.75em; color:#94A3B8;">{pf['origin']}</span></div><div style="font-size:0.75em; color:#94A3B8;"><span class="mono">Sch {pf['sch_time']}</span></div></div><div class="status-col"><div style="font-size:0.8em; font-weight:700; color:{pf['status_color']};">{pf['status_text']}</div></div></div>""", unsafe_allow_html=True)
 
-st.markdown(f"<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V9.1</div>", unsafe_allow_html=True)
+st.markdown(f"<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V9.2</div>", unsafe_allow_html=True)
