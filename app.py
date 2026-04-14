@@ -81,7 +81,6 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 
-# Standard CSS with double-curly braces for Streamlit f-string safety
 st.markdown(f"""
 <meta http-equiv="refresh" content="{UI_REFRESH_SEC}">
 <style>
@@ -91,7 +90,6 @@ st.markdown(f"""
     .block-container {{padding-top: 1.5rem; font-family: 'Inter', sans-serif; max-width: 850px;}}
     .mono {{ font-family: 'JetBrains Mono', monospace; letter-spacing: -0.5px; }}
     
-    /* Flip Animation Logic */
     .flip-container {{ position: relative; width: 70px; height: 70px; margin-right: 20px; flex-shrink: 0; }}
     .flip-img {{ position: absolute; top: 0; left: 0; width: 70px; height: 70px; border-radius: 35px; border: 2.5px solid #475569; transition: opacity 1s ease-in-out; }}
     @keyframes logoFade {{ 0%, 45% {{ opacity: 1; }} 55%, 100% {{ opacity: 0; }} }}
@@ -99,7 +97,6 @@ st.markdown(f"""
     .logo-layer {{ animation: logoFade 10s infinite; background: #FFFFFF; padding: 7px; object-fit: contain; border-radius: 10px; z-index: 2; }}
     .photo-layer {{ animation: photoFade 10s infinite; object-fit: cover; z-index: 1; }}
     
-    /* Card Alignment */
     .flight-card {{
         background-color: #1E293B; border-radius: 12px; padding: 16px 20px; 
         margin-bottom: 12px; display: flex; align-items: center; color: white;
@@ -108,7 +105,6 @@ st.markdown(f"""
     .info-col {{ flex-grow: 1; min-width: 0; }}
     .status-col {{ text-align: right; min-width: 135px; display: flex; flex-direction: column; justify-content: center; }}
     
-    /* Gap Bar Alignment - Fixed padding and left border to match cards */
     .gap-bar {{
         background-color: #0F172A; border: 1.5px dashed #475569; border-left: 6px solid transparent;
         border-radius: 10px; padding: 12px 20px; margin: 10px 0 22px 0; text-align: center; color: #94A3B8;
@@ -116,7 +112,6 @@ st.markdown(f"""
     }}
     .gap-active {{ background-color: #064E3B; border-color: #10B981; border-left-color: #10B981; color: #A7F3D0; }}
 
-    /* ZOOM MODAL - Hard reset to ensure it's hidden by default */
     .img-zoom-modal {{ 
         display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
         background: rgba(15,23,42,0.95); z-index: 99999; align-items: center; 
@@ -144,13 +139,27 @@ with c2:
     api_txt = f'API: {api_t.strftime("%H:%M")}' if api_t else 'API: --:--'
     st.markdown(f'<div style="font-size:0.75em;color:#64748B;text-align:right;">{api_txt}</div>', unsafe_allow_html=True)
 
+# NEW: Dashboard Guide placed at the TOP
+with st.expander("📋 Dashboard Usage & Guide"):
+    st.markdown(f"""
+    **Purpose:**
+    Track international arrivals to manage floor staffing, plan break windows (Gaps), and coordinate store tasks.
+    
+    **Time Labels:**
+    * <span class="mono" style="color:#7DD3FC;font-weight:bold;">Act</span>: **Actual** time (Landed).
+    * <span class="mono" style="color:#E2E8F0;font-weight:bold;">Est</span>: **Estimated** time (Radar ETA).
+    * <span class="mono" style="color:#94A3B8;font-weight:bold;">Sch</span>: **Scheduled** time (No radar sync).
+    
+    **Settings:** Refresh: 60s | Window: -{LOOKBACK_HOURS}h to +{LOOKAHEAD_HOURS}h | Dev: Phillip Yeh
+    """, unsafe_allow_html=True)
+
 # Fetch Data
 anchor = (datetime(2000, 1, 1, tzinfo=aest) + timedelta(seconds=(int((now_aest - datetime(2000, 1, 1, tzinfo=aest)).total_seconds()) // API_DATA_TTL_SEC) * API_DATA_TTL_SEC)).strftime("%Y-%m-%dT%H:%M")
 raw_flights = fetch_flight_data(anchor, (now_aest - timedelta(hours=LOOKBACK_HOURS)).strftime("%Y-%m-%dT%H:%M"), (now_aest + timedelta(hours=LOOKAHEAD_HOURS)).strftime("%Y-%m-%dT%H:%M"))
 
 if not raw_flights: st.info("Synchronizing with BNE Radar..."); st.stop()
 
-# Prefetch all images concurrently to avoid per-card lag
+# Prefetch images
 all_regs = list(set([f.get("aircraft", {}).get("reg", "") for f in raw_flights if f.get("aircraft", {}).get("reg")]))
 with ThreadPoolExecutor(max_workers=IMAGE_WORKERS) as executor:
     executor.map(get_photo_from_api, all_regs)
@@ -160,8 +169,7 @@ for f in {f.get("number"): f for f in raw_flights}.values():
     flight_num = f.get("number", "N/A")
     dep_ap = f.get("departure", {}).get("airport") or f.get("movement", {}).get("airport") or {}
     arr = f.get("arrival") or f.get("movement") or {}
-    ac_m = f.get("aircraft", {}).get("model", "")
-    ac_r = f.get("aircraft", {}).get("reg", "")
+    ac_m, ac_r = f.get("aircraft", {}).get("model", ""), f.get("aircraft", {}).get("reg", "")
     
     if not is_strictly_international(str(arr.get("terminal", "")), str(dep_ap.get("countryCode", "")), ac_m): continue
     
@@ -175,7 +183,6 @@ for f in {f.get("number"): f for f in raw_flights}.values():
     is_can = f.get("status", "").lower() in ("canceled", "cancelled")
     is_lan = (f.get("status", "").lower() in ("landed", "arrived") or t_diff <= 0) and not is_can
     
-    # Logic for Card Styling
     delay = (best_dt - s_dt).total_seconds() / 3600
     if is_can: bc, sc, bg, st_txt = ("#475569", "#94A3B8", "#0F172A", "CANCELED") if (now_aest-s_dt).total_seconds()/60 > 15 else ("#EF4444", "#F87171", "#1E293B", "CANCELED")
     elif is_lan:
@@ -209,7 +216,7 @@ if future:
 # Sorting
 processed.sort(key=lambda p: (1, p["time_key"]) if p.get("is_gap") else ((2, p["s_dt_val"].timestamp()) if p["is_canceled"] else ((0, -p["dt"].timestamp()) if p["is_landed"] and p["landed_mins"] <= RECENT_LANDED_MAX else ((2, -p["dt"].timestamp()) if p["is_landed"] else (1, p["dt"].timestamp())))))
 
-# RENDER CARDS
+# Render Cards
 for i, pf in enumerate(processed):
     if pf.get("is_canceled"): continue
     if pf.get("is_gap"): st.markdown(pf["html"], unsafe_allow_html=True); continue
@@ -250,4 +257,4 @@ if cans:
         img_html = f'<div class="flip-container"><img src="{pf["logo_url"]}" class="flip-img" style="border-color:{pf["border_color"]}; background:#FFF; padding:7px; object-fit:contain; border-radius:10px;"/></div>'
         st.markdown(f"""<div class="flight-card" style="border-left-color:{pf['border_color']}; background-color:{pf['bg_color']};">{img_html}<div class="info-col"><div style="font-size:1.4em; font-weight:700;">{pf['num']} <span style="font-size:0.7em; color:#94A3B8;">{pf['origin']}</span></div><div style="font-size:0.85em; color:#94A3B8;"><span class="mono">Sch {pf['sch_time']}</span></div></div><div class="status-col"><div style="font-size:1em; font-weight:700; color:{pf['status_color']};">{pf['status_text']}</div></div></div>""", unsafe_allow_html=True)
 
-st.markdown(f"<div style='text-align:center; color:#475569; font-size:0.8em; margin-top:50px;'>Developer: Phillip Yeh | V8.6</div>", unsafe_allow_html=True)
+st.markdown(f"<div style='text-align:center; color:#475569; font-size:0.8em; margin-top:50px;'>Developer: Phillip Yeh | V8.7</div>", unsafe_allow_html=True)
