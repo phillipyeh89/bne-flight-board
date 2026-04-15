@@ -80,6 +80,7 @@ class FlightStyle:
 def classify_flight_status(
     *,
     is_canceled: bool,
+    is_diverted: bool,
     is_landed: bool,
     landed_mins: int,
     t_diff: int,
@@ -93,6 +94,9 @@ def classify_flight_status(
         if archived:
             return FlightStyle("#475569", "#94A3B8", "#0F172A", "CANCELED", "0.5", "grayscale(100%)")
         return FlightStyle("#EF4444", "#F87171", "#1E293B", "CANCELED", "0.5", "grayscale(100%)")
+
+    if is_diverted:
+        return FlightStyle("#7C3AED", "#C4B5FD", "#1E1B4B", "✈️ DIVERTED", "0.8", "none")
 
     if is_landed:
         if landed_mins <= RECENT_LANDED_MAX:
@@ -472,7 +476,7 @@ def live_dashboard():
         # 1. Scheduled-only: AeroDataBox has no radar at all → use OpenSky
         # 2. Close-in flights (< 60 min): AeroDataBox data is ~5 min stale,
         #    but OpenSky updates every ~10 sec → prefer live position math
-        if status_raw not in ("canceled", "cancelled"):
+        if status_raw not in ("canceled", "cancelled", "diverted"):
             preliminary_mins = int((best_dt - now_aest).total_seconds() / 60)
             use_opensky = (
                 t_type == "scheduled"
@@ -491,18 +495,19 @@ def live_dashboard():
 
         t_diff = int((best_dt - now_aest).total_seconds() / 60)
         is_can = status_raw in ("canceled", "cancelled")
+        is_div = status_raw == "diverted"
 
         is_lan = False
         if status_raw in ("landed", "arrived"):
             is_lan = True
         elif t_diff <= 0 and t_type in ("actual", "revised"):
             is_lan = True
-        is_lan = is_lan and not is_can
+        is_lan = is_lan and not is_can and not is_div
 
         landed_mins = max(0, -t_diff)
 
         style = classify_flight_status(
-            is_canceled=is_can, is_landed=is_lan, landed_mins=landed_mins,
+            is_canceled=is_can, is_diverted=is_div, is_landed=is_lan, landed_mins=landed_mins,
             t_diff=t_diff, t_type=t_type, delay_hours=delay, s_dt=s_dt, now=now_aest,
         )
 
@@ -522,6 +527,7 @@ def live_dashboard():
             "sch_time":     s_dt.strftime("%H:%M"),
             "is_landed":    is_lan,
             "is_canceled":  is_can,
+            "is_diverted":  is_div,
             "dt":           best_dt,
             "s_dt_val":     s_dt,
             "time_type":    t_type,
@@ -539,7 +545,7 @@ def live_dashboard():
     # ── Gap Detection ─────────────────────────────────────────────────────────────
     gap_candidates = sorted(
         [p for p in processed
-         if not p["is_canceled"]
+         if not p["is_canceled"] and not p["is_diverted"]
          and not (p["is_landed"] and p["landed_mins"] > RECENT_LANDED_MAX)],
         key=lambda x: x["dt"],
     )
@@ -598,7 +604,7 @@ def live_dashboard():
 
     # ── Surge Detection ───────────────────────────────────────────────────────────
     future_flights = sorted(
-        [p for p in processed if not p.get("is_gap") and not p["is_canceled"] and not p["is_landed"]],
+        [p for p in processed if not p.get("is_gap") and not p["is_canceled"] and not p["is_diverted"] and not p["is_landed"]],
         key=lambda x: x["dt"],
     )
 
@@ -638,7 +644,7 @@ def live_dashboard():
             })
 
     # ── Summary Strip ─────────────────────────────────────────────────────────────
-    incoming       = [p for p in processed if not p.get("is_gap") and not p.get("is_surge") and not p["is_canceled"] and not p["is_landed"]]
+    incoming       = [p for p in processed if not p.get("is_gap") and not p.get("is_surge") and not p["is_canceled"] and not p["is_diverted"] and not p["is_landed"]]
     incoming_count = len(incoming)
 
     next_gap_txt = "None"
@@ -676,7 +682,7 @@ def live_dashboard():
     # ── Sort ──────────────────────────────────────────────────────────────────────
     processed.sort(key=lambda p:
         (1, p["time_key"])              if p.get("is_gap") or p.get("is_surge")                     else
-        (2, p["s_dt_val"].timestamp())  if p["is_canceled"]                                         else
+        (2, p["s_dt_val"].timestamp())  if p["is_canceled"] or p["is_diverted"]                     else
         (0, -p["dt"].timestamp())       if p["is_landed"] and p["landed_mins"] <= RECENT_LANDED_MAX else
         (2, -p["dt"].timestamp())       if p["is_landed"]                                           else
         (1, p["dt"].timestamp())
@@ -684,7 +690,7 @@ def live_dashboard():
 
     # ── Render Active Cards ────────────────────────────────────────────────────────
     for i, pf in enumerate(processed):
-        if pf.get("is_canceled"):
+        if pf.get("is_canceled") or pf.get("is_diverted"):
             continue
         if pf.get("is_gap") or pf.get("is_surge"):
             st.markdown(pf["html"], unsafe_allow_html=True)
@@ -726,7 +732,7 @@ def live_dashboard():
         <div class="flight-card" style="border-left-color:{pf['border_color']}; background-color:{pf['bg_color']}; opacity:{pf['card_opacity']};">
             {img_html}
             <div class="info-col">
-                <div style="font-size:1.1em; font-weight:700;">{pf['num']}<span style="font-size:0.7em; color:#94A3B8; margin-left:8px;">{pf['origin']}</span></div>
+                <div style="font-size:1.1em; font-weight:700;">{pf['num']}<span style="font-size:0.7em; color:#94A3B8; margin-left:8px;">{pf['origin']} [{pf['iata']}]</span></div>
                 <div class="ac-line">{pf['ac_text']}</div>
                 <div style="font-size:0.8em; color:#94A3B8;">{time_display}</div>
             </div>
@@ -743,6 +749,33 @@ def live_dashboard():
             <img src="{zoom_src}"/>
         </div>
         """, unsafe_allow_html=True)
+
+    # ── Render Diverted ──────────────────────────────────────────────────────────
+    divs = sorted([p for p in processed if p.get("is_diverted")], key=lambda x: x["s_dt_val"])
+    if divs:
+        st.markdown(
+            "<hr style='margin:15px 0 8px 0; opacity:0.2;'>"
+            "<div style='color:#C4B5FD; font-size:0.85em; font-weight:700; margin-bottom:5px;'>✈️ Diverted — not arriving at BNE</div>",
+            unsafe_allow_html=True,
+        )
+        for pf in divs:
+            img_html = (
+                f'<div class="flip-container" style="filter:{pf["img_filter"]};">'
+                f'<img src="{pf["logo_url"]}" class="flip-img" style="border-color:{pf["border_color"]}; '
+                f'background:#FFF; padding:4px; object-fit:contain; border-radius:8px;"/>'
+                f'</div>'
+            )
+            st.markdown(f"""
+            <div class="flight-card" style="border-left-color:{pf['border_color']}; background-color:{pf['bg_color']}; opacity:{pf['card_opacity']};">
+                {img_html}
+                <div class="info-col">
+                    <div style="font-size:1em; font-weight:700;">{pf['num']} <span style="font-size:0.75em; color:#94A3B8;">{pf['origin']} [{pf['iata']}]</span></div>
+                    <div style="font-size:0.75em; color:#94A3B8;"><span class="mono">Sch {pf['sch_time']}</span></div>
+                </div>
+                <div class="status-col">
+                    <div style="font-size:0.8em; font-weight:700; color:{pf['status_color']};">{pf['status_text']}</div>
+                </div>
+            </div>""", unsafe_allow_html=True)
 
     # ── Render Canceled ───────────────────────────────────────────────────────────
     cans = sorted([p for p in processed if p.get("is_canceled")], key=lambda x: x["s_dt_val"])
@@ -763,7 +796,7 @@ def live_dashboard():
             <div class="flight-card" style="border-left-color:{pf['border_color']}; background-color:{pf['bg_color']}; opacity:{pf['card_opacity']};">
                 {img_html}
                 <div class="info-col">
-                    <div style="font-size:1em; font-weight:700;">{pf['num']} <span style="font-size:0.75em; color:#94A3B8;">{pf['origin']}</span></div>
+                    <div style="font-size:1em; font-weight:700;">{pf['num']} <span style="font-size:0.75em; color:#94A3B8;">{pf['origin']} [{pf['iata']}]</span></div>
                     <div style="font-size:0.75em; color:#94A3B8;"><span class="mono">Sch {pf['sch_time']}</span></div>
                 </div>
                 <div class="status-col">
