@@ -109,6 +109,15 @@ COUNTRY_REGION = {
     "bh": "middle_east", "om": "middle_east", "kw": "middle_east",
 }
 
+# ── Airline-level load overrides ─────────────────────────────────────────────
+# Some carriers consistently run near-full regardless of season.
+# Map IATA 2-letter prefix → fixed load factor (bypasses seasonal curve).
+AIRLINE_LOAD_OVERRIDE = {
+    "SQ": 0.95,   # Singapore Airlines — consistently full year-round
+    # Add more here as you observe patterns, e.g.:
+    # "CX": 0.92,  # Cathay Pacific
+}
+
 UI_REFRESH_SEC           = 60
 API_DATA_TTL_SEC         = 600
 STALE_DATA_THRESHOLD_MIN = 30
@@ -181,10 +190,10 @@ def _format_hm(total_minutes: int) -> str:
     return f"{m:02d}m" if h == 0 else f"{h:02d}h {m:02d}m"
 
 
-def estimate_pax(aircraft_model: str, country_code: str = "", month: int = 0) -> tuple:
+def estimate_pax(aircraft_model: str, country_code: str = "", month: int = 0, flight_number: str = "") -> tuple:
     """
     Returns (estimated_pax: int, load_label: str, load_color: str, load_pct: int).
-    Applies seasonal load factor by origin region and current month.
+    Priority: airline override → seasonal regional curve → default.
     """
     model_upper = aircraft_model.upper()
     capacity = 0
@@ -195,10 +204,15 @@ def estimate_pax(aircraft_model: str, country_code: str = "", month: int = 0) ->
     if capacity == 0:
         return 0, "", "", 0
 
-    # Apply seasonal load factor
-    region = COUNTRY_REGION.get(country_code.lower(), "")
-    load_table = SEASONAL_LOAD.get(region, SEASONAL_DEFAULT)
-    load_factor = load_table.get(month, 0.75)
+    # Check airline-level override first (e.g. SQ always full)
+    airline_prefix = "".join(c for c in flight_number if c.isalpha())[:2].upper()
+    if airline_prefix in AIRLINE_LOAD_OVERRIDE:
+        load_factor = AIRLINE_LOAD_OVERRIDE[airline_prefix]
+    else:
+        region = COUNTRY_REGION.get(country_code.lower(), "")
+        load_table = SEASONAL_LOAD.get(region, SEASONAL_DEFAULT)
+        load_factor = load_table.get(month, 0.75)
+
     pax = int(capacity * load_factor)
     load_pct = int(load_factor * 100)
 
@@ -311,7 +325,7 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & CSS  (V11.1)
+#  4. UI SETUP & CSS  (V11.2)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 st.markdown(f"""
@@ -334,20 +348,24 @@ st.markdown(f"""
 
     .flight-card {{
         border-radius: 10px; padding: 10px 14px;
-        margin-bottom: 6px; display: flex; align-items: center; color: white;
+        margin-bottom: 8px; display: flex; align-items: center; color: white;
         box-shadow: 0 4px 10px rgba(0,0,0,0.2); border-left: 5px solid #3B82F6;
         transition: opacity 0.3s ease;
     }}
-    .info-col   {{ flex-grow: 1; min-width: 0; }}
-    .status-col {{ text-align: right; min-width: 120px; display: flex; flex-direction: column; justify-content: center; }}
+    .info-col   {{ flex-grow: 1; min-width: 0; overflow: hidden; }}
+    .info-col .ac-line {{ font-size: 0.7em; color: #CBD5E1; margin: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+    .status-col {{ text-align: right; min-width: 110px; display: flex; flex-direction: column; justify-content: center; }}
+    .gate-num   {{ font-size: 1.85em; font-weight: 700; line-height: 1; }}
+    .gate-tba   {{ font-size: 1.85em; font-weight: 700; line-height: 1; opacity: 0.35; }}
 
     /* ── Summary strip ────────────────────────── */
     .summary-strip {{
-        display: flex; justify-content: space-between; align-items: center;
+        display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
         background: #0F172A; border: 1px solid #1E293B; border-radius: 8px;
-        padding: 8px 14px; margin-bottom: 10px; font-size: 0.78em; color: #94A3B8;
+        padding: 10px 14px; margin-bottom: 10px; font-size: 0.78em; color: #94A3B8;
+        gap: 4px 0;
     }}
-    .summary-strip .s-item {{ text-align: center; }}
+    .summary-strip .s-item {{ text-align: center; min-width: 22%; }}
     .summary-strip .s-val  {{ font-weight: 700; font-size: 1.15em; display: block; }}
 
     /* ── Gap bar ──────────────────────────────── */
@@ -377,9 +395,9 @@ st.markdown(f"""
 
     /* ── Pax badge ────────────────────────────── */
     .pax-badge {{
-        display: inline-block; font-size: 0.65em; font-weight: 700;
-        padding: 1px 6px; border-radius: 4px; margin-left: 6px;
-        vertical-align: middle; letter-spacing: 0.3px;
+        display: inline-block; font-size: 0.6em; font-weight: 700;
+        padding: 1px 6px; border-radius: 4px; margin-top: 2px;
+        letter-spacing: 0.3px;
     }}
 
     .img-zoom-modal {{
@@ -542,7 +560,7 @@ for f in unique_flights:
     )
 
     pax_count, pax_label, pax_color, load_pct = estimate_pax(
-        ac_m, str(dep_ap.get("countryCode", "")), now_aest.month
+        ac_m, str(dep_ap.get("countryCode", "")), now_aest.month, flight_num
     )
 
     processed.append({
@@ -761,24 +779,26 @@ for i, pf in enumerate(processed):
     pax_html = ""
     if pf["pax_label"]:
         pax_html = (
-            f'<span class="pax-badge" style="background:{pf["pax_color"]}22; color:{pf["pax_color"]}; '
+            f'<div><span class="pax-badge" style="background:{pf["pax_color"]}22; color:{pf["pax_color"]}; '
             f'border: 1px solid {pf["pax_color"]}44;">'
-            f'~{pf["pax_count"]} · {pf["load_pct"]}%</span>'
+            f'~{pf["pax_count"]} pax · {pf["load_pct"]}%</span></div>'
         )
 
     zoom_src = pf["photo_url"] if has_photo else pf["logo_url"]
+    gate_cls = "gate-tba" if pf["gate"] == "TBA" else "gate-num"
 
     st.markdown(f"""
     <div class="flight-card" style="border-left-color:{pf['border_color']}; background-color:{pf['bg_color']}; opacity:{pf['card_opacity']};">
         {img_html}
         <div class="info-col">
             <div style="font-size:1.1em; font-weight:700;">{pf['num']}<span style="font-size:0.7em; color:#94A3B8; margin-left:8px;">{pf['origin']}</span></div>
-            <div style="font-size:0.7em; color:#CBD5E1; margin: 1px 0;">{pf['ac_text'][:25]}{pax_html}</div>
+            <div class="ac-line">{pf['ac_text']}</div>
+            {pax_html}
             <div style="font-size:0.8em; color:#94A3B8;">{time_display}</div>
         </div>
         <div class="status-col">
             <div style="font-size:0.6em; color:#94A3B8; font-weight:700; letter-spacing:1px;">GATE</div>
-            <div class="mono" style="font-size:1.85em; font-weight:700; line-height:1;">{pf['gate']}</div>
+            <div class="mono {gate_cls}">{pf['gate']}</div>
             <div style="font-size:0.85em; font-weight:700; color:{pf['status_color']}; margin-top:2px;">{pf['status_text']}</div>
         </div>
     </div>
@@ -818,6 +838,6 @@ if cans:
         </div>""", unsafe_allow_html=True)
 
 st.markdown(
-    "<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.1</div>",
+    "<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.2</div>",
     unsafe_allow_html=True,
 )
