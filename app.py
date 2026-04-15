@@ -704,7 +704,11 @@ def live_dashboard():
                 "time_key": t1.timestamp() + 1,
             })
 
-    # ── Surge Detection ───────────────────────────────────────────────────────────
+    # ── Surge Detection (chain-based) ────────────────────────────────────────────
+    # A flight joins the cluster if it's within SURGE_WINDOW_MINS of the LAST
+    # flight added — not the first. This means a continuous stream like
+    # 06:45 → 07:00 → 07:15 forms one surge even though 06:45→07:15 is 30 min,
+    # because each consecutive gap is ≤ 20 min.
     future_flights = sorted(
         [p for p in processed if not p.get("is_gap") and not p["is_canceled"] and not p["is_diverted"] and not p["is_landed"]],
         key=lambda x: x["dt"],
@@ -720,7 +724,8 @@ def live_dashboard():
         for j in range(i + 1, len(future_flights)):
             if j in surge_used:
                 continue
-            if (future_flights[j]["dt"] - anchor_f["dt"]).total_seconds() / 60 <= SURGE_WINDOW_MINS:
+            # Compare to LAST flight in cluster, not the anchor
+            if (future_flights[j]["dt"] - cluster[-1]["dt"]).total_seconds() / 60 <= SURGE_WINDOW_MINS:
                 cluster.append(future_flights[j])
                 cluster_idx.append(j)
             else:
