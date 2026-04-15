@@ -82,18 +82,30 @@ def classify_flight_status(
         return FlightStyle("#475569", "#94A3B8", "#0F172A",
                            f"Landed {_format_hm(landed_mins)} ago", "0.4", "grayscale(80%)")
 
-    m_left = max(0, t_diff)
+    m_left     = max(0, t_diff)
+    delay_mins = max(0, int(round(delay_hours * 60)))
 
+    # 1. No radar confirmation and scheduled time has passed
     if t_type == "scheduled" and t_diff <= 0:
         return FlightStyle("#F59E0B", "#FBBF24", "#0F172A", "NO UPDATE", "1.0", "none")
-    if delay_hours >= SEVERE_DELAY_HOURS:
-        return FlightStyle("#7F1D1D", "#FCA5A5", "#1E293B", "SEVERE DELAY", "1.0", "none")
-    if delay_hours >= HEAVY_DELAY_HOURS:
-        return FlightStyle("#92400E", "#FBBF24", "#1E293B",
-                           f"🟠 Delayed {_format_hm(m_left)}", "1.0", "none")
+
+    # 2. Imminent — highest operational priority regardless of delay
+    #    (the delay amount is already visible in the Sch/Est time row)
     if m_left < IMMINENT_MINS:
         return FlightStyle("#EF4444", "#F87171", "#1E293B",
                            f"In {_format_hm(m_left)}", "1.0", "none")
+
+    # 3. Severe delay (12 h+) — show delay amount
+    if delay_hours >= SEVERE_DELAY_HOURS:
+        return FlightStyle("#7F1D1D", "#FCA5A5", "#1E293B",
+                           f"🔴 +{_format_hm(delay_mins)} Late", "1.0", "none")
+
+    # 4. Heavy delay (3 h+) — show delay amount, not time-to-arrival
+    if delay_hours >= HEAVY_DELAY_HOURS:
+        return FlightStyle("#92400E", "#FBBF24", "#1E293B",
+                           f"🟠 +{_format_hm(delay_mins)} Late", "1.0", "none")
+
+    # 5. Normal incoming
     return FlightStyle("#3B82F6", "#60A5FA", "#1E293B",
                        f"In {_format_hm(m_left)}", "1.0", "none")
 
