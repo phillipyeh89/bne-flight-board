@@ -50,6 +50,65 @@ PAX_TABLE = [
 PAX_LIGHT_THRESHOLD  = 200
 PAX_HEAVY_THRESHOLD  = 300
 
+# ── Seasonal load factors ────────────────────────────────────────────────────
+# Monthly estimated occupancy rates by region.
+# Conservative baseline — actual load varies by airline, day-of-week, and events
+# but these give the team a useful ballpark for staffing decisions.
+#                         Jan   Feb   Mar   Apr   May   Jun   Jul   Aug   Sep   Oct   Nov   Dec
+SEASONAL_LOAD = {
+    "east_asia": {        # China, HK, Taiwan, Japan, Korea
+        1: 0.90, 2: 0.82, 3: 0.78, 4: 0.85,   # CNY Jan peak; cherry blossom Apr
+        5: 0.72, 6: 0.85, 7: 0.92, 8: 0.92,   # Asian summer holidays Jul-Aug
+        9: 0.78, 10: 0.88, 11: 0.78, 12: 0.90, # Golden Week Oct; Christmas Dec
+    },
+    "se_asia": {          # Singapore, Vietnam, Thailand, Philippines, Malaysia, Indonesia
+        1: 0.85, 2: 0.75, 3: 0.72, 4: 0.78,   # Songkran travel Apr
+        5: 0.68, 6: 0.80, 7: 0.88, 8: 0.88,   # Peak summer Jul-Aug
+        9: 0.72, 10: 0.75, 11: 0.78, 12: 0.88, # Year-end travel Dec
+    },
+    "pacific": {          # NZ, Fiji, New Caledonia, PNG, Vanuatu, Samoa, Norfolk
+        1: 0.90, 2: 0.78, 3: 0.75, 4: 0.82,   # AU/NZ summer peak Jan; Easter Apr
+        5: 0.70, 6: 0.75, 7: 0.80, 8: 0.75,   # AU school holidays Jul
+        9: 0.72, 10: 0.78, 11: 0.80, 12: 0.90, # Christmas Dec
+    },
+    "south_asia": {       # India, Sri Lanka, Bangladesh
+        1: 0.82, 2: 0.75, 3: 0.78, 4: 0.75,
+        5: 0.68, 6: 0.78, 7: 0.85, 8: 0.85,
+        9: 0.75, 10: 0.82, 11: 0.80, 12: 0.88, # Diwali Oct; year-end Dec
+    },
+    "middle_east": {      # UAE, Qatar — mostly connecting traffic
+        1: 0.82, 2: 0.75, 3: 0.78, 4: 0.78,
+        5: 0.72, 6: 0.80, 7: 0.88, 8: 0.85,
+        9: 0.75, 10: 0.78, 11: 0.80, 12: 0.88,
+    },
+}
+
+SEASONAL_DEFAULT = {      # Fallback for unmapped origins
+    1: 0.80, 2: 0.72, 3: 0.72, 4: 0.75,
+    5: 0.68, 6: 0.75, 7: 0.82, 8: 0.82,
+    9: 0.72, 10: 0.75, 11: 0.75, 12: 0.85,
+}
+
+COUNTRY_REGION = {
+    # East Asia
+    "cn": "east_asia", "hk": "east_asia", "tw": "east_asia",
+    "jp": "east_asia", "kr": "east_asia", "mo": "east_asia",
+    # SE Asia
+    "sg": "se_asia", "vn": "se_asia", "th": "se_asia",
+    "ph": "se_asia", "my": "se_asia", "id": "se_asia",
+    "kh": "se_asia", "la": "se_asia", "mm": "se_asia", "bn": "se_asia",
+    # Pacific
+    "nz": "pacific", "fj": "pacific", "nc": "pacific",
+    "pg": "pacific", "vu": "pacific", "ws": "pacific",
+    "to": "pacific", "nf": "pacific", "nr": "pacific",
+    # South Asia
+    "in": "south_asia", "lk": "south_asia", "bd": "south_asia",
+    "np": "south_asia", "pk": "south_asia",
+    # Middle East
+    "ae": "middle_east", "qa": "middle_east", "sa": "middle_east",
+    "bh": "middle_east", "om": "middle_east", "kw": "middle_east",
+}
+
 UI_REFRESH_SEC           = 60
 API_DATA_TTL_SEC         = 600
 STALE_DATA_THRESHOLD_MIN = 30
@@ -122,21 +181,33 @@ def _format_hm(total_minutes: int) -> str:
     return f"{m:02d}m" if h == 0 else f"{h:02d}h {m:02d}m"
 
 
-def estimate_pax(aircraft_model: str) -> tuple:
+def estimate_pax(aircraft_model: str, country_code: str = "", month: int = 0) -> tuple:
     """
-    Returns (estimated_pax: int, load_label: str, load_color: str).
-    Matches against PAX_TABLE in order. Returns (0, '', '') if unknown.
+    Returns (estimated_pax: int, load_label: str, load_color: str, load_pct: int).
+    Applies seasonal load factor by origin region and current month.
     """
     model_upper = aircraft_model.upper()
-    for keyword, pax in PAX_TABLE:
+    capacity = 0
+    for keyword, cap in PAX_TABLE:
         if keyword.upper() in model_upper:
-            if pax >= PAX_HEAVY_THRESHOLD:
-                return pax, "Heavy", "#EF4444"
-            elif pax >= PAX_LIGHT_THRESHOLD:
-                return pax, "Medium", "#F59E0B"
-            else:
-                return pax, "Light", "#34D399"
-    return 0, "", ""
+            capacity = cap
+            break
+    if capacity == 0:
+        return 0, "", "", 0
+
+    # Apply seasonal load factor
+    region = COUNTRY_REGION.get(country_code.lower(), "")
+    load_table = SEASONAL_LOAD.get(region, SEASONAL_DEFAULT)
+    load_factor = load_table.get(month, 0.75)
+    pax = int(capacity * load_factor)
+    load_pct = int(load_factor * 100)
+
+    if pax >= PAX_HEAVY_THRESHOLD:
+        return pax, "Heavy", "#EF4444", load_pct
+    elif pax >= PAX_LIGHT_THRESHOLD:
+        return pax, "Medium", "#F59E0B", load_pct
+    else:
+        return pax, "Light", "#34D399", load_pct
 
 
 def extract_best_time(node: dict, tz) -> tuple:
@@ -367,6 +438,8 @@ with st.expander(" 👋👋👋 (Operational Guide)"):
 
     **Passenger Load Badges:**
     * <span style="color:#34D399;">Light</span> (< 200 pax) · <span style="color:#F59E0B;">Medium</span> (200–300 pax) · <span style="color:#EF4444;">Heavy</span> (300+ pax)
+    * Pax counts are conservative estimates adjusted by **seasonal demand** — e.g. East Asia routes run ~92% full in Jul–Aug but ~72% in May.
+    * The **%** shown is the load factor used for that flight's origin region this month.
 
     *Developed by Phillip Yeh to support the BNE Lotte Team.*
     """, unsafe_allow_html=True)
@@ -468,7 +541,9 @@ for f in unique_flights:
         dep_ap.get("municipalityName") or dep_ap.get("name") or "Unknown",
     )
 
-    pax_count, pax_label, pax_color = estimate_pax(ac_m)
+    pax_count, pax_label, pax_color, load_pct = estimate_pax(
+        ac_m, str(dep_ap.get("countryCode", "")), now_aest.month
+    )
 
     processed.append({
         "num":          flight_num,
@@ -496,6 +571,7 @@ for f in unique_flights:
         "pax_count":    pax_count,
         "pax_label":    pax_label,
         "pax_color":    pax_color,
+        "load_pct":     load_pct,
     })
 
 # ── Gap Detection ─────────────────────────────────────────────────────────────
@@ -687,7 +763,7 @@ for i, pf in enumerate(processed):
         pax_html = (
             f'<span class="pax-badge" style="background:{pf["pax_color"]}22; color:{pf["pax_color"]}; '
             f'border: 1px solid {pf["pax_color"]}44;">'
-            f'~{pf["pax_count"]} {pf["pax_label"]}</span>'
+            f'~{pf["pax_count"]} · {pf["load_pct"]}%</span>'
         )
 
     zoom_src = pf["photo_url"] if has_photo else pf["logo_url"]
