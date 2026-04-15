@@ -45,7 +45,8 @@ PAX_TABLE = [
     ("A340",    270), ("767",     220),
     ("A321",    200), ("A320",    165), ("A319",    140),
     ("737 MAX", 175), ("737-9",   175), ("737-8",   170), ("737",  165),
-    ("ATR",     70),  ("E190",    100), ("E195",    120),
+    ("ATR",     70),  ("EMBRAER 190", 100), ("EMBRAER 195", 120),
+    ("ERJ-190", 100), ("ERJ-195", 120), ("E190", 100), ("E195", 120),
 ]
 PAX_LIGHT_THRESHOLD  = 200
 PAX_HEAVY_THRESHOLD  = 300
@@ -792,8 +793,7 @@ for i, pf in enumerate(processed):
         {img_html}
         <div class="info-col">
             <div style="font-size:1.1em; font-weight:700;">{pf['num']}<span style="font-size:0.7em; color:#94A3B8; margin-left:8px;">{pf['origin']}</span></div>
-            <div class="ac-line">{pf['ac_text']}</div>
-            {pax_html}
+            <div class="ac-line">{pf['ac_text']}</div>{pax_html}
             <div style="font-size:0.8em; color:#94A3B8;">{time_display}</div>
         </div>
         <div class="status-col">
