@@ -38,7 +38,6 @@ CITY_MAP = {
 }
 
 # ── Pax estimation (typical 3-class config) ──────────────────────────────────
-# Checked in order — most specific substring first.
 PAX_TABLE = [
     ("A380",    500), ("777-300", 350), ("777-200", 300), ("777",  320),
     ("A350-1",  350), ("A350",    300),
@@ -53,31 +52,26 @@ PAX_TABLE = [
 PAX_LIGHT_THRESHOLD  = 200
 PAX_HEAVY_THRESHOLD  = 300
 
-# ── Seasonal load factors ────────────────────────────────────────────────────
-# Monthly estimated occupancy rates by region.
-# Conservative baseline — actual load varies by airline, day-of-week, and events
-# but these give the team a useful ballpark for staffing decisions.
-#                         Jan   Feb   Mar   Apr   May   Jun   Jul   Aug   Sep   Oct   Nov   Dec
 SEASONAL_LOAD = {
     "east_asia": {        # China, HK, Taiwan, Japan, Korea
-        1: 0.90, 2: 0.82, 3: 0.78, 4: 0.85,   # CNY Jan peak; cherry blossom Apr
-        5: 0.72, 6: 0.85, 7: 0.92, 8: 0.92,   # Asian summer holidays Jul-Aug
-        9: 0.78, 10: 0.88, 11: 0.78, 12: 0.90, # Golden Week Oct; Christmas Dec
+        1: 0.90, 2: 0.82, 3: 0.78, 4: 0.85,
+        5: 0.72, 6: 0.85, 7: 0.92, 8: 0.92,
+        9: 0.78, 10: 0.88, 11: 0.78, 12: 0.90,
     },
     "se_asia": {          # Singapore, Vietnam, Thailand, Philippines, Malaysia, Indonesia
-        1: 0.85, 2: 0.75, 3: 0.72, 4: 0.78,   # Songkran travel Apr
-        5: 0.68, 6: 0.80, 7: 0.88, 8: 0.88,   # Peak summer Jul-Aug
-        9: 0.72, 10: 0.75, 11: 0.78, 12: 0.88, # Year-end travel Dec
+        1: 0.85, 2: 0.75, 3: 0.72, 4: 0.78,
+        5: 0.68, 6: 0.80, 7: 0.88, 8: 0.88,
+        9: 0.72, 10: 0.75, 11: 0.78, 12: 0.88,
     },
     "pacific": {          # NZ, Fiji, New Caledonia, PNG, Vanuatu, Samoa, Norfolk
-        1: 0.90, 2: 0.78, 3: 0.75, 4: 0.82,   # AU/NZ summer peak Jan; Easter Apr
-        5: 0.70, 6: 0.75, 7: 0.80, 8: 0.75,   # AU school holidays Jul
-        9: 0.72, 10: 0.78, 11: 0.80, 12: 0.90, # Christmas Dec
+        1: 0.90, 2: 0.78, 3: 0.75, 4: 0.82,
+        5: 0.70, 6: 0.75, 7: 0.80, 8: 0.75,
+        9: 0.72, 10: 0.78, 11: 0.80, 12: 0.90,
     },
     "south_asia": {       # India, Sri Lanka, Bangladesh
         1: 0.82, 2: 0.75, 3: 0.78, 4: 0.75,
         5: 0.68, 6: 0.78, 7: 0.85, 8: 0.85,
-        9: 0.75, 10: 0.82, 11: 0.80, 12: 0.88, # Diwali Oct; year-end Dec
+        9: 0.75, 10: 0.82, 11: 0.80, 12: 0.88,
     },
     "middle_east": {      # UAE, Qatar — mostly connecting traffic
         1: 0.82, 2: 0.75, 3: 0.78, 4: 0.78,
@@ -86,52 +80,38 @@ SEASONAL_LOAD = {
     },
 }
 
-SEASONAL_DEFAULT = {      # Fallback for unmapped origins
+SEASONAL_DEFAULT = {      
     1: 0.80, 2: 0.72, 3: 0.72, 4: 0.75,
     5: 0.68, 6: 0.75, 7: 0.82, 8: 0.82,
     9: 0.72, 10: 0.75, 11: 0.75, 12: 0.85,
 }
 
 COUNTRY_REGION = {
-    # East Asia
     "cn": "east_asia", "hk": "east_asia", "tw": "east_asia",
     "jp": "east_asia", "kr": "east_asia", "mo": "east_asia",
-    # SE Asia
     "sg": "se_asia", "vn": "se_asia", "th": "se_asia",
     "ph": "se_asia", "my": "se_asia", "id": "se_asia",
     "kh": "se_asia", "la": "se_asia", "mm": "se_asia", "bn": "se_asia",
-    # Pacific
     "nz": "pacific", "fj": "pacific", "nc": "pacific",
     "pg": "pacific", "vu": "pacific", "ws": "pacific",
     "to": "pacific", "nf": "pacific", "nr": "pacific",
-    # South Asia
     "in": "south_asia", "lk": "south_asia", "bd": "south_asia",
     "np": "south_asia", "pk": "south_asia",
-    # Middle East
     "ae": "middle_east", "qa": "middle_east", "sa": "middle_east",
     "bh": "middle_east", "om": "middle_east", "kw": "middle_east",
 }
 
-# ── Airline-level load overrides ─────────────────────────────────────────────
-# Some carriers consistently run near-full regardless of season.
-# Map IATA 2-letter prefix → fixed load factor (bypasses seasonal curve).
 AIRLINE_LOAD_OVERRIDE = {
-    "SQ": 0.95,   # Singapore Airlines — consistently full year-round
-    # Add more here as you observe patterns, e.g.:
-    # "CX": 0.92,  # Cathay Pacific
+    "SQ": 0.95,   # Singapore Airlines consistently full
 }
 
 # ── OpenSky Network — free ADS-B radar supplement ────────────────────────────
-# When AeroDataBox has only scheduled time (no radar), we query OpenSky to see
-# if the aircraft is actually airborne and calculate an ETA from its live position.
 YBBN_LAT, YBBN_LON = -27.3842, 153.1175
 OPENSKY_BBOX = {"lamin": -38, "lamax": -10, "lomin": 135, "lomax": 170}
 OPENSKY_ENABLED      = True
 OPENSKY_MIN_SPEED_KT = 80    # ignore ground vehicles / taxiing
 OPENSKY_MAX_ETA_MIN  = 600   # sanity cap — 10 hours
 
-# IATA → ICAO airline code mapping (for OpenSky callsign matching)
-# OpenSky callsigns use ICAO format: "SIA321" not "SQ321"
 AIRLINE_ICAO = {
     "QF": "QFA", "SQ": "SIA", "CX": "CPA", "VA": "VOZ", "JQ": "JST",
     "NZ": "ANZ", "FJ": "FJI", "CI": "CAL", "CZ": "CSN", "MU": "CES",
@@ -153,7 +133,7 @@ log = logging.getLogger("bne-board")
 
 
 # ─────────────────────────────────────────────
-#  2. STATUS CLASSIFICATION (pure function)
+#  2. STATUS CLASSIFICATION 
 # ─────────────────────────────────────────────
 @dataclass
 class FlightStyle:
@@ -163,7 +143,6 @@ class FlightStyle:
     status_text:  str
     card_opacity: str
     img_filter:   str
-
 
 def classify_flight_status(
     *,
@@ -176,7 +155,6 @@ def classify_flight_status(
     s_dt: datetime,
     now: datetime,
 ) -> FlightStyle:
-    """Pure function — given flight state, returns all visual styling."""
     if is_canceled:
         archived = (now - s_dt).total_seconds() / 60 > 15
         if archived:
@@ -186,9 +164,9 @@ def classify_flight_status(
     if is_landed:
         if landed_mins <= RECENT_LANDED_MAX:
             return FlightStyle("#059669", "#34D399", "#0F172A",
-                               f"Landed {_format_hm(landed_mins)} ago", "0.75", "grayscale(40%)")
+                               f"Landed {format_hm(landed_mins)} ago", "0.75", "grayscale(40%)")
         return FlightStyle("#475569", "#94A3B8", "#0F172A",
-                           f"Landed {_format_hm(landed_mins)} ago", "0.4", "grayscale(80%)")
+                           f"Landed {format_hm(landed_mins)} ago", "0.4", "grayscale(80%)")
 
     m_left     = max(0, t_diff)
     delay_mins = max(0, int(round(delay_hours * 60)))
@@ -197,30 +175,26 @@ def classify_flight_status(
         return FlightStyle("#F59E0B", "#FBBF24", "#0F172A", "NO UPDATE", "1.0", "none")
     if m_left < IMMINENT_MINS:
         return FlightStyle("#EF4444", "#F87171", "#1E293B",
-                           f"In {_format_hm(m_left)}", "1.0", "none")
+                           f"In {format_hm(m_left)}", "1.0", "none")
     if delay_hours >= SEVERE_DELAY_HOURS:
         return FlightStyle("#7F1D1D", "#FCA5A5", "#1E293B",
-                           f"🔴 +{_format_hm(delay_mins)} Late", "1.0", "none")
+                           f"🔴 +{format_hm(delay_mins)} Late", "1.0", "none")
     if delay_hours >= HEAVY_DELAY_HOURS:
         return FlightStyle("#92400E", "#FBBF24", "#1E293B",
-                           f"🟠 +{_format_hm(delay_mins)} Late", "1.0", "none")
+                           f"🟠 +{format_hm(delay_mins)} Late", "1.0", "none")
     return FlightStyle("#3B82F6", "#60A5FA", "#1E293B",
-                       f"In {_format_hm(m_left)}", "1.0", "none")
+                       f"In {format_hm(m_left)}", "1.0", "none")
 
 
 # ─────────────────────────────────────────────
 #  3. CORE LOGIC
 # ─────────────────────────────────────────────
-def _format_hm(total_minutes: int) -> str:
+def format_hm(total_minutes: int) -> str:
     h, m = divmod(total_minutes, 60)
     return f"{m:02d}m" if h == 0 else f"{h:02d}h {m:02d}m"
 
 
 def estimate_pax(aircraft_model: str, country_code: str = "", month: int = 0, flight_number: str = "") -> tuple:
-    """
-    Returns (estimated_pax: int, load_label: str, load_color: str, load_pct: int).
-    Priority: airline override → seasonal regional curve → default.
-    """
     model_upper = aircraft_model.upper()
     capacity = 0
     for keyword, cap in PAX_TABLE:
@@ -230,7 +204,6 @@ def estimate_pax(aircraft_model: str, country_code: str = "", month: int = 0, fl
     if capacity == 0:
         return 0, "", "", 0
 
-    # Check airline-level override first (e.g. SQ always full)
     airline_prefix = "".join(c for c in flight_number if c.isalpha())[:2].upper()
     if airline_prefix in AIRLINE_LOAD_OVERRIDE:
         load_factor = AIRLINE_LOAD_OVERRIDE[airline_prefix]
@@ -277,7 +250,7 @@ def is_strictly_international(terminal: str, country_code: str, aircraft_model: 
     if iata == "NLK":                                    return True
     if t in DOMESTIC_TERMINALS:                          return False
     if cc == "au":                                       return False
-    if any(k in ac for k in SMALL_AIRCRAFT_FILTER):     return False
+    if any(k in ac for k in SMALL_AIRCRAFT_FILTER):      return False
     return True
 
 
@@ -286,11 +259,9 @@ def get_airline_logo_url(flight_number: str) -> str:
     return f"https://pics.avs.io/200/200/{prefix}.png" if len(prefix) == 2 else ""
 
 
-# ── Photo fetching with smart retry ──────────────────────────────────────────
 @st.cache_data(show_spinner=False)
 def _photo_cache_permanent(reg: str) -> str:
     return _fetch_photo_http(reg)
-
 
 def _fetch_photo_http(reg: str) -> str:
     try:
@@ -307,18 +278,17 @@ def _fetch_photo_http(reg: str) -> str:
         log.warning("Photo fetch failed for reg=%s: %s", reg, e)
     return "NOT_FOUND"
 
-
 def get_photo_from_api(reg: str) -> str:
-    if not reg:
-        return "NOT_FOUND"
+    if not reg: return "NOT_FOUND"
     cached = _photo_cache_permanent(reg)
-    if cached != "NOT_FOUND":
-        return cached
+    if cached != "NOT_FOUND": return cached
+    
     fail_cache = st.session_state.setdefault("_photo_fails", {})
     fail_entry = fail_cache.get(reg)
     if fail_entry:
         if (datetime.now() - fail_entry).total_seconds() < PHOTO_FAIL_TTL_SEC:
             return "NOT_FOUND"
+            
     url = _fetch_photo_http(reg)
     if url != "NOT_FOUND":
         _photo_cache_permanent.clear()
@@ -350,177 +320,136 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
         return []
 
 
-# ── OpenSky Network — free ADS-B supplement ──────────────────────────────────
 def _iata_to_callsign(flight_number: str) -> str:
-    """Convert IATA flight number 'QF354' → ICAO callsign 'QFA354'."""
     prefix = "".join(c for c in flight_number if c.isalpha())[:2].upper()
     digits = "".join(c for c in flight_number if c.isdigit())
     icao = AIRLINE_ICAO.get(prefix, prefix)
     return f"{icao}{digits}"
 
-
 def _haversine_nm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Great-circle distance in nautical miles."""
     R = 3440.065
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
-    a = (math.sin(dlat / 2) ** 2
-         + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2))
-         * math.sin(dlon / 2) ** 2)
+    a = (math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2)
     return R * 2 * math.asin(math.sqrt(a))
-
 
 @st.cache_data(ttl=API_DATA_TTL_SEC, show_spinner=False)
 def fetch_opensky_states(anchor: str) -> dict:
-    """
-    Fetch all airborne aircraft in Brisbane approach area from OpenSky Network.
-    Returns dict of callsign → {lat, lon, velocity_kts, altitude_ft}.
-    Free API, no key needed. One call per cache window covers all flights.
-    """
-    if not OPENSKY_ENABLED:
-        return {}
+    if not OPENSKY_ENABLED: return {}
     try:
-        r = requests.get(
-            "https://opensky-network.org/api/states/all",
-            params=OPENSKY_BBOX,
-            headers={"User-Agent": "BNE-Board-App/2.0"},
-            timeout=8,
-        )
+        r = requests.get("https://opensky-network.org/api/states/all", params=OPENSKY_BBOX, headers={"User-Agent": "BNE-Board-App/2.0"}, timeout=8)
         if r.status_code == 200:
-            data = r.json()
-            states = data.get("states") or []
+            states = r.json().get("states") or []
             result = {}
             for s in states:
                 callsign = (s[1] or "").strip().upper()
                 on_ground = s[8]
-                velocity = s[9]  # m/s ground speed
+                velocity = s[9]  
                 if callsign and not on_ground and velocity:
                     result[callsign] = {
-                        "lat":          s[6],
-                        "lon":          s[5],
-                        "velocity_kts": velocity * 1.94384,  # m/s → knots
-                        "altitude_ft":  (s[7] or 0) * 3.281, # metres → feet
+                        "lat": s[6], "lon": s[5],
+                        "velocity_kts": velocity * 1.94384,  
+                        "altitude_ft": (s[7] or 0) * 3.281, 
                     }
-            log.info("OpenSky: %d airborne aircraft in bbox", len(result))
             return result
-        elif r.status_code == 429:
-            log.warning("OpenSky rate limited — skipping this cycle")
-        else:
-            log.warning("OpenSky HTTP %d", r.status_code)
     except Exception as e:
         log.warning("OpenSky query failed: %s", e)
     return {}
 
-
 def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime, tz) -> tuple:
-    """
-    Look up a flight in OpenSky data by callsign.
-    Returns (estimated_dt, 'revised') if found airborne with sane ETA, else (None, '').
-    """
-    if not opensky_data:
-        return None, ""
+    if not opensky_data: return None, ""
     callsign = _iata_to_callsign(flight_number)
     state = opensky_data.get(callsign)
-    if not state or state["velocity_kts"] < OPENSKY_MIN_SPEED_KT:
-        return None, ""
+    if not state or state["velocity_kts"] < OPENSKY_MIN_SPEED_KT: return None, ""
 
     dist_nm  = _haversine_nm(state["lat"], state["lon"], YBBN_LAT, YBBN_LON)
     eta_min  = int(dist_nm / state["velocity_kts"] * 60)
 
-    if eta_min < 1 or eta_min > OPENSKY_MAX_ETA_MIN:
-        return None, ""
-
-    est_dt = now + timedelta(minutes=eta_min)
-    log.info("OpenSky ETA: %s (%s) → %s (%.0fnm @ %.0fkts)",
-             flight_number, callsign, est_dt.strftime("%H:%M"),
-             dist_nm, state["velocity_kts"])
-    return est_dt, "revised"
+    if eta_min < 1 or eta_min > OPENSKY_MAX_ETA_MIN: return None, ""
+    return now + timedelta(minutes=eta_min), "revised"
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & CSS  (V11.3)
+#  4. UI SETUP & CSS  (V11.4)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
+
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=JetBrains+Mono:wght@600&display=swap');
-    #MainMenu {{visibility: hidden;}}
-    header {{visibility: hidden;}}
-    .block-container {{padding-top: 1rem; font-family: 'Inter', sans-serif; max-width: 700px;}}
-    .mono {{ font-family: 'JetBrains Mono', monospace; letter-spacing: -0.5px; }}
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    .block-container {padding-top: 1rem; font-family: 'Inter', sans-serif; max-width: 700px;}
+    .mono { font-family: 'JetBrains Mono', monospace; letter-spacing: -0.5px; }
 
-    .flip-container {{ position: relative; width: 55px; height: 55px; margin-right: 12px; flex-shrink: 0; }}
-    .flip-img {{ position: absolute; top: 0; left: 0; width: 55px; height: 55px; border-radius: 8px; border: 2.5px solid #475569; transition: opacity 1s ease-in-out; box-sizing: border-box; }}
+    .flip-container { position: relative; width: 55px; height: 55px; margin-right: 12px; flex-shrink: 0; }
+    .flip-img { position: absolute; top: 0; left: 0; width: 55px; height: 55px; border-radius: 8px; border: 2.5px solid #475569; transition: opacity 1s ease-in-out; box-sizing: border-box; }
 
-    @keyframes logoFade  {{ 0%, 45% {{ opacity: 1; }} 55%, 100% {{ opacity: 0; }} }}
-    @keyframes photoFade {{ 0%, 45% {{ opacity: 0; }} 55%, 95%  {{ opacity: 1; }} 100% {{ opacity: 0; }} }}
+    @keyframes logoFade  { 0%, 45% { opacity: 1; } 55%, 100% { opacity: 0; } }
+    @keyframes photoFade { 0%, 45% { opacity: 0; } 55%, 95%  { opacity: 1; } 100% { opacity: 0; } }
 
-    .logo-layer  {{ animation: logoFade 10s infinite;  background: #FFFFFF; padding: 4px; object-fit: contain !important; border-radius: 8px; z-index: 2; }}
-    .photo-layer {{ animation: photoFade 10s infinite; object-fit: cover !important;   z-index: 1; }}
+    .logo-layer  { animation: logoFade 10s infinite;  background: #FFFFFF; padding: 4px; object-fit: contain !important; border-radius: 8px; z-index: 2; }
+    .photo-layer { animation: photoFade 10s infinite; object-fit: cover !important;   z-index: 1; }
 
-    .flight-card {{
+    .flight-card {
         border-radius: 10px; padding: 10px 14px;
         margin-bottom: 8px; display: flex; align-items: center; color: white;
         box-shadow: 0 4px 10px rgba(0,0,0,0.2); border-left: 5px solid #3B82F6;
         transition: opacity 0.3s ease;
-    }}
-    .info-col   {{ flex-grow: 1; min-width: 0; overflow: hidden; }}
-    .info-col .ac-line {{ font-size: 0.7em; color: #CBD5E1; margin: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-    .status-col {{ text-align: right; min-width: 110px; display: flex; flex-direction: column; justify-content: center; }}
-    .gate-num   {{ font-size: 1.85em; font-weight: 700; line-height: 1; }}
-    .gate-tba   {{ font-size: 1.85em; font-weight: 700; line-height: 1; opacity: 0.35; }}
+    }
+    .info-col   { flex-grow: 1; min-width: 0; overflow: hidden; }
+    .info-col .ac-line { font-size: 0.7em; color: #CBD5E1; margin: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .status-col { text-align: right; min-width: 110px; display: flex; flex-direction: column; justify-content: center; }
+    .gate-num   { font-size: 1.85em; font-weight: 700; line-height: 1; }
+    .gate-tba   { font-size: 1.85em; font-weight: 700; line-height: 1; opacity: 0.35; }
 
-    /* ── Summary strip ────────────────────────── */
-    .summary-strip {{
+    .summary-strip {
         display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
         background: #0F172A; border: 1px solid #1E293B; border-radius: 8px;
         padding: 10px 14px; margin-bottom: 10px; font-size: 0.78em; color: #94A3B8;
         gap: 4px 0;
-    }}
-    .summary-strip .s-item {{ text-align: center; min-width: 22%; }}
-    .summary-strip .s-val  {{ font-weight: 700; font-size: 1.15em; display: block; }}
+    }
+    .summary-strip .s-item { text-align: center; min-width: 22%; }
+    .summary-strip .s-val  { font-weight: 700; font-size: 1.15em; display: block; }
 
-    /* ── Gap bar ──────────────────────────────── */
-    .gap-bar {{
+    .gap-bar {
         background-color: #0F172A; border: 1px dashed #475569; border-left: 5px solid transparent;
         border-radius: 8px; padding: 8px 14px; margin: 4px 0 10px 0; text-align: center; color: #94A3B8;
         font-weight: 600; font-size: 0.85em; box-sizing: border-box;
-    }}
-    .gap-active {{ background-color: #064E3B; border-color: #10B981; border-left-color: #10B981; color: #A7F3D0; }}
+    }
+    .gap-active { background-color: #064E3B; border-color: #10B981; border-left-color: #10B981; color: #A7F3D0; }
 
-    .gap-progress-track {{
+    .gap-progress-track {
         width: 100%; height: 5px; background: #1E293B; border-radius: 3px; margin-top: 6px; overflow: hidden;
-    }}
-    .gap-progress-fill {{
+    }
+    .gap-progress-fill {
         height: 100%; border-radius: 3px; transition: width 1s linear;
-    }}
+    }
 
-    /* ── Surge banner ─────────────────────────── */
-    .surge-banner {{
+    .surge-banner {
         background: linear-gradient(90deg, #7F1D1D 0%, #991B1B 100%);
         border-left: 5px solid #EF4444; border-radius: 8px;
         padding: 7px 14px; margin: 6px 0 8px 0; color: #FCA5A5;
         font-size: 0.82em; font-weight: 700; display: flex;
         align-items: center; gap: 8px;
-    }}
-    .surge-banner .surge-icon {{ font-size: 1.1em; }}
+    }
+    .surge-banner .surge-icon { font-size: 1.1em; }
 
-    /* ── Pax badge ────────────────────────────── */
-    .pax-badge {{
+    .pax-badge {
         display: inline-block; font-size: 0.6em; font-weight: 700;
         padding: 1px 6px; border-radius: 4px; margin-top: 2px;
         letter-spacing: 0.3px;
-    }}
+    }
 
-    .img-zoom-modal {{
+    .img-zoom-modal {
         display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
         background: rgba(15,23,42,0.92); z-index: 10000; align-items: center;
         justify-content: center; backdrop-filter: blur(10px);
-    }}
-    .img-zoom-chk:checked + .img-zoom-modal {{ display: flex !important; }}
-    .img-zoom-modal img {{ max-width: 90%; max-height: 80%; border-radius: 12px; border: 2px solid #475569; object-fit: contain; z-index: 10001; }}
-    .img-zoom-close-bg {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: pointer; z-index: 10000; }}
-    .close-btn {{ position: absolute; top: 20px; right: 30px; color: white; font-size: 3.5em; font-weight: bold; cursor: pointer; z-index: 10002; line-height: 1; }}
+    }
+    .img-zoom-chk:checked + .img-zoom-modal { display: flex !important; }
+    .img-zoom-modal img { max-width: 90%; max-height: 80%; border-radius: 12px; border: 2px solid #475569; object-fit: contain; z-index: 10001; }
+    .img-zoom-close-bg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: pointer; z-index: 10000; }
+    .close-btn { position: absolute; top: 20px; right: 30px; color: white; font-size: 3.5em; font-weight: bold; cursor: pointer; z-index: 10002; line-height: 1; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -534,7 +463,6 @@ if "api_error"    not in st.session_state: st.session_state.api_error    = None
 aest     = pytz.timezone(TIMEZONE)
 now_aest = datetime.now(aest)
 
-# ── Header ────────────────────────────────────
 c1, c2 = st.columns([2, 1])
 with c1:
     st.subheader("✈️ Arrivals")
@@ -587,8 +515,6 @@ raw_flights = fetch_flight_data(
     (now_aest + timedelta(hours=LOOKAHEAD_HOURS)).strftime("%Y-%m-%dT%H:%M"),
 )
 
-# OpenSky — one call gets all airborne aircraft in the Brisbane area.
-# Used to upgrade "scheduled only" flights with live ADS-B position data.
 opensky_data = fetch_opensky_states(anchor)
 
 if st.session_state.api_error:
@@ -599,7 +525,6 @@ if not raw_flights:
     st.info("⏳ Synchronizing radar... data will appear on next refresh.")
     st.stop()
 
-# ── Deduplicate ───────────────────────────────────────────────────────────────
 seen: dict = {}
 for f in raw_flights:
     num = f.get("number")
@@ -607,7 +532,6 @@ for f in raw_flights:
         seen[num] = f
 unique_flights = list(seen.values())
 
-# ── Prefetch reg photos concurrently ──────────────────────────────────────────
 all_regs = list({
     f.get("aircraft", {}).get("reg", "")
     for f in unique_flights
@@ -616,7 +540,6 @@ all_regs = list({
 with ThreadPoolExecutor(max_workers=IMAGE_WORKERS) as executor:
     executor.map(get_photo_from_api, all_regs)
 
-# ── Process ───────────────────────────────────────────────────────────────────
 processed = []
 
 for f in unique_flights:
@@ -651,13 +574,11 @@ for f in unique_flights:
     if t_type == "revised" and abs((best_dt - s_dt).total_seconds()) < 60 and not has_departed:
         t_type = "scheduled"
 
-    # ── OpenSky fallback — upgrade scheduled-only flights with live ADS-B ─────
-    # If AeroDataBox has no radar data, check if OpenSky can see the aircraft.
     if t_type == "scheduled" and status_raw not in ("canceled", "cancelled"):
         osky_dt, osky_type = opensky_estimate_eta(flight_num, opensky_data, now_aest, aest)
         if osky_dt:
             best_dt = osky_dt
-            t_type  = osky_type  # "revised" — removes ⚠️ Check Board
+            t_type  = osky_type  
 
     delay = (best_dt - s_dt).total_seconds() / 3600
     if delay < -2 or delay > 24:
@@ -749,7 +670,6 @@ if gap_candidates:
         window_start = max(t1, now_aest) if is_active else t1
         display_min  = gap_remaining if is_active else gap_total
 
-        # ── Progress bar for active gaps ──────────────────────────────────────
         progress_html = ""
         if is_active and gap_total > 0:
             pct_left = max(0, min(100, int(gap_remaining / gap_total * 100)))
@@ -768,7 +688,7 @@ if gap_candidates:
         processed.append({
             "is_gap":   True,
             "html":     (
-                f'<div class="{cls}">{lbl} {_format_hm(display_min)} GAP '
+                f'<div class="{cls}">{lbl} {format_hm(display_min)} GAP '
                 f'<span style="opacity:0.6; font-weight:400; margin-left:8px;">'
                 f'({window_start.strftime("%H:%M")}–{t2.strftime("%H:%M")})</span>'
                 f'{progress_html}</div>'
@@ -782,7 +702,7 @@ future_flights = sorted(
     key=lambda x: x["dt"],
 )
 
-surge_used = set()  # indices of flights already claimed by a surge
+surge_used = set()  
 surge_windows = []
 for i, anchor_f in enumerate(future_flights):
     if i in surge_used:
@@ -824,7 +744,6 @@ incoming       = [p for p in processed if not p.get("is_gap") and not p.get("is_
 incoming_count = len(incoming)
 total_pax_sum  = sum(p["pax_count"] for p in incoming)
 
-# Next gap
 next_gap_txt = "None"
 for g in sorted(gap_list, key=lambda x: x["t1"]):
     if g["t2"] > now_aest:
@@ -834,7 +753,6 @@ for g in sorted(gap_list, key=lambda x: x["t1"]):
             next_gap_txt = f'{g["t1"].strftime("%H:%M")} ({g["total"]}m)'
         break
 
-# Busiest window: slide a 30-min window across incoming flights
 busiest_txt = "—"
 if len(incoming) >= 2:
     sorted_inc = sorted(incoming, key=lambda x: x["dt"])
@@ -845,7 +763,6 @@ if len(incoming) >= 2:
         if count > best_count:
             best_count = count
             best_start = f["dt"]
-            # Find the last flight in this window
             last_in_window = max((o["dt"] for o in sorted_inc if f["dt"] <= o["dt"] < window_end), default=f["dt"])
             best_end = last_in_window
     if best_count >= 2 and best_start:
@@ -908,7 +825,6 @@ for i, pf in enumerate(processed):
             f' • <span class="mono" style="color:{time_color}; font-weight:700;">{tag} {pf["actual_time"]}</span>'
         )
 
-    # ── Pax badge ─────────────────────────────────────────────────────────────
     pax_html = ""
     if pf["pax_label"]:
         pax_html = (
@@ -970,13 +886,10 @@ if cans:
         </div>""", unsafe_allow_html=True)
 
 st.markdown(
-    "<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.3</div>",
+    "<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.4</div>",
     unsafe_allow_html=True,
 )
 
-# ── Auto-refresh via JavaScript (reliable unlike <meta refresh>) ──────────────
-# components.html() runs in an iframe that actually executes <script> tags.
-# window.parent targets the main Streamlit page from inside the iframe.
 components.html(f"""
 <script>
     setTimeout(function() {{
