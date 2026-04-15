@@ -291,6 +291,13 @@ st.markdown("""
 
     .flip-container { position: relative; width: 55px; height: 55px; margin-right: 12px; flex-shrink: 0; }
     .flip-img { position: absolute; top: 0; left: 0; width: 55px; height: 55px; border-radius: 8px; border: 2.5px solid #475569; transition: opacity 1s ease-in-out; box-sizing: border-box; }
+    .img-fallback {
+        position: absolute; top: 0; left: 0; width: 55px; height: 55px; border-radius: 8px;
+        border: 2.5px solid #475569; box-sizing: border-box; z-index: 0;
+        display: flex; align-items: center; justify-content: center;
+        background: #1E293B; color: #94A3B8; font-weight: 700; font-size: 0.75em;
+        letter-spacing: 0.5px;
+    }
 
     @keyframes logoFade  { 0%, 45% { opacity: 1; } 55%, 100% { opacity: 0; } }
     @keyframes photoFade { 0%, 45% { opacity: 0; } 55%, 95%  { opacity: 1; } 100% { opacity: 0; } }
@@ -428,6 +435,32 @@ def live_dashboard():
         if num and num not in seen:
             seen[num] = f
     unique_flights = list(seen.values())
+
+    # ── Codeshare dedup: same origin + same scheduled time + same aircraft ─────
+    # ON 91 and W2 805 can be the same physical plane with different flight numbers.
+    # Keep the one with more data (registration, actual time).
+    physical_seen: dict = {}
+    deduped_flights = []
+    for f in unique_flights:
+        dep_ap = (f.get("departure") or {}).get("airport") or {}
+        arr    = f.get("arrival") or f.get("movement") or {}
+        sch    = arr.get("scheduledTime")
+        sch_str = sch.get("local", "") if isinstance(sch, dict) else ""
+        ac_m   = f.get("aircraft", {}).get("model", "")
+        origin = str(dep_ap.get("iata", ""))
+        phy_key = f"{origin}|{sch_str}|{ac_m}"
+
+        if phy_key and phy_key in physical_seen:
+            # Keep the entry with a registration (better data)
+            existing = physical_seen[phy_key]
+            if not existing.get("aircraft", {}).get("reg") and f.get("aircraft", {}).get("reg"):
+                physical_seen[phy_key] = f
+                deduped_flights = [x for x in deduped_flights if x is not existing]
+                deduped_flights.append(f)
+            continue
+        physical_seen[phy_key] = f
+        deduped_flights.append(f)
+    unique_flights = deduped_flights
 
     all_regs = list({
         f.get("aircraft", {}).get("reg", "")
@@ -698,15 +731,19 @@ def live_dashboard():
 
         mid       = f"z_{i}"
         has_photo = pf["photo_url"] != "NOT_FOUND"
+        # Airline code for text fallback when logo image fails to load
+        al_code = "".join(c for c in pf["num"] if c.isalpha())[:2].upper()
 
         img_html = (
             f'<div class="flip-container" style="filter:{pf["img_filter"]};">'
+            f'<div class="img-fallback" style="border-color:{pf["border_color"]};">{al_code}</div>'
             f'<label for="{mid}" style="cursor:pointer; display:block; width:100%; height:100%;">'
             f'<img src="{pf["logo_url"]}" class="flip-img logo-layer" style="border-color:{pf["border_color"]};"/>'
             f'<img src="{pf["photo_url"]}" class="flip-img photo-layer" style="border-color:{pf["border_color"]};"/>'
             f'</label></div>'
             if has_photo else
             f'<div class="flip-container" style="filter:{pf["img_filter"]};">'
+            f'<div class="img-fallback" style="border-color:{pf["border_color"]};">{al_code}</div>'
             f'<img src="{pf["logo_url"]}" class="flip-img" style="border-color:{pf["border_color"]}; background:#FFF; padding:4px; object-fit:contain; border-radius:8px;"/>'
             f'</div>'
         )
@@ -759,8 +796,10 @@ def live_dashboard():
             unsafe_allow_html=True,
         )
         for pf in divs:
+            al_code = "".join(c for c in pf["num"] if c.isalpha())[:2].upper()
             img_html = (
                 f'<div class="flip-container" style="filter:{pf["img_filter"]};">'
+                f'<div class="img-fallback" style="border-color:{pf["border_color"]};">{al_code}</div>'
                 f'<img src="{pf["logo_url"]}" class="flip-img" style="border-color:{pf["border_color"]}; '
                 f'background:#FFF; padding:4px; object-fit:contain; border-radius:8px;"/>'
                 f'</div>'
@@ -786,8 +825,10 @@ def live_dashboard():
             unsafe_allow_html=True,
         )
         for pf in cans:
+            al_code = "".join(c for c in pf["num"] if c.isalpha())[:2].upper()
             img_html = (
                 f'<div class="flip-container" style="filter:{pf["img_filter"]};">'
+                f'<div class="img-fallback" style="border-color:{pf["border_color"]};">{al_code}</div>'
                 f'<img src="{pf["logo_url"]}" class="flip-img" style="border-color:{pf["border_color"]}; '
                 f'background:#FFF; padding:4px; object-fit:contain; border-radius:8px;"/>'
                 f'</div>'
