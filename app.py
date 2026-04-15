@@ -22,6 +22,8 @@ SEVERE_DELAY_HOURS       = 12   # red critical threshold
 IMMINENT_MINS            = 25   # red "hot" threshold
 IMAGE_WORKERS            = 15
 PHOTO_FAIL_TTL_SEC       = 600  # retry failed photo lookups after 10 min
+SURGE_WINDOW_MINS        = 20   # cluster detection window
+SURGE_MIN_FLIGHTS        = 3    # minimum flights to trigger surge alert
 DOMESTIC_TERMINALS       = ('D', 'DOM', 'D-ANC', 'GAT')
 SMALL_AIRCRAFT_FILTER    = ('BEECH', 'FAIRCHILD', 'CESSNA', 'PIPER', 'PILATUS', 'KING AIR', 'METROLINER', 'SAAB')
 
@@ -32,6 +34,21 @@ CITY_MAP = {
     "Ho Chi Minh City": "Saigon", "Yaren District": "Nauru",
     "Guangzhou Baiyun": "Guangzhou",
 }
+
+# ── Pax estimation (typical 3-class config) ──────────────────────────────────
+# Checked in order — most specific substring first.
+PAX_TABLE = [
+    ("A380",    500), ("777-300", 350), ("777-200", 300), ("777",  320),
+    ("A350-1",  350), ("A350",    300),
+    ("787-10",  320), ("787-9",   280), ("787-8",   240), ("787",  275),
+    ("A330-9",  280), ("A330-3",  280), ("A330-2",  250), ("A330", 260),
+    ("A340",    270), ("767",     220),
+    ("A321",    200), ("A320",    165), ("A319",    140),
+    ("737 MAX", 175), ("737-9",   175), ("737-8",   170), ("737",  165),
+    ("ATR",     70),  ("E190",    100), ("E195",    120),
+]
+PAX_LIGHT_THRESHOLD  = 200
+PAX_HEAVY_THRESHOLD  = 300
 
 UI_REFRESH_SEC           = 60
 API_DATA_TTL_SEC         = 600
@@ -65,10 +82,7 @@ def classify_flight_status(
     s_dt: datetime,
     now: datetime,
 ) -> FlightStyle:
-    """
-    Pure function — given flight state, returns all visual styling.
-    Extracted from the V10 inline if/elif chain so it can be unit-tested.
-    """
+    """Pure function — given flight state, returns all visual styling."""
     if is_canceled:
         archived = (now - s_dt).total_seconds() / 60 > 15
         if archived:
@@ -85,27 +99,17 @@ def classify_flight_status(
     m_left     = max(0, t_diff)
     delay_mins = max(0, int(round(delay_hours * 60)))
 
-    # 1. No radar confirmation and scheduled time has passed
     if t_type == "scheduled" and t_diff <= 0:
         return FlightStyle("#F59E0B", "#FBBF24", "#0F172A", "NO UPDATE", "1.0", "none")
-
-    # 2. Imminent — highest operational priority regardless of delay
-    #    (the delay amount is already visible in the Sch/Est time row)
     if m_left < IMMINENT_MINS:
         return FlightStyle("#EF4444", "#F87171", "#1E293B",
                            f"In {_format_hm(m_left)}", "1.0", "none")
-
-    # 3. Severe delay (12 h+) — show delay amount
     if delay_hours >= SEVERE_DELAY_HOURS:
         return FlightStyle("#7F1D1D", "#FCA5A5", "#1E293B",
                            f"🔴 +{_format_hm(delay_mins)} Late", "1.0", "none")
-
-    # 4. Heavy delay (3 h+) — show delay amount, not time-to-arrival
     if delay_hours >= HEAVY_DELAY_HOURS:
         return FlightStyle("#92400E", "#FBBF24", "#1E293B",
                            f"🟠 +{_format_hm(delay_mins)} Late", "1.0", "none")
-
-    # 5. Normal incoming
     return FlightStyle("#3B82F6", "#60A5FA", "#1E293B",
                        f"In {_format_hm(m_left)}", "1.0", "none")
 
@@ -116,6 +120,23 @@ def classify_flight_status(
 def _format_hm(total_minutes: int) -> str:
     h, m = divmod(total_minutes, 60)
     return f"{m:02d}m" if h == 0 else f"{h:02d}h {m:02d}m"
+
+
+def estimate_pax(aircraft_model: str) -> tuple:
+    """
+    Returns (estimated_pax: int, load_label: str, load_color: str).
+    Matches against PAX_TABLE in order. Returns (0, '', '') if unknown.
+    """
+    model_upper = aircraft_model.upper()
+    for keyword, pax in PAX_TABLE:
+        if keyword.upper() in model_upper:
+            if pax >= PAX_HEAVY_THRESHOLD:
+                return pax, "Heavy", "#EF4444"
+            elif pax >= PAX_LIGHT_THRESHOLD:
+                return pax, "Medium", "#F59E0B"
+            else:
+                return pax, "Light", "#34D399"
+    return 0, "", ""
 
 
 def extract_best_time(node: dict, tz) -> tuple:
@@ -138,15 +159,10 @@ def extract_best_time(node: dict, tz) -> tuple:
 
 
 def is_strictly_international(terminal: str, country_code: str, aircraft_model: str, origin_iata: str) -> bool:
-    """
-    Returns True only for confirmed international arrivals.
-    NLK (Norfolk Island) is force-allowed — AeroDataBox may tag it as 'au'.
-    """
     t    = terminal.strip().upper()
     ac   = aircraft_model.upper()
     cc   = country_code.lower()
     iata = origin_iata.upper()
-
     if iata == "NLK":                                    return True
     if t in DOMESTIC_TERMINALS:                          return False
     if cc == "au":                                       return False
@@ -160,12 +176,8 @@ def get_airline_logo_url(flight_number: str) -> str:
 
 
 # ── Photo fetching with smart retry ──────────────────────────────────────────
-# Successes are cached indefinitely (liveries don't change).
-# Failures are retried after PHOTO_FAIL_TTL_SEC so transient errors self-heal.
-
 @st.cache_data(show_spinner=False)
 def _photo_cache_permanent(reg: str) -> str:
-    """Permanent cache slot — only called when we have a confirmed URL."""
     return _fetch_photo_http(reg)
 
 
@@ -186,30 +198,18 @@ def _fetch_photo_http(reg: str) -> str:
 
 
 def get_photo_from_api(reg: str) -> str:
-    """
-    Two-tier cache:
-    - Successful URLs → @st.cache_data (permanent, no TTL)
-    - Failures → session_state dict with timestamp (retried after PHOTO_FAIL_TTL_SEC)
-    """
     if not reg:
         return "NOT_FOUND"
-
-    # Check permanent cache first
     cached = _photo_cache_permanent(reg)
     if cached != "NOT_FOUND":
         return cached
-
-    # Check failure cooldown
     fail_cache = st.session_state.setdefault("_photo_fails", {})
     fail_entry = fail_cache.get(reg)
     if fail_entry:
         if (datetime.now() - fail_entry).total_seconds() < PHOTO_FAIL_TTL_SEC:
-            return "NOT_FOUND"  # still in cooldown
-
-    # Actually fetch
+            return "NOT_FOUND"
     url = _fetch_photo_http(reg)
     if url != "NOT_FOUND":
-        # Promote to permanent cache by clearing and re-calling
         _photo_cache_permanent.clear()
         return url
     else:
@@ -240,7 +240,7 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & CSS  (V11.0)
+#  4. UI SETUP & CSS  (V11.1)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 st.markdown(f"""
@@ -270,12 +270,46 @@ st.markdown(f"""
     .info-col   {{ flex-grow: 1; min-width: 0; }}
     .status-col {{ text-align: right; min-width: 120px; display: flex; flex-direction: column; justify-content: center; }}
 
+    /* ── Summary strip ────────────────────────── */
+    .summary-strip {{
+        display: flex; justify-content: space-between; align-items: center;
+        background: #0F172A; border: 1px solid #1E293B; border-radius: 8px;
+        padding: 8px 14px; margin-bottom: 10px; font-size: 0.78em; color: #94A3B8;
+    }}
+    .summary-strip .s-item {{ text-align: center; }}
+    .summary-strip .s-val  {{ font-weight: 700; font-size: 1.15em; display: block; }}
+
+    /* ── Gap bar ──────────────────────────────── */
     .gap-bar {{
         background-color: #0F172A; border: 1px dashed #475569; border-left: 5px solid transparent;
         border-radius: 8px; padding: 8px 14px; margin: 4px 0 10px 0; text-align: center; color: #94A3B8;
         font-weight: 600; font-size: 0.85em; box-sizing: border-box;
     }}
     .gap-active {{ background-color: #064E3B; border-color: #10B981; border-left-color: #10B981; color: #A7F3D0; }}
+
+    .gap-progress-track {{
+        width: 100%; height: 5px; background: #1E293B; border-radius: 3px; margin-top: 6px; overflow: hidden;
+    }}
+    .gap-progress-fill {{
+        height: 100%; border-radius: 3px; transition: width 1s linear;
+    }}
+
+    /* ── Surge banner ─────────────────────────── */
+    .surge-banner {{
+        background: linear-gradient(90deg, #7F1D1D 0%, #991B1B 100%);
+        border-left: 5px solid #EF4444; border-radius: 8px;
+        padding: 7px 14px; margin: 6px 0 8px 0; color: #FCA5A5;
+        font-size: 0.82em; font-weight: 700; display: flex;
+        align-items: center; gap: 8px;
+    }}
+    .surge-banner .surge-icon {{ font-size: 1.1em; }}
+
+    /* ── Pax badge ────────────────────────────── */
+    .pax-badge {{
+        display: inline-block; font-size: 0.65em; font-weight: 700;
+        padding: 1px 6px; border-radius: 4px; margin-left: 6px;
+        vertical-align: middle; letter-spacing: 0.3px;
+    }}
 
     .img-zoom-modal {{
         display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
@@ -329,6 +363,10 @@ with st.expander(" 👋👋👋 (Operational Guide)"):
     **Flight Status Tags:**
     * ⚠️ **Check Board**: No live radar data yet. Check physical airport FIDS boards.
     * 🟠 **Delayed**: Flight is running 3+ hours late.
+    * ⚡ **Surge**: 3+ flights arriving within 20 minutes — all hands on deck.
+
+    **Passenger Load Badges:**
+    * <span style="color:#34D399;">Light</span> (< 200 pax) · <span style="color:#F59E0B;">Medium</span> (200–300 pax) · <span style="color:#EF4444;">Heavy</span> (300+ pax)
 
     *Developed by Phillip Yeh to support the BNE Lotte Team.*
     """, unsafe_allow_html=True)
@@ -351,7 +389,7 @@ if not raw_flights:
     st.info("⏳ Synchronizing radar... data will appear on next refresh.")
     st.stop()
 
-# ── Deduplicate: keep FIRST occurrence per flight number ──────────────────────
+# ── Deduplicate ───────────────────────────────────────────────────────────────
 seen: dict = {}
 for f in raw_flights:
     num = f.get("number")
@@ -360,7 +398,6 @@ for f in raw_flights:
 unique_flights = list(seen.values())
 
 # ── Prefetch reg photos concurrently ──────────────────────────────────────────
-# Only fetch registrations we don't already have a permanent cached result for.
 all_regs = list({
     f.get("aircraft", {}).get("reg", "")
     for f in unique_flights
@@ -389,7 +426,6 @@ for f in unique_flights:
     if not best_dt:
         continue
 
-    # Scheduled time — parse safely, fall back to best_dt if absent
     sch_val = arr.get("scheduledTime")
     sch_raw = sch_val.get("local") if isinstance(sch_val, dict) else None
     if sch_raw:
@@ -401,12 +437,10 @@ for f in unique_flights:
     else:
         s_dt = best_dt
 
-    # ── Fake Estimate Filter ───────────────────────────────────────────────────
     has_departed = (dep_node.get("actualTime") is not None) or (status_raw in AIRBORNE_STATUSES)
     if t_type == "revised" and abs((best_dt - s_dt).total_seconds()) < 60 and not has_departed:
         t_type = "scheduled"
 
-    # Sanity guard: skip implausible delays
     delay = (best_dt - s_dt).total_seconds() / 3600
     if delay < -2 or delay > 24:
         log.info("Skipping %s — implausible delay %.1fh", flight_num, delay)
@@ -415,7 +449,6 @@ for f in unique_flights:
     t_diff = int((best_dt - now_aest).total_seconds() / 60)
     is_can = status_raw in ("canceled", "cancelled")
 
-    # Landing detection
     is_lan = False
     if status_raw in ("landed", "arrived"):
         is_lan = True
@@ -425,16 +458,9 @@ for f in unique_flights:
 
     landed_mins = max(0, -t_diff)
 
-    # ── Status styling (via pure function) ─────────────────────────────────────
     style = classify_flight_status(
-        is_canceled=is_can,
-        is_landed=is_lan,
-        landed_mins=landed_mins,
-        t_diff=t_diff,
-        t_type=t_type,
-        delay_hours=delay,
-        s_dt=s_dt,
-        now=now_aest,
+        is_canceled=is_can, is_landed=is_lan, landed_mins=landed_mins,
+        t_diff=t_diff, t_type=t_type, delay_hours=delay, s_dt=s_dt, now=now_aest,
     )
 
     city = CITY_MAP.get(
@@ -442,11 +468,14 @@ for f in unique_flights:
         dep_ap.get("municipalityName") or dep_ap.get("name") or "Unknown",
     )
 
+    pax_count, pax_label, pax_color = estimate_pax(ac_m)
+
     processed.append({
         "num":          flight_num,
         "origin":       city,
         "iata":         origin_iata,
         "gate":         arr.get("gate", "TBA"),
+        "ac_model":     ac_m,
         "ac_text":      f"{ac_m} ({ac_r})" if ac_m and ac_r else ac_m or ac_r,
         "actual_time":  best_dt.strftime("%H:%M"),
         "sch_time":     s_dt.strftime("%H:%M"),
@@ -464,12 +493,12 @@ for f in unique_flights:
         "card_opacity": style.card_opacity,
         "img_filter":   style.img_filter,
         "landed_mins":  landed_mins,
+        "pax_count":    pax_count,
+        "pax_label":    pax_label,
+        "pax_color":    pax_color,
     })
 
-# ── Gap Detection (V11 — compares actual arrival times of both flights) ───────
-# Include recently-landed flights so the gap between "just landed" and the next
-# incoming flight is visible. This matches the spec: "compare with both flights
-# actual arrival time."
+# ── Gap Detection ─────────────────────────────────────────────────────────────
 gap_candidates = sorted(
     [p for p in processed
      if not p["is_canceled"]
@@ -477,41 +506,139 @@ gap_candidates = sorted(
     key=lambda x: x["dt"],
 )
 
+gap_list = []
 if gap_candidates:
     for i in range(len(gap_candidates) - 1):
-        t1 = gap_candidates[i]["dt"]      # actual/best time of preceding flight
-        t2 = gap_candidates[i + 1]["dt"]  # actual/best time of following flight
+        t1 = gap_candidates[i]["dt"]
+        t2 = gap_candidates[i + 1]["dt"]
 
         gap_total = int((t2 - t1).total_seconds() / 60)
         if gap_total < GAP_MIN_MINUTES:
             continue
 
-        # How much of the gap is still ahead of us?
         gap_remaining = int((t2 - max(t1, now_aest)).total_seconds() / 60)
         if gap_remaining < GAP_DISPLAY_MIN:
             continue
 
-        # Is the team currently inside this gap window?
         is_active = t1 <= now_aest < t2
+        gap_list.append({"t1": t1, "t2": t2, "total": gap_total, "remaining": gap_remaining, "active": is_active})
+
         cls = "gap-bar gap-active" if is_active else "gap-bar"
         lbl = "🟢 ACTIVE" if is_active else "🔄"
         window_start = max(t1, now_aest) if is_active else t1
         display_min  = gap_remaining if is_active else gap_total
+
+        # ── Progress bar for active gaps ──────────────────────────────────────
+        progress_html = ""
+        if is_active and gap_total > 0:
+            pct_left = max(0, min(100, int(gap_remaining / gap_total * 100)))
+            if pct_left > 50:
+                bar_color = "#10B981"
+            elif pct_left > 25:
+                bar_color = "#F59E0B"
+            else:
+                bar_color = "#EF4444"
+            progress_html = (
+                f'<div class="gap-progress-track">'
+                f'<div class="gap-progress-fill" style="width:{pct_left}%; background:{bar_color};"></div>'
+                f'</div>'
+            )
 
         processed.append({
             "is_gap":   True,
             "html":     (
                 f'<div class="{cls}">{lbl} {_format_hm(display_min)} GAP '
                 f'<span style="opacity:0.6; font-weight:400; margin-left:8px;">'
-                f'({window_start.strftime("%H:%M")}–{t2.strftime("%H:%M")})</span></div>'
+                f'({window_start.strftime("%H:%M")}–{t2.strftime("%H:%M")})</span>'
+                f'{progress_html}</div>'
             ),
             "time_key": t1.timestamp() + 1,
         })
 
+# ── Surge Detection ───────────────────────────────────────────────────────────
+future_flights = sorted(
+    [p for p in processed if not p.get("is_gap") and not p["is_canceled"] and not p["is_landed"]],
+    key=lambda x: x["dt"],
+)
+
+surge_windows = []
+for i, anchor_f in enumerate(future_flights):
+    cluster = [anchor_f]
+    for j in range(i + 1, len(future_flights)):
+        if (future_flights[j]["dt"] - anchor_f["dt"]).total_seconds() / 60 <= SURGE_WINDOW_MINS:
+            cluster.append(future_flights[j])
+        else:
+            break
+    if len(cluster) >= SURGE_MIN_FLIGHTS:
+        w_start = cluster[0]["dt"]
+        w_end   = cluster[-1]["dt"]
+        already = any(s["start"] == w_start for s in surge_windows)
+        if not already:
+            total_pax = sum(c["pax_count"] for c in cluster)
+            pax_note  = f" · ~{total_pax} pax" if total_pax > 0 else ""
+            surge_windows.append({
+                "start": w_start, "end": w_end,
+                "count": len(cluster), "pax": total_pax,
+            })
+            processed.append({
+                "is_surge": True,
+                "html": (
+                    f'<div class="surge-banner">'
+                    f'<span class="surge-icon">⚡</span>'
+                    f'SURGE {w_start.strftime("%H:%M")}–{w_end.strftime("%H:%M")} '
+                    f'({len(cluster)} flights{pax_note})'
+                    f'</div>'
+                ),
+                "time_key": w_start.timestamp() - 1,
+            })
+
+# ── Summary Strip ─────────────────────────────────────────────────────────────
+incoming       = [p for p in processed if not p.get("is_gap") and not p.get("is_surge") and not p["is_canceled"] and not p["is_landed"]]
+incoming_count = len(incoming)
+total_pax_sum  = sum(p["pax_count"] for p in incoming)
+
+# Next gap
+next_gap_txt = "None"
+for g in sorted(gap_list, key=lambda x: x["t1"]):
+    if g["t2"] > now_aest:
+        if g["active"]:
+            next_gap_txt = f'<span style="color:#34D399;">NOW ({g["remaining"]}m)</span>'
+        else:
+            next_gap_txt = f'{g["t1"].strftime("%H:%M")} ({g["total"]}m)'
+        break
+
+# Busiest window: slide a 30-min window across incoming flights
+busiest_txt = "—"
+if len(incoming) >= 2:
+    sorted_inc = sorted(incoming, key=lambda x: x["dt"])
+    best_count, best_start, best_end = 0, None, None
+    for f in sorted_inc:
+        window_end = f["dt"] + timedelta(minutes=30)
+        count = sum(1 for o in sorted_inc if f["dt"] <= o["dt"] < window_end)
+        if count > best_count:
+            best_count = count
+            best_start = f["dt"]
+            # Find the last flight in this window
+            last_in_window = max((o["dt"] for o in sorted_inc if f["dt"] <= o["dt"] < window_end), default=f["dt"])
+            best_end = last_in_window
+    if best_count >= 2 and best_start:
+        busiest_txt = f'{best_start.strftime("%H:%M")}–{best_end.strftime("%H:%M")} ({best_count})'
+
+pax_txt = f"~{total_pax_sum}" if total_pax_sum > 0 else "—"
+
+st.markdown(f"""
+<div class="summary-strip">
+    <div class="s-item"><span class="s-val" style="color:#60A5FA;">{incoming_count}</span>Incoming</div>
+    <div class="s-item"><span class="s-val" style="color:#94A3B8;">{pax_txt}</span>Total Pax</div>
+    <div class="s-item"><span class="s-val" style="color:#34D399;">{next_gap_txt}</span>Next Gap</div>
+    <div class="s-item"><span class="s-val" style="color:#F59E0B;">{busiest_txt}</span>Busiest</div>
+</div>
+""", unsafe_allow_html=True)
+
 # ── Sort ──────────────────────────────────────────────────────────────────────
 processed.sort(key=lambda p:
-    (1, p["time_key"])              if p.get("is_gap")                                         else
-    (2, p["s_dt_val"].timestamp())  if p["is_canceled"]                                        else
+    (1, p["time_key"])              if p.get("is_gap") or p.get("is_surge")                     else
+    (2, p["s_dt_val"].timestamp())  if p["is_canceled"]                                         else
     (0, -p["dt"].timestamp())       if p["is_landed"] and p["landed_mins"] <= RECENT_LANDED_MAX else
     (2, -p["dt"].timestamp())       if p["is_landed"]                                           else
     (1, p["dt"].timestamp())
@@ -521,7 +648,7 @@ processed.sort(key=lambda p:
 for i, pf in enumerate(processed):
     if pf.get("is_canceled"):
         continue
-    if pf.get("is_gap"):
+    if pf.get("is_gap") or pf.get("is_surge"):
         st.markdown(pf["html"], unsafe_allow_html=True)
         continue
 
@@ -554,6 +681,15 @@ for i, pf in enumerate(processed):
             f' • <span class="mono" style="color:{time_color}; font-weight:700;">{tag} {pf["actual_time"]}</span>'
         )
 
+    # ── Pax badge ─────────────────────────────────────────────────────────────
+    pax_html = ""
+    if pf["pax_label"]:
+        pax_html = (
+            f'<span class="pax-badge" style="background:{pf["pax_color"]}22; color:{pf["pax_color"]}; '
+            f'border: 1px solid {pf["pax_color"]}44;">'
+            f'~{pf["pax_count"]} {pf["pax_label"]}</span>'
+        )
+
     zoom_src = pf["photo_url"] if has_photo else pf["logo_url"]
 
     st.markdown(f"""
@@ -561,7 +697,7 @@ for i, pf in enumerate(processed):
         {img_html}
         <div class="info-col">
             <div style="font-size:1.1em; font-weight:700;">{pf['num']}<span style="font-size:0.7em; color:#94A3B8; margin-left:8px;">{pf['origin']}</span></div>
-            <div style="font-size:0.7em; color:#CBD5E1; margin: 1px 0;">{pf['ac_text'][:25]}</div>
+            <div style="font-size:0.7em; color:#CBD5E1; margin: 1px 0;">{pf['ac_text'][:25]}{pax_html}</div>
             <div style="font-size:0.8em; color:#94A3B8;">{time_display}</div>
         </div>
         <div class="status-col">
@@ -606,6 +742,6 @@ if cans:
         </div>""", unsafe_allow_html=True)
 
 st.markdown(
-    "<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.0</div>",
+    "<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.1</div>",
     unsafe_allow_html=True,
 )
