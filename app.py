@@ -31,6 +31,12 @@ SURGE_MIN_FLIGHTS        = 3    # minimum flights to trigger surge alert
 DOMESTIC_TERMINALS       = ('D', 'DOM', 'D-ANC', 'GAT')
 SMALL_AIRCRAFT_FILTER    = ('BEECH', 'FAIRCHILD', 'CESSNA', 'PIPER', 'PILATUS', 'KING AIR', 'METROLINER', 'SAAB')
 
+# ── Ghost flight blocklist ───────────────────────────────────────────────────
+# For flights that NEVER operate to BNE but appear in AeroDataBox schedule data.
+# Use sparingly — for day-of-week non-operating flights, the auto-detection
+# below handles it (no registration + no departure = not flying today).
+GHOST_FLIGHTS  = set()               # e.g. {"XX 123", "YY 456"}
+
 AIRBORNE_STATUSES = {"enroute", "departed", "approaching"}
 
 CITY_MAP = {
@@ -514,6 +520,11 @@ def live_dashboard():
     processed = []
     for f in unique_flights:
         flight_num  = f.get("number", "N/A")
+
+        # ── Ghost flight filter (exact flight numbers only) ───────────────────
+        if flight_num in GHOST_FLIGHTS:
+            continue
+
         status_raw  = f.get("status", "").lower()
         dep_node    = f.get("departure") or {}
         dep_ap      = dep_node.get("airport") or f.get("movement", {}).get("airport") or {}
@@ -543,6 +554,23 @@ def live_dashboard():
         has_departed = (dep_node.get("actualTime") is not None) or (status_raw in AIRBORNE_STATUSES)
         if t_type == "revised" and abs((best_dt - s_dt).total_seconds()) < 60 and not has_departed:
             t_type = "scheduled"
+
+        # ── Not-operating-today filter ────────────────────────────────────────
+        # AeroDataBox includes flights in the schedule that don't run every day.
+        # If a flight is arriving within 3 hours but STILL has:
+        #   - no aircraft registration (airline hasn't allocated a plane)
+        #   - no departure confirmation (plane hasn't left origin)
+        #   - no revised/actual arrival time (purely scheduled)
+        # ...it's almost certainly not operating today. Real flights get aircraft
+        # assignments and departure data well before the 3-hour mark.
+        hours_until = (best_dt - now_aest).total_seconds() / 3600
+        if (0 < hours_until < 3
+            and not ac_r
+            and not has_departed
+            and t_type == "scheduled"
+            and status_raw not in ("landed", "arrived", "canceled", "cancelled", "diverted")):
+            log.info("Filtering %s — likely not operating (no reg/departure, arriving in %.1fh)", flight_num, hours_until)
+            continue
 
         # ── OpenSky radar supplement ───────────────────────────────────────────
         # Two cases where OpenSky's live ADS-B position beats AeroDataBox:
