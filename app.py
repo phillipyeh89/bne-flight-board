@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import requests
 import pandas as pd
 import logging
@@ -437,11 +438,10 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime, 
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & CSS  (V11.2)
+#  4. UI SETUP & CSS  (V11.3)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
-st.markdown(f"""
-<meta http-equiv="refresh" content="{UI_REFRESH_SEC}">
+st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=JetBrains+Mono:wght@600&display=swap');
     #MainMenu {{visibility: hidden;}}
@@ -782,36 +782,42 @@ future_flights = sorted(
     key=lambda x: x["dt"],
 )
 
+surge_used = set()  # indices of flights already claimed by a surge
 surge_windows = []
 for i, anchor_f in enumerate(future_flights):
+    if i in surge_used:
+        continue
     cluster = [anchor_f]
+    cluster_idx = [i]
     for j in range(i + 1, len(future_flights)):
+        if j in surge_used:
+            continue
         if (future_flights[j]["dt"] - anchor_f["dt"]).total_seconds() / 60 <= SURGE_WINDOW_MINS:
             cluster.append(future_flights[j])
+            cluster_idx.append(j)
         else:
             break
     if len(cluster) >= SURGE_MIN_FLIGHTS:
-        w_start = cluster[0]["dt"]
-        w_end   = cluster[-1]["dt"]
-        already = any(s["start"] == w_start for s in surge_windows)
-        if not already:
-            total_pax = sum(c["pax_count"] for c in cluster)
-            pax_note  = f" · ~{total_pax} pax" if total_pax > 0 else ""
-            surge_windows.append({
-                "start": w_start, "end": w_end,
-                "count": len(cluster), "pax": total_pax,
-            })
-            processed.append({
-                "is_surge": True,
-                "html": (
-                    f'<div class="surge-banner">'
-                    f'<span class="surge-icon">⚡</span>'
-                    f'SURGE {w_start.strftime("%H:%M")}–{w_end.strftime("%H:%M")} '
-                    f'({len(cluster)} flights{pax_note})'
-                    f'</div>'
-                ),
-                "time_key": w_start.timestamp() - 1,
-            })
+        surge_used.update(cluster_idx)
+        w_start   = cluster[0]["dt"]
+        w_end     = cluster[-1]["dt"]
+        total_pax = sum(c["pax_count"] for c in cluster)
+        pax_note  = f" · ~{total_pax} pax" if total_pax > 0 else ""
+        surge_windows.append({
+            "start": w_start, "end": w_end,
+            "count": len(cluster), "pax": total_pax,
+        })
+        processed.append({
+            "is_surge": True,
+            "html": (
+                f'<div class="surge-banner">'
+                f'<span class="surge-icon">⚡</span>'
+                f'SURGE {w_start.strftime("%H:%M")}–{w_end.strftime("%H:%M")} '
+                f'({len(cluster)} flights{pax_note})'
+                f'</div>'
+            ),
+            "time_key": w_start.timestamp() - 1,
+        })
 
 # ── Summary Strip ─────────────────────────────────────────────────────────────
 incoming       = [p for p in processed if not p.get("is_gap") and not p.get("is_surge") and not p["is_canceled"] and not p["is_landed"]]
@@ -964,6 +970,17 @@ if cans:
         </div>""", unsafe_allow_html=True)
 
 st.markdown(
-    "<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.2</div>",
+    "<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.3</div>",
     unsafe_allow_html=True,
 )
+
+# ── Auto-refresh via JavaScript (reliable unlike <meta refresh>) ──────────────
+# components.html() runs in an iframe that actually executes <script> tags.
+# window.parent targets the main Streamlit page from inside the iframe.
+components.html(f"""
+<script>
+    setTimeout(function() {{
+        window.parent.location.reload();
+    }}, {UI_REFRESH_SEC * 1000});
+</script>
+""", height=0)
