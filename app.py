@@ -41,7 +41,10 @@ CITY_MAP = {
 
 # ── OpenSky Network — free ADS-B radar supplement ────────────────────────────
 YBBN_LAT, YBBN_LON = -27.3842, 153.1175
-OPENSKY_BBOX = {"lamin": -38, "lamax": -10, "lomin": 135, "lomax": 170}
+# Tight bbox: ~500nm around BNE. Covers approach from all directions up to ~60 min out.
+# The old bbox (-38 to -10, 135 to 170) asked for thousands of aircraft across
+# all of Oceania — slow response, frequent timeouts. This is 10x less data.
+OPENSKY_BBOX = {"lamin": -35, "lamax": -19, "lomin": 144, "lomax": 164}
 OPENSKY_ENABLED      = True
 OPENSKY_MIN_SPEED_KT = 80
 OPENSKY_MAX_ETA_MIN  = 600
@@ -206,6 +209,37 @@ def get_photo_from_api(reg: str) -> str:
         fail_cache[reg] = datetime.now()
         return "NOT_FOUND"
 
+
+@st.cache_data(show_spinner=False)
+def fetch_aircraft_age(reg: str) -> str:
+    """
+    Fetch aircraft delivery date from AeroDataBox aircraft endpoint.
+    Returns age string like "7.2 yrs" or "" if unavailable.
+    Cached permanently — aircraft age barely changes.
+    """
+    if not reg:
+        return ""
+    try:
+        r = requests.get(
+            f"https://aerodatabox.p.rapidapi.com/aircrafts/reg/{reg}",
+            headers={
+                "X-RapidAPI-Key":  st.secrets["X_RAPIDAPI_KEY"],
+                "X-RapidAPI-Host": "aerodatabox.p.rapidapi.com",
+            },
+            timeout=5,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            # Try deliveryDate first, fall back to firstFlightDate
+            date_str = data.get("deliveryDate") or data.get("firstFlightDate") or ""
+            if date_str:
+                dt = pd.to_datetime(date_str).to_pydatetime()
+                age_years = (datetime.now() - dt).days / 365.25
+                return f"{age_years:.1f} yrs"
+    except Exception as e:
+        log.warning("Aircraft age fetch failed for reg=%s: %s", reg, e)
+    return ""
+
 @st.cache_data(ttl=API_DATA_TTL_SEC, show_spinner=False)
 def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
     url = f"https://aerodatabox.p.rapidapi.com/flights/airports/icao/{AIRPORT_ICAO}/{from_time}/{to_time}"
@@ -243,25 +277,30 @@ def _haversine_nm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 @st.cache_data(ttl=API_DATA_TTL_SEC, show_spinner=False)
 def fetch_opensky_states(anchor: str) -> dict:
     if not OPENSKY_ENABLED: return {}
-    try:
-        r = requests.get("https://opensky-network.org/api/states/all", params=OPENSKY_BBOX,
-                         headers={"User-Agent": "BNE-Board-App/2.0"}, timeout=8)
-        if r.status_code == 200:
-            states = r.json().get("states") or []
-            result = {}
-            for s in states:
-                callsign = (s[1] or "").strip().upper()
-                on_ground = s[8]
-                velocity = s[9]
-                if callsign and not on_ground and velocity:
-                    result[callsign] = {
-                        "lat": s[6], "lon": s[5],
-                        "velocity_kts": velocity * 1.94384,
-                        "altitude_ft": (s[7] or 0) * 3.281,
-                    }
-            return result
-    except Exception as e:
-        log.warning("OpenSky query failed: %s", e)
+    # Try twice — OpenSky free tier is flaky, a quick retry often succeeds.
+    for attempt in range(2):
+        try:
+            r = requests.get("https://opensky-network.org/api/states/all", params=OPENSKY_BBOX,
+                             headers={"User-Agent": "BNE-Board-App/2.0"}, timeout=5)
+            if r.status_code == 200:
+                states = r.json().get("states") or []
+                result = {}
+                for s in states:
+                    callsign = (s[1] or "").strip().upper()
+                    on_ground = s[8]
+                    velocity = s[9]
+                    if callsign and not on_ground and velocity:
+                        result[callsign] = {
+                            "lat": s[6], "lon": s[5],
+                            "velocity_kts": velocity * 1.94384,
+                            "altitude_ft": (s[7] or 0) * 3.281,
+                        }
+                return result
+            elif r.status_code == 429:
+                log.warning("OpenSky rate limited (attempt %d)", attempt + 1)
+                break  # don't retry rate limits
+        except Exception as e:
+            log.warning("OpenSky attempt %d failed: %s", attempt + 1, e)
     return {}
 
 def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime, tz) -> tuple:
@@ -470,6 +509,7 @@ def live_dashboard():
 
     with ThreadPoolExecutor(max_workers=IMAGE_WORKERS) as executor:
         executor.map(get_photo_from_api, all_regs)
+        executor.map(fetch_aircraft_age, all_regs)
 
     processed = []
     for f in unique_flights:
@@ -566,6 +606,7 @@ def live_dashboard():
             "time_type":    t_type,
             "logo_url":     get_airline_logo_url(flight_num),
             "photo_url":    get_photo_from_api(ac_r),
+            "ac_age":       fetch_aircraft_age(ac_r),
             "border_color": style.border_color,
             "status_color": style.status_color,
             "status_text":  style.status_text,
@@ -764,6 +805,8 @@ def live_dashboard():
 
         zoom_src = pf["photo_url"] if has_photo else pf["logo_url"]
         gate_cls = "gate-tba" if pf["gate"] == "TBA" else "gate-num"
+        age_txt  = f' · Age: {pf["ac_age"]}' if pf.get("ac_age") else ""
+        modal_info = f'{pf["num"]} — {pf["ac_text"]}{age_txt}'
 
         st.markdown(f"""
         <div class="flight-card" style="border-left-color:{pf['border_color']}; background-color:{pf['bg_color']}; opacity:{pf['card_opacity']};">
@@ -784,6 +827,7 @@ def live_dashboard():
             <label for="{mid}" class="img-zoom-close-bg"></label>
             <label for="{mid}" class="close-btn">&times;</label>
             <img src="{zoom_src}"/>
+            <div style="position:absolute; bottom:30px; left:50%; transform:translateX(-50%); background:rgba(15,23,42,0.85); color:#E2E8F0; padding:8px 18px; border-radius:8px; font-size:0.85em; font-weight:600; z-index:10002; white-space:nowrap; backdrop-filter:blur(4px); border:1px solid #334155;">{modal_info}</div>
         </div>
         """, unsafe_allow_html=True)
 
