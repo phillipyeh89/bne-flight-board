@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 import logging
+import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
@@ -117,6 +118,29 @@ AIRLINE_LOAD_OVERRIDE = {
     "SQ": 0.95,   # Singapore Airlines — consistently full year-round
     # Add more here as you observe patterns, e.g.:
     # "CX": 0.92,  # Cathay Pacific
+}
+
+# ── OpenSky Network — free ADS-B radar supplement ────────────────────────────
+# When AeroDataBox has only scheduled time (no radar), we query OpenSky to see
+# if the aircraft is actually airborne and calculate an ETA from its live position.
+YBBN_LAT, YBBN_LON = -27.3842, 153.1175
+OPENSKY_BBOX = {"lamin": -38, "lamax": -10, "lomin": 135, "lomax": 170}
+OPENSKY_ENABLED      = True
+OPENSKY_MIN_SPEED_KT = 80    # ignore ground vehicles / taxiing
+OPENSKY_MAX_ETA_MIN  = 600   # sanity cap — 10 hours
+
+# IATA → ICAO airline code mapping (for OpenSky callsign matching)
+# OpenSky callsigns use ICAO format: "SIA321" not "SQ321"
+AIRLINE_ICAO = {
+    "QF": "QFA", "SQ": "SIA", "CX": "CPA", "VA": "VOZ", "JQ": "JST",
+    "NZ": "ANZ", "FJ": "FJI", "CI": "CAL", "CZ": "CSN", "MU": "CES",
+    "TG": "THA", "VN": "HVN", "MH": "MAS", "GA": "GIA", "PR": "PAL",
+    "KE": "KAL", "OZ": "AAR", "JL": "JAL", "NH": "ANA", "TR": "TGW",
+    "3K": "JSA", "BI": "RBA", "PX": "ANG", "SB": "ACI", "EK": "UAE",
+    "QR": "QTR", "EY": "ETD", "AI": "AIC", "AK": "AXM", "5J": "CEB",
+    "NF": "AVN", "S7": "SBI", "CA": "CCA", "HX": "CRK", "UO": "HKE",
+    "BR": "EVA", "IT": "TTW", "MM": "APJ", "TW": "TWB", "PG": "BKP",
+    "WEB": "WEB",
 }
 
 UI_REFRESH_SEC           = 60
@@ -325,6 +349,93 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
         return []
 
 
+# ── OpenSky Network — free ADS-B supplement ──────────────────────────────────
+def _iata_to_callsign(flight_number: str) -> str:
+    """Convert IATA flight number 'QF354' → ICAO callsign 'QFA354'."""
+    prefix = "".join(c for c in flight_number if c.isalpha())[:2].upper()
+    digits = "".join(c for c in flight_number if c.isdigit())
+    icao = AIRLINE_ICAO.get(prefix, prefix)
+    return f"{icao}{digits}"
+
+
+def _haversine_nm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance in nautical miles."""
+    R = 3440.065
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (math.sin(dlat / 2) ** 2
+         + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2))
+         * math.sin(dlon / 2) ** 2)
+    return R * 2 * math.asin(math.sqrt(a))
+
+
+@st.cache_data(ttl=API_DATA_TTL_SEC, show_spinner=False)
+def fetch_opensky_states(anchor: str) -> dict:
+    """
+    Fetch all airborne aircraft in Brisbane approach area from OpenSky Network.
+    Returns dict of callsign → {lat, lon, velocity_kts, altitude_ft}.
+    Free API, no key needed. One call per cache window covers all flights.
+    """
+    if not OPENSKY_ENABLED:
+        return {}
+    try:
+        r = requests.get(
+            "https://opensky-network.org/api/states/all",
+            params=OPENSKY_BBOX,
+            headers={"User-Agent": "BNE-Board-App/2.0"},
+            timeout=8,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            states = data.get("states") or []
+            result = {}
+            for s in states:
+                callsign = (s[1] or "").strip().upper()
+                on_ground = s[8]
+                velocity = s[9]  # m/s ground speed
+                if callsign and not on_ground and velocity:
+                    result[callsign] = {
+                        "lat":          s[6],
+                        "lon":          s[5],
+                        "velocity_kts": velocity * 1.94384,  # m/s → knots
+                        "altitude_ft":  (s[7] or 0) * 3.281, # metres → feet
+                    }
+            log.info("OpenSky: %d airborne aircraft in bbox", len(result))
+            return result
+        elif r.status_code == 429:
+            log.warning("OpenSky rate limited — skipping this cycle")
+        else:
+            log.warning("OpenSky HTTP %d", r.status_code)
+    except Exception as e:
+        log.warning("OpenSky query failed: %s", e)
+    return {}
+
+
+def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime, tz) -> tuple:
+    """
+    Look up a flight in OpenSky data by callsign.
+    Returns (estimated_dt, 'revised') if found airborne with sane ETA, else (None, '').
+    """
+    if not opensky_data:
+        return None, ""
+    callsign = _iata_to_callsign(flight_number)
+    state = opensky_data.get(callsign)
+    if not state or state["velocity_kts"] < OPENSKY_MIN_SPEED_KT:
+        return None, ""
+
+    dist_nm  = _haversine_nm(state["lat"], state["lon"], YBBN_LAT, YBBN_LON)
+    eta_min  = int(dist_nm / state["velocity_kts"] * 60)
+
+    if eta_min < 1 or eta_min > OPENSKY_MAX_ETA_MIN:
+        return None, ""
+
+    est_dt = now + timedelta(minutes=eta_min)
+    log.info("OpenSky ETA: %s (%s) → %s (%.0fnm @ %.0fkts)",
+             flight_number, callsign, est_dt.strftime("%H:%M"),
+             dist_nm, state["velocity_kts"])
+    return est_dt, "revised"
+
+
 # ─────────────────────────────────────────────
 #  4. UI SETUP & CSS  (V11.2)
 # ─────────────────────────────────────────────
@@ -450,6 +561,9 @@ with st.expander(" 👋👋👋 (Operational Guide)"):
     * <span class="mono" style="color:#E2E8F0;font-weight:bold;">Est</span>: **Estimated** arrival based on live radar. Very reliable.
     * <span class="mono" style="color:#94A3B8;font-weight:bold;">Sch</span>: **Scheduled** time only.
 
+    **Dual Radar:**
+    This app uses **two** data sources. If the primary API (AeroDataBox) has no radar data, it falls back to **OpenSky Network** (live ADS-B transponder data) to estimate arrival times from the aircraft's actual position and speed. This reduces the number of ⚠️ Check Board warnings.
+
     **Flight Status Tags:**
     * ⚠️ **Check Board**: No live radar data yet. Check physical airport FIDS boards.
     * 🟠 **Delayed**: Flight is running 3+ hours late.
@@ -472,6 +586,10 @@ raw_flights = fetch_flight_data(
     (now_aest - timedelta(hours=LOOKBACK_HOURS)).strftime("%Y-%m-%dT%H:%M"),
     (now_aest + timedelta(hours=LOOKAHEAD_HOURS)).strftime("%Y-%m-%dT%H:%M"),
 )
+
+# OpenSky — one call gets all airborne aircraft in the Brisbane area.
+# Used to upgrade "scheduled only" flights with live ADS-B position data.
+opensky_data = fetch_opensky_states(anchor)
 
 if st.session_state.api_error:
     st.error(f"⚠️ API Error — {st.session_state.api_error}")
@@ -532,6 +650,14 @@ for f in unique_flights:
     has_departed = (dep_node.get("actualTime") is not None) or (status_raw in AIRBORNE_STATUSES)
     if t_type == "revised" and abs((best_dt - s_dt).total_seconds()) < 60 and not has_departed:
         t_type = "scheduled"
+
+    # ── OpenSky fallback — upgrade scheduled-only flights with live ADS-B ─────
+    # If AeroDataBox has no radar data, check if OpenSky can see the aircraft.
+    if t_type == "scheduled" and status_raw not in ("canceled", "cancelled"):
+        osky_dt, osky_type = opensky_estimate_eta(flight_num, opensky_data, now_aest, aest)
+        if osky_dt:
+            best_dt = osky_dt
+            t_type  = osky_type  # "revised" — removes ⚠️ Check Board
 
     delay = (best_dt - s_dt).total_seconds() / 3600
     if delay < -2 or delay > 24:
