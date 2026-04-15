@@ -21,7 +21,9 @@ GAP_MIN_MINUTES          = 20   # minimum gap size to display
 GAP_DISPLAY_MIN          = 5    # minimum remaining time in gap to display
 HEAVY_DELAY_HOURS        = 3    # orange warning threshold
 SEVERE_DELAY_HOURS       = 12   # red critical threshold
-IMMINENT_MINS            = 25   # red "hot" threshold
+IMMINENT_MINS            = 30   # red "hot" threshold (25 + 5 lag compensation)
+API_LAG_MINS             = 5    # AeroDataBox data is ~5 min behind real-time
+OPENSKY_PREFER_UNDER_MIN = 60   # use OpenSky over AeroDataBox for flights < 60 min out
 IMAGE_WORKERS            = 15
 PHOTO_FAIL_TTL_SEC       = 600  # retry failed photo lookups after 10 min
 SURGE_WINDOW_MINS        = 20   # cluster detection window
@@ -363,7 +365,7 @@ def live_dashboard():
             unsafe_allow_html=True,
         )
         api_t   = st.session_state.get("api_last_hit")
-        api_txt = f'API: {api_t.strftime("%H:%M")}' if api_t else "API: --:--"
+        api_txt = f'API: {api_t.strftime("%H:%M")} <span style="color:#F59E0B;">(~{API_LAG_MINS}m lag)</span>' if api_t else "API: --:--"
         st.markdown(
             f'<div style="font-size:0.7em;color:#64748B;text-align:right;">{api_txt}</div>',
             unsafe_allow_html=True,
@@ -459,12 +461,22 @@ def live_dashboard():
         if t_type == "revised" and abs((best_dt - s_dt).total_seconds()) < 60 and not has_departed:
             t_type = "scheduled"
 
-        # ── OpenSky fallback for scheduled-only flights ───────────────────────
-        if t_type == "scheduled" and status_raw not in ("canceled", "cancelled"):
-            osky_dt, osky_type = opensky_estimate_eta(flight_num, opensky_data, now_aest, aest)
-            if osky_dt:
-                best_dt = osky_dt
-                t_type  = osky_type
+        # ── OpenSky radar supplement ───────────────────────────────────────────
+        # Two cases where OpenSky's live ADS-B position beats AeroDataBox:
+        # 1. Scheduled-only: AeroDataBox has no radar at all → use OpenSky
+        # 2. Close-in flights (< 60 min): AeroDataBox data is ~5 min stale,
+        #    but OpenSky updates every ~10 sec → prefer live position math
+        if status_raw not in ("canceled", "cancelled"):
+            preliminary_mins = int((best_dt - now_aest).total_seconds() / 60)
+            use_opensky = (
+                t_type == "scheduled"
+                or (t_type == "revised" and 0 < preliminary_mins < OPENSKY_PREFER_UNDER_MIN)
+            )
+            if use_opensky:
+                osky_dt, osky_type = opensky_estimate_eta(flight_num, opensky_data, now_aest, aest)
+                if osky_dt:
+                    best_dt = osky_dt
+                    t_type  = osky_type
 
         delay = (best_dt - s_dt).total_seconds() / 3600
         if delay < -2 or delay > 24:
@@ -541,16 +553,20 @@ def live_dashboard():
                 continue
 
             is_active = t1 <= now_aest < t2
-            gap_list.append({"t1": t1, "t2": t2, "total": gap_total, "remaining": gap_remaining, "active": is_active})
+
+            # Subtract API lag from remaining time — flight could arrive ~5 min
+            # earlier than shown, so a "20m gap" is really ~15m usable.
+            safe_remaining = max(0, gap_remaining - API_LAG_MINS)
+            gap_list.append({"t1": t1, "t2": t2, "total": gap_total, "remaining": safe_remaining, "active": is_active})
 
             cls = "gap-bar gap-active" if is_active else "gap-bar"
             lbl = "🟢 ACTIVE" if is_active else "🔄"
             window_start = max(t1, now_aest) if is_active else t1
-            display_min  = gap_remaining if is_active else gap_total
+            display_min  = safe_remaining if is_active else max(0, gap_total - API_LAG_MINS)
 
             progress_html = ""
             if is_active and gap_total > 0:
-                pct_left = max(0, min(100, int(gap_remaining / gap_total * 100)))
+                pct_left = max(0, min(100, int(safe_remaining / gap_total * 100)))
                 if pct_left > 50:
                     bar_color = "#10B981"
                 elif pct_left > 25:
