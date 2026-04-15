@@ -143,14 +143,20 @@ def extract_best_time(node: dict, tz) -> tuple:
                 continue
     return None, ""
 
-def is_strictly_international(terminal: str, country_code: str, aircraft_model: str, origin_iata: str) -> bool:
+def is_strictly_international(terminal: str, country_code: str, aircraft_model: str, origin_iata: str, reg: str = "") -> bool:
     t    = terminal.strip().upper()
     ac   = aircraft_model.upper()
     cc   = country_code.lower()
     iata = origin_iata.upper()
+    rv   = reg.strip().upper()
+
     if iata == "NLK":                                    return True
     if t in DOMESTIC_TERMINALS:                          return False
     if cc == "au":                                       return False
+    # VH- registration = Australian-registered aircraft — strong domestic signal
+    if rv.startswith("VH-") and not cc:                  return False
+    # No origin data at all = unproven, treat as domestic
+    if not cc and not iata:                              return False
     if any(k in ac for k in SMALL_AIRCRAFT_FILTER):      return False
     return True
 
@@ -439,7 +445,7 @@ def live_dashboard():
         ac_r        = f.get("aircraft", {}).get("reg", "")
         origin_iata = str(dep_ap.get("iata", ""))
 
-        if not is_strictly_international(str(arr.get("terminal", "")), str(dep_ap.get("countryCode", "")), ac_m, origin_iata):
+        if not is_strictly_international(str(arr.get("terminal", "")), str(dep_ap.get("countryCode", "")), ac_m, origin_iata, ac_r):
             continue
 
         best_dt, t_type = extract_best_time(arr, aest)
