@@ -37,106 +37,12 @@ CITY_MAP = {
     "Guangzhou Baiyun": "Guangzhou",
 }
 
-# ── BNE Airline Specific Configurations (V11.6) ──────────────────────────────
-AIRLINE_CAPACITY_OVERRIDE = {
-    "JQ": {"787-8": 335, "A321": 232, "A320": 186},      # Jetstar (High Density)
-    "QF": {"787-9": 236, "A330-2": 251, "A330-3": 297},  # Qantas (Premium Spacing)
-    "EK": {"A380": 516, "777-300": 354},                 # Emirates
-    "QR": {"777-300": 354, "A380": 517},                 # Qatar Airways
-    "CI": {"A350-9": 306, "A330-3": 313},                # China Airlines
-    "BR": {"787-10": 342, "777-300": 323, "787-9": 304}, # EVA Air
-    "CX": {"A350": 280, "777-300": 368},                 # Cathay Pacific
-    "SQ": {"A350": 303, "777-300": 264},                 # Singapore Airlines
-    "NZ": {"777-300": 342, "787-9": 302, "A321": 214},   # Air New Zealand
-    "FJ": {"A330": 273, "A350": 334, "737 MAX": 170},    # Fiji Airways
-    "VA": {"737": 176, "737-8": 170},                    # Virgin Australia
-    "TR": {"787-9": 375, "787-8": 329},                  # Scoot (Ultra High Density)
-}
-
-AIRLINE_LOAD_OVERRIDE = {
-    "SQ": 0.92, "EK": 0.88, "QR": 0.88, "CX": 0.85, 
-    "BR": 0.86, "CI": 0.82, "QF": 0.85, "JQ": 0.91, 
-    "TR": 0.89, "NZ": 0.84, "VA": 0.83, "FJ": 0.87,
-}
-
-# QLD Public School Holidays (Approximate ranges for surge detection)
-QLD_SCHOOL_HOLIDAYS = [
-    (datetime(2026, 4, 2).date(), datetime(2026, 4, 19).date()),   # Easter
-    (datetime(2026, 6, 27).date(), datetime(2026, 7, 12).date()),  # Winter
-    (datetime(2026, 9, 19).date(), datetime(2026, 10, 5).date()),  # Spring
-    (datetime(2026, 12, 12).date(), datetime(2027, 1, 26).date()), # Summer
-]
-
-# ── Generic Fallback Pax Table ───────────────────────────────────────────────
-PAX_TABLE = [
-    ("A380",    500), ("777-300", 350), ("777-200", 300), ("777",  320),
-    ("A350-1",  350), ("A350",    300),
-    ("787-10",  320), ("787-9",   280), ("787-8",   240), ("787",  275),
-    ("A330-9",  280), ("A330-3",  280), ("A330-2",  250), ("A330", 260),
-    ("A340",    270), ("767",     220),
-    ("A321",    200), ("A320",    165), ("A319",    140),
-    ("737 MAX", 175), ("737-9",   175), ("737-8",   170), ("737",  165),
-    ("ATR",     70),  ("EMBRAER 190", 100), ("EMBRAER 195", 120),
-    ("ERJ-190", 100), ("ERJ-195", 120), ("E190", 100), ("E195", 120),
-]
-PAX_LIGHT_THRESHOLD  = 200
-PAX_HEAVY_THRESHOLD  = 300
-
-SEASONAL_LOAD = {
-    "east_asia": {        
-        1: 0.90, 2: 0.82, 3: 0.78, 4: 0.85,
-        5: 0.72, 6: 0.85, 7: 0.92, 8: 0.92,
-        9: 0.78, 10: 0.88, 11: 0.78, 12: 0.90,
-    },
-    "se_asia": {          
-        1: 0.85, 2: 0.75, 3: 0.72, 4: 0.78,
-        5: 0.68, 6: 0.80, 7: 0.88, 8: 0.88,
-        9: 0.72, 10: 0.75, 11: 0.78, 12: 0.88,
-    },
-    "pacific": {          
-        1: 0.90, 2: 0.78, 3: 0.75, 4: 0.82,
-        5: 0.70, 6: 0.75, 7: 0.80, 8: 0.75,
-        9: 0.72, 10: 0.78, 11: 0.80, 12: 0.90,
-    },
-    "south_asia": {       
-        1: 0.82, 2: 0.75, 3: 0.78, 4: 0.75,
-        5: 0.68, 6: 0.78, 7: 0.85, 8: 0.85,
-        9: 0.75, 10: 0.82, 11: 0.80, 12: 0.88,
-    },
-    "middle_east": {      
-        1: 0.82, 2: 0.75, 3: 0.78, 4: 0.78,
-        5: 0.72, 6: 0.80, 7: 0.88, 8: 0.85,
-        9: 0.75, 10: 0.78, 11: 0.80, 12: 0.88,
-    },
-}
-
-SEASONAL_DEFAULT = {      
-    1: 0.80, 2: 0.72, 3: 0.72, 4: 0.75,
-    5: 0.68, 6: 0.75, 7: 0.82, 8: 0.82,
-    9: 0.72, 10: 0.75, 11: 0.75, 12: 0.85,
-}
-
-COUNTRY_REGION = {
-    "cn": "east_asia", "hk": "east_asia", "tw": "east_asia",
-    "jp": "east_asia", "kr": "east_asia", "mo": "east_asia",
-    "sg": "se_asia", "vn": "se_asia", "th": "se_asia",
-    "ph": "se_asia", "my": "se_asia", "id": "se_asia",
-    "kh": "se_asia", "la": "se_asia", "mm": "se_asia", "bn": "se_asia",
-    "nz": "pacific", "fj": "pacific", "nc": "pacific",
-    "pg": "pacific", "vu": "pacific", "ws": "pacific",
-    "to": "pacific", "nf": "pacific", "nr": "pacific",
-    "in": "south_asia", "lk": "south_asia", "bd": "south_asia",
-    "np": "south_asia", "pk": "south_asia",
-    "ae": "middle_east", "qa": "middle_east", "sa": "middle_east",
-    "bh": "middle_east", "om": "middle_east", "kw": "middle_east",
-}
-
 # ── OpenSky Network — free ADS-B radar supplement ────────────────────────────
 YBBN_LAT, YBBN_LON = -27.3842, 153.1175
 OPENSKY_BBOX = {"lamin": -38, "lamax": -10, "lomin": 135, "lomax": 170}
 OPENSKY_ENABLED      = True
-OPENSKY_MIN_SPEED_KT = 80    # ignore ground vehicles / taxiing
-OPENSKY_MAX_ETA_MIN  = 600   # sanity cap — 10 hours
+OPENSKY_MIN_SPEED_KT = 80
+OPENSKY_MAX_ETA_MIN  = 600
 
 AIRLINE_ICAO = {
     "QF": "QFA", "SQ": "SIA", "CX": "CPA", "VA": "VOZ", "JQ": "JST",
@@ -158,7 +64,7 @@ logging.basicConfig(level=logging.WARNING, format="%(asctime)s [%(levelname)s] %
 log = logging.getLogger("bne-board")
 
 # ─────────────────────────────────────────────
-#  2. STATUS CLASSIFICATION 
+#  2. STATUS CLASSIFICATION
 # ─────────────────────────────────────────────
 @dataclass
 class FlightStyle:
@@ -217,50 +123,6 @@ def format_hm(total_minutes: int) -> str:
     h, m = divmod(total_minutes, 60)
     return f"{m:02d}m" if h == 0 else f"{h:02d}h {m:02d}m"
 
-def estimate_pax(aircraft_model: str, country_code: str, now: datetime, flight_number: str) -> tuple:
-    model_upper = aircraft_model.upper()
-    airline_prefix = "".join(c for c in flight_number if c.isalpha())[:2].upper()
-    capacity = 0
-
-    # 1. Exact Match: Airline-specific cabin configurations
-    if airline_prefix in AIRLINE_CAPACITY_OVERRIDE:
-        for keyword, cap in AIRLINE_CAPACITY_OVERRIDE[airline_prefix].items():
-            if keyword.upper() in model_upper:
-                capacity = cap
-                break
-
-    # 2. Fallback: Standard aircraft table
-    if capacity == 0:
-        for keyword, cap in PAX_TABLE:
-            if keyword.upper() in model_upper:
-                capacity = cap
-                break
-
-    if capacity == 0:
-        return 0, "", "", 0
-
-    # 3. Base Load Factor: Airline specific -> Regional seasonal
-    if airline_prefix in AIRLINE_LOAD_OVERRIDE:
-        base_load = AIRLINE_LOAD_OVERRIDE[airline_prefix]
-    else:
-        region = COUNTRY_REGION.get(country_code.lower(), "")
-        base_load = SEASONAL_LOAD.get(region, SEASONAL_DEFAULT).get(now.month, 0.75)
-
-    # 4. QLD Holiday Surge Multiplier (+8% during school holidays)
-    is_holiday = any(start <= now.date() <= end for start, end in QLD_SCHOOL_HOLIDAYS)
-    final_load = min(1.0, base_load + 0.08) if is_holiday else base_load
-
-    pax = int(capacity * final_load)
-    load_pct = int(final_load * 100)
-
-    # 5. Output Classification
-    if pax >= PAX_HEAVY_THRESHOLD:
-        return pax, "Heavy", "#EF4444", load_pct
-    elif pax >= PAX_LIGHT_THRESHOLD:
-        return pax, "Medium", "#F59E0B", load_pct
-    else:
-        return pax, "Light", "#34D399", load_pct
-
 def extract_best_time(node: dict, tz) -> tuple:
     for key, label in (
         ("actualTime",    "actual"),
@@ -317,13 +179,13 @@ def get_photo_from_api(reg: str) -> str:
     if not reg: return "NOT_FOUND"
     cached = _photo_cache_permanent(reg)
     if cached != "NOT_FOUND": return cached
-    
+
     fail_cache = st.session_state.setdefault("_photo_fails", {})
     fail_entry = fail_cache.get(reg)
     if fail_entry:
         if (datetime.now() - fail_entry).total_seconds() < PHOTO_FAIL_TTL_SEC:
             return "NOT_FOUND"
-            
+
     url = _fetch_photo_http(reg)
     if url != "NOT_FOUND":
         _photo_cache_permanent.clear()
@@ -370,19 +232,20 @@ def _haversine_nm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 def fetch_opensky_states(anchor: str) -> dict:
     if not OPENSKY_ENABLED: return {}
     try:
-        r = requests.get("https://opensky-network.org/api/states/all", params=OPENSKY_BBOX, headers={"User-Agent": "BNE-Board-App/2.0"}, timeout=8)
+        r = requests.get("https://opensky-network.org/api/states/all", params=OPENSKY_BBOX,
+                         headers={"User-Agent": "BNE-Board-App/2.0"}, timeout=8)
         if r.status_code == 200:
             states = r.json().get("states") or []
             result = {}
             for s in states:
                 callsign = (s[1] or "").strip().upper()
                 on_ground = s[8]
-                velocity = s[9]  
+                velocity = s[9]
                 if callsign and not on_ground and velocity:
                     result[callsign] = {
                         "lat": s[6], "lon": s[5],
-                        "velocity_kts": velocity * 1.94384,  
-                        "altitude_ft": (s[7] or 0) * 3.281, 
+                        "velocity_kts": velocity * 1.94384,
+                        "altitude_ft": (s[7] or 0) * 3.281,
                     }
             return result
     except Exception as e:
@@ -402,7 +265,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime, 
     return now + timedelta(minutes=eta_min), "revised"
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & CSS
+#  4. UI SETUP & CSS  (V11.8)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 
@@ -441,7 +304,7 @@ st.markdown("""
         padding: 10px 14px; margin-bottom: 10px; font-size: 0.78em; color: #94A3B8;
         gap: 4px 0;
     }
-    .summary-strip .s-item { text-align: center; min-width: 22%; }
+    .summary-strip .s-item { text-align: center; min-width: 30%; }
     .summary-strip .s-val  { font-weight: 700; font-size: 1.15em; display: block; }
 
     .gap-bar {
@@ -466,12 +329,6 @@ st.markdown("""
         align-items: center; gap: 8px;
     }
     .surge-banner .surge-icon { font-size: 1.1em; }
-
-    .pax-badge {
-        display: inline-block; font-size: 0.6em; font-weight: 700;
-        padding: 1px 6px; border-radius: 4px; margin-top: 2px;
-        letter-spacing: 0.3px;
-    }
 
     .img-zoom-modal {
         display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
@@ -500,7 +357,6 @@ def live_dashboard():
     with c1:
         st.subheader("✈️ Arrivals")
     with c2:
-        # V11.6 Live Clock Injection Tag Added Here
         st.markdown(
             f'<div style="font-size:0.8em;color:#94A3B8;text-align:right;margin-top:5px;">'
             f'🕒 Live: <span id="bne-live-clock">{now_aest.strftime("%H:%M:%S")}</span></div>',
@@ -531,11 +387,6 @@ def live_dashboard():
         * 🟠 **Delayed**: Flight is running 3+ hours late.
         * ⚡ **Surge**: 3+ flights arriving within 20 minutes — all hands on deck.
 
-        **Passenger Load Badges:**
-        * <span style="color:#34D399;">Light</span> (< 200 pax) · <span style="color:#F59E0B;">Medium</span> (200–300 pax) · <span style="color:#EF4444;">Heavy</span> (300+ pax)
-        * Pax counts are conservative estimates adjusted by **seasonal demand** — e.g. East Asia routes run ~92% full in Jul–Aug but ~72% in May.
-        * The **%** shown is the load factor used for that flight's origin region this month.
-
         *Developed by Phillip Yeh to support the BNE Lotte Team.*
         """, unsafe_allow_html=True)
 
@@ -557,7 +408,7 @@ def live_dashboard():
 
     if not raw_flights:
         st.info("⏳ Synchronizing radar... data will appear on next refresh.")
-        return 
+        return
 
     seen: dict = {}
     for f in raw_flights:
@@ -608,11 +459,12 @@ def live_dashboard():
         if t_type == "revised" and abs((best_dt - s_dt).total_seconds()) < 60 and not has_departed:
             t_type = "scheduled"
 
+        # ── OpenSky fallback for scheduled-only flights ───────────────────────
         if t_type == "scheduled" and status_raw not in ("canceled", "cancelled"):
             osky_dt, osky_type = opensky_estimate_eta(flight_num, opensky_data, now_aest, aest)
             if osky_dt:
                 best_dt = osky_dt
-                t_type  = osky_type  
+                t_type  = osky_type
 
         delay = (best_dt - s_dt).total_seconds() / 3600
         if delay < -2 or delay > 24:
@@ -641,11 +493,6 @@ def live_dashboard():
             dep_ap.get("municipalityName") or dep_ap.get("name") or "Unknown",
         )
 
-        # V11.6 Updated Pax Function Call
-        pax_count, pax_label, pax_color, load_pct = estimate_pax(
-            ac_m, str(dep_ap.get("countryCode", "")), now_aest, flight_num
-        )
-
         processed.append({
             "num":          flight_num,
             "origin":       city,
@@ -669,10 +516,6 @@ def live_dashboard():
             "card_opacity": style.card_opacity,
             "img_filter":   style.img_filter,
             "landed_mins":  landed_mins,
-            "pax_count":    pax_count,
-            "pax_label":    pax_label,
-            "pax_color":    pax_color,
-            "load_pct":     load_pct,
         })
 
     # ── Gap Detection ─────────────────────────────────────────────────────────────
@@ -737,7 +580,7 @@ def live_dashboard():
         key=lambda x: x["dt"],
     )
 
-    surge_used = set()  
+    surge_used = set()
     surge_windows = []
     for i, anchor_f in enumerate(future_flights):
         if i in surge_used:
@@ -756,11 +599,9 @@ def live_dashboard():
             surge_used.update(cluster_idx)
             w_start   = cluster[0]["dt"]
             w_end     = cluster[-1]["dt"]
-            total_pax = sum(c["pax_count"] for c in cluster)
-            pax_note  = f" · ~{total_pax} pax" if total_pax > 0 else ""
             surge_windows.append({
                 "start": w_start, "end": w_end,
-                "count": len(cluster), "pax": total_pax,
+                "count": len(cluster),
             })
             processed.append({
                 "is_surge": True,
@@ -768,7 +609,7 @@ def live_dashboard():
                     f'<div class="surge-banner">'
                     f'<span class="surge-icon">⚡</span>'
                     f'SURGE {w_start.strftime("%H:%M")}–{w_end.strftime("%H:%M")} '
-                    f'({len(cluster)} flights{pax_note})'
+                    f'({len(cluster)} flights)'
                     f'</div>'
                 ),
                 "time_key": w_start.timestamp() - 1,
@@ -777,7 +618,6 @@ def live_dashboard():
     # ── Summary Strip ─────────────────────────────────────────────────────────────
     incoming       = [p for p in processed if not p.get("is_gap") and not p.get("is_surge") and not p["is_canceled"] and not p["is_landed"]]
     incoming_count = len(incoming)
-    total_pax_sum  = sum(p["pax_count"] for p in incoming)
 
     next_gap_txt = "None"
     for g in sorted(gap_list, key=lambda x: x["t1"]):
@@ -792,23 +632,20 @@ def live_dashboard():
     if len(incoming) >= 2:
         sorted_inc = sorted(incoming, key=lambda x: x["dt"])
         best_count, best_start, best_end = 0, None, None
-        for f in sorted_inc:
-            window_end = f["dt"] + timedelta(minutes=30)
-            count = sum(1 for o in sorted_inc if f["dt"] <= o["dt"] < window_end)
+        for f_item in sorted_inc:
+            window_end = f_item["dt"] + timedelta(minutes=30)
+            count = sum(1 for o in sorted_inc if f_item["dt"] <= o["dt"] < window_end)
             if count > best_count:
                 best_count = count
-                best_start = f["dt"]
-                last_in_window = max((o["dt"] for o in sorted_inc if f["dt"] <= o["dt"] < window_end), default=f["dt"])
+                best_start = f_item["dt"]
+                last_in_window = max((o["dt"] for o in sorted_inc if f_item["dt"] <= o["dt"] < window_end), default=f_item["dt"])
                 best_end = last_in_window
         if best_count >= 2 and best_start:
             busiest_txt = f'{best_start.strftime("%H:%M")}–{best_end.strftime("%H:%M")} ({best_count})'
 
-    pax_txt = f"~{total_pax_sum}" if total_pax_sum > 0 else "—"
-
     st.markdown(f"""
     <div class="summary-strip">
         <div class="s-item"><span class="s-val" style="color:#60A5FA;">{incoming_count}</span>Incoming</div>
-        <div class="s-item"><span class="s-val" style="color:#94A3B8;">{pax_txt}</span>Est. Pax</div>
         <div class="s-item"><span class="s-val" style="color:#34D399;">{next_gap_txt}</span>Next Gap</div>
         <div class="s-item"><span class="s-val" style="color:#F59E0B;">{busiest_txt}</span>Busiest</div>
     </div>
@@ -860,14 +697,6 @@ def live_dashboard():
                 f' • <span class="mono" style="color:{time_color}; font-weight:700;">{tag} {pf["actual_time"]}</span>'
             )
 
-        pax_html = ""
-        if pf["pax_label"]:
-            pax_html = (
-                f'<div><span class="pax-badge" style="background:{pf["pax_color"]}22; color:{pf["pax_color"]}; '
-                f'border: 1px solid {pf["pax_color"]}44;">'
-                f'~{pf["pax_count"]} pax · {pf["load_pct"]}%</span></div>'
-            )
-
         zoom_src = pf["photo_url"] if has_photo else pf["logo_url"]
         gate_cls = "gate-tba" if pf["gate"] == "TBA" else "gate-num"
 
@@ -876,7 +705,7 @@ def live_dashboard():
             {img_html}
             <div class="info-col">
                 <div style="font-size:1.1em; font-weight:700;">{pf['num']}<span style="font-size:0.7em; color:#94A3B8; margin-left:8px;">{pf['origin']}</span></div>
-                <div class="ac-line">{pf['ac_text']}</div>{pax_html}
+                <div class="ac-line">{pf['ac_text']}</div>
                 <div style="font-size:0.8em; color:#94A3B8;">{time_display}</div>
             </div>
             <div class="status-col">
@@ -921,33 +750,30 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        "<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.6 (Live Sync)</div>",
+        "<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.8</div>",
         unsafe_allow_html=True,
     )
 
 # ── Call the fragment ──
 live_dashboard()
 
-# ── JavaScript Live Ticker Injection (V11.6) ──
+# ── JavaScript Live Clock (V11.7 — uses real AEST, no drift) ──
+# The V11.6 clock incremented from the last displayed value, which drifts on
+# mobile browsers where setInterval(1000) is throttled. This version uses the
+# browser's real Date() converted to AEST via Intl.DateTimeFormat — it's always
+# correct regardless of the user's timezone or timer drift.
 components.html("""
 <script>
     const doc = window.parent.document;
+    const aestFormatter = new Intl.DateTimeFormat('en-AU', {
+        timeZone: 'Australia/Brisbane',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        hour12: false
+    });
     setInterval(function() {
         const clockEl = doc.getElementById('bne-live-clock');
         if (clockEl) {
-            let parts = clockEl.innerText.split(':');
-            if (parts.length === 3) {
-                let d = new Date();
-                d.setHours(parseInt(parts[0], 10));
-                d.setMinutes(parseInt(parts[1], 10));
-                d.setSeconds(parseInt(parts[2], 10) + 1); 
-                
-                let h = String(d.getHours()).padStart(2, '0');
-                let m = String(d.getMinutes()).padStart(2, '0');
-                let s = String(d.getSeconds()).padStart(2, '0');
-                
-                clockEl.innerText = h + ':' + m + ':' + s;
-            }
+            clockEl.innerText = aestFormatter.format(new Date());
         }
     }, 1000);
 </script>
