@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import requests
 import logging
@@ -36,7 +37,37 @@ CITY_MAP = {
     "Guangzhou Baiyun": "Guangzhou",
 }
 
-# ── Pax estimation (typical 3-class config) ──────────────────────────────────
+# ── BNE Airline Specific Configurations (V11.6) ──────────────────────────────
+AIRLINE_CAPACITY_OVERRIDE = {
+    "JQ": {"787-8": 335, "A321": 232, "A320": 186},      # Jetstar (High Density)
+    "QF": {"787-9": 236, "A330-2": 251, "A330-3": 297},  # Qantas (Premium Spacing)
+    "EK": {"A380": 516, "777-300": 354},                 # Emirates
+    "QR": {"777-300": 354, "A380": 517},                 # Qatar Airways
+    "CI": {"A350-9": 306, "A330-3": 313},                # China Airlines
+    "BR": {"787-10": 342, "777-300": 323, "787-9": 304}, # EVA Air
+    "CX": {"A350": 280, "777-300": 368},                 # Cathay Pacific
+    "SQ": {"A350": 303, "777-300": 264},                 # Singapore Airlines
+    "NZ": {"777-300": 342, "787-9": 302, "A321": 214},   # Air New Zealand
+    "FJ": {"A330": 273, "A350": 334, "737 MAX": 170},    # Fiji Airways
+    "VA": {"737": 176, "737-8": 170},                    # Virgin Australia
+    "TR": {"787-9": 375, "787-8": 329},                  # Scoot (Ultra High Density)
+}
+
+AIRLINE_LOAD_OVERRIDE = {
+    "SQ": 0.92, "EK": 0.88, "QR": 0.88, "CX": 0.85, 
+    "BR": 0.86, "CI": 0.82, "QF": 0.85, "JQ": 0.91, 
+    "TR": 0.89, "NZ": 0.84, "VA": 0.83, "FJ": 0.87,
+}
+
+# QLD Public School Holidays (Approximate ranges for surge detection)
+QLD_SCHOOL_HOLIDAYS = [
+    (datetime(2026, 4, 2).date(), datetime(2026, 4, 19).date()),   # Easter
+    (datetime(2026, 6, 27).date(), datetime(2026, 7, 12).date()),  # Winter
+    (datetime(2026, 9, 19).date(), datetime(2026, 10, 5).date()),  # Spring
+    (datetime(2026, 12, 12).date(), datetime(2027, 1, 26).date()), # Summer
+]
+
+# ── Generic Fallback Pax Table ───────────────────────────────────────────────
 PAX_TABLE = [
     ("A380",    500), ("777-300", 350), ("777-200", 300), ("777",  320),
     ("A350-1",  350), ("A350",    300),
@@ -52,27 +83,27 @@ PAX_LIGHT_THRESHOLD  = 200
 PAX_HEAVY_THRESHOLD  = 300
 
 SEASONAL_LOAD = {
-    "east_asia": {        # China, HK, Taiwan, Japan, Korea
+    "east_asia": {        
         1: 0.90, 2: 0.82, 3: 0.78, 4: 0.85,
         5: 0.72, 6: 0.85, 7: 0.92, 8: 0.92,
         9: 0.78, 10: 0.88, 11: 0.78, 12: 0.90,
     },
-    "se_asia": {          # Singapore, Vietnam, Thailand, Philippines, Malaysia, Indonesia
+    "se_asia": {          
         1: 0.85, 2: 0.75, 3: 0.72, 4: 0.78,
         5: 0.68, 6: 0.80, 7: 0.88, 8: 0.88,
         9: 0.72, 10: 0.75, 11: 0.78, 12: 0.88,
     },
-    "pacific": {          # NZ, Fiji, New Caledonia, PNG, Vanuatu, Samoa, Norfolk
+    "pacific": {          
         1: 0.90, 2: 0.78, 3: 0.75, 4: 0.82,
         5: 0.70, 6: 0.75, 7: 0.80, 8: 0.75,
         9: 0.72, 10: 0.78, 11: 0.80, 12: 0.90,
     },
-    "south_asia": {       # India, Sri Lanka, Bangladesh
+    "south_asia": {       
         1: 0.82, 2: 0.75, 3: 0.78, 4: 0.75,
         5: 0.68, 6: 0.78, 7: 0.85, 8: 0.85,
         9: 0.75, 10: 0.82, 11: 0.80, 12: 0.88,
     },
-    "middle_east": {      # UAE, Qatar — mostly connecting traffic
+    "middle_east": {      
         1: 0.82, 2: 0.75, 3: 0.78, 4: 0.78,
         5: 0.72, 6: 0.80, 7: 0.88, 8: 0.85,
         9: 0.75, 10: 0.78, 11: 0.80, 12: 0.88,
@@ -98,10 +129,6 @@ COUNTRY_REGION = {
     "np": "south_asia", "pk": "south_asia",
     "ae": "middle_east", "qa": "middle_east", "sa": "middle_east",
     "bh": "middle_east", "om": "middle_east", "kw": "middle_east",
-}
-
-AIRLINE_LOAD_OVERRIDE = {
-    "SQ": 0.95,   # Singapore Airlines consistently full
 }
 
 # ── OpenSky Network — free ADS-B radar supplement ────────────────────────────
@@ -190,27 +217,43 @@ def format_hm(total_minutes: int) -> str:
     h, m = divmod(total_minutes, 60)
     return f"{m:02d}m" if h == 0 else f"{h:02d}h {m:02d}m"
 
-def estimate_pax(aircraft_model: str, country_code: str = "", month: int = 0, flight_number: str = "") -> tuple:
+def estimate_pax(aircraft_model: str, country_code: str, now: datetime, flight_number: str) -> tuple:
     model_upper = aircraft_model.upper()
+    airline_prefix = "".join(c for c in flight_number if c.isalpha())[:2].upper()
     capacity = 0
-    for keyword, cap in PAX_TABLE:
-        if keyword.upper() in model_upper:
-            capacity = cap
-            break
+
+    # 1. Exact Match: Airline-specific cabin configurations
+    if airline_prefix in AIRLINE_CAPACITY_OVERRIDE:
+        for keyword, cap in AIRLINE_CAPACITY_OVERRIDE[airline_prefix].items():
+            if keyword.upper() in model_upper:
+                capacity = cap
+                break
+
+    # 2. Fallback: Standard aircraft table
+    if capacity == 0:
+        for keyword, cap in PAX_TABLE:
+            if keyword.upper() in model_upper:
+                capacity = cap
+                break
+
     if capacity == 0:
         return 0, "", "", 0
 
-    airline_prefix = "".join(c for c in flight_number if c.isalpha())[:2].upper()
+    # 3. Base Load Factor: Airline specific -> Regional seasonal
     if airline_prefix in AIRLINE_LOAD_OVERRIDE:
-        load_factor = AIRLINE_LOAD_OVERRIDE[airline_prefix]
+        base_load = AIRLINE_LOAD_OVERRIDE[airline_prefix]
     else:
         region = COUNTRY_REGION.get(country_code.lower(), "")
-        load_table = SEASONAL_LOAD.get(region, SEASONAL_DEFAULT)
-        load_factor = load_table.get(month, 0.75)
+        base_load = SEASONAL_LOAD.get(region, SEASONAL_DEFAULT).get(now.month, 0.75)
 
-    pax = int(capacity * load_factor)
-    load_pct = int(load_factor * 100)
+    # 4. QLD Holiday Surge Multiplier (+8% during school holidays)
+    is_holiday = any(start <= now.date() <= end for start, end in QLD_SCHOOL_HOLIDAYS)
+    final_load = min(1.0, base_load + 0.08) if is_holiday else base_load
 
+    pax = int(capacity * final_load)
+    load_pct = int(final_load * 100)
+
+    # 5. Output Classification
     if pax >= PAX_HEAVY_THRESHOLD:
         return pax, "Heavy", "#EF4444", load_pct
     elif pax >= PAX_LIGHT_THRESHOLD:
@@ -457,9 +500,10 @@ def live_dashboard():
     with c1:
         st.subheader("✈️ Arrivals")
     with c2:
+        # V11.6 Live Clock Injection Tag Added Here
         st.markdown(
             f'<div style="font-size:0.8em;color:#94A3B8;text-align:right;margin-top:5px;">'
-            f'🕒 Live: {now_aest.strftime("%H:%M:%S")}</div>',
+            f'🕒 Live: <span id="bne-live-clock">{now_aest.strftime("%H:%M:%S")}</span></div>',
             unsafe_allow_html=True,
         )
         api_t   = st.session_state.get("api_last_hit")
@@ -513,7 +557,7 @@ def live_dashboard():
 
     if not raw_flights:
         st.info("⏳ Synchronizing radar... data will appear on next refresh.")
-        return # Use return instead of st.stop() inside a fragment
+        return 
 
     seen: dict = {}
     for f in raw_flights:
@@ -597,8 +641,9 @@ def live_dashboard():
             dep_ap.get("municipalityName") or dep_ap.get("name") or "Unknown",
         )
 
+        # V11.6 Updated Pax Function Call
         pax_count, pax_label, pax_color, load_pct = estimate_pax(
-            ac_m, str(dep_ap.get("countryCode", "")), now_aest.month, flight_num
+            ac_m, str(dep_ap.get("countryCode", "")), now_aest, flight_num
         )
 
         processed.append({
@@ -876,9 +921,34 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        "<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.5 (Seamless)</div>",
+        "<div style='text-align:center; color:#475569; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.6 (Live Sync)</div>",
         unsafe_allow_html=True,
     )
 
 # ── Call the fragment ──
 live_dashboard()
+
+# ── JavaScript Live Ticker Injection (V11.6) ──
+components.html("""
+<script>
+    const doc = window.parent.document;
+    setInterval(function() {
+        const clockEl = doc.getElementById('bne-live-clock');
+        if (clockEl) {
+            let parts = clockEl.innerText.split(':');
+            if (parts.length === 3) {
+                let d = new Date();
+                d.setHours(parseInt(parts[0], 10));
+                d.setMinutes(parseInt(parts[1], 10));
+                d.setSeconds(parseInt(parts[2], 10) + 1); 
+                
+                let h = String(d.getHours()).padStart(2, '0');
+                let m = String(d.getMinutes()).padStart(2, '0');
+                let s = String(d.getSeconds()).padStart(2, '0');
+                
+                clockEl.innerText = h + ':' + m + ':' + s;
+            }
+        }
+    }, 1000);
+</script>
+""", height=0)
