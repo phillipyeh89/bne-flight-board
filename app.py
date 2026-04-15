@@ -629,7 +629,7 @@ pax_txt = f"~{total_pax_sum}" if total_pax_sum > 0 else "—"
 st.markdown(f"""
 <div class="summary-strip">
     <div class="s-item"><span class="s-val" style="color:#60A5FA;">{incoming_count}</span>Incoming</div>
-    <div class="s-item"><span class="s-val" style="color:#94A3B8;">{pax_txt}</span>Total Pax</div>
+    <div class="s-item"><span class="s-val" style="color:#94A3B8;">{pax_txt}</span>Est. Pax</div>
     <div class="s-item"><span class="s-val" style="color:#34D399;">{next_gap_txt}</span>Next Gap</div>
     <div class="s-item"><span class="s-val" style="color:#F59E0B;">{busiest_txt}</span>Busiest</div>
 </div>
