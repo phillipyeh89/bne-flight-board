@@ -21,8 +21,8 @@ GAP_MIN_MINUTES          = 20   # minimum gap size to display
 GAP_DISPLAY_MIN          = 5    # minimum remaining time in gap to display
 HEAVY_DELAY_HOURS        = 3    # orange warning threshold
 SEVERE_DELAY_HOURS       = 12   # red critical threshold
-IMMINENT_MINS            = 40   # red "hot" threshold (25 + 5 lag compensation)
-API_LAG_MINS             = 15    # AeroDataBox data is ~5 min behind real-time
+IMMINENT_MINS            = 40   # red "hot" threshold (25 real + 15 lag compensation)
+API_LAG_MINS             = 15   # AeroDataBox data is ~15 min behind real-time
 OPENSKY_PREFER_UNDER_MIN = 60   # use OpenSky over AeroDataBox for flights < 60 min out
 IMAGE_WORKERS            = 15
 PHOTO_FAIL_TTL_SEC       = 600  # retry failed photo lookups after 10 min
@@ -658,29 +658,30 @@ def live_dashboard():
             t1 = gap_candidates[i]["dt"]
             t2 = gap_candidates[i + 1]["dt"]
 
-            gap_total = int((t2 - t1).total_seconds() / 60)
+            # Treat next flight as arriving lag-minutes earlier than reported,
+            # so both the DURATION and the END TIME shown to the user are
+            # consistent and conservative. If t2_safe is in the past, drop the gap.
+            t2_safe = t2 - timedelta(minutes=API_LAG_MINS)
+
+            gap_total = int((t2_safe - t1).total_seconds() / 60)
             if gap_total < GAP_MIN_MINUTES:
                 continue
 
-            gap_remaining = int((t2 - max(t1, now_aest)).total_seconds() / 60)
+            gap_remaining = int((t2_safe - max(t1, now_aest)).total_seconds() / 60)
             if gap_remaining < GAP_DISPLAY_MIN:
                 continue
 
-            is_active = t1 <= now_aest < t2
-
-            # Subtract API lag from remaining time — flight could arrive ~5 min
-            # earlier than shown, so a "20m gap" is really ~15m usable.
-            safe_remaining = max(0, gap_remaining - API_LAG_MINS)
-            gap_list.append({"t1": t1, "t2": t2, "total": gap_total, "remaining": safe_remaining, "active": is_active})
+            is_active = t1 <= now_aest < t2_safe
+            gap_list.append({"t1": t1, "t2": t2_safe, "total": gap_total, "remaining": gap_remaining, "active": is_active})
 
             cls = "gap-bar gap-active" if is_active else "gap-bar"
             lbl = "🟢 ACTIVE" if is_active else "🔄"
             window_start = max(t1, now_aest) if is_active else t1
-            display_min  = safe_remaining if is_active else max(0, gap_total - API_LAG_MINS)
+            display_min  = gap_remaining if is_active else gap_total
 
             progress_html = ""
             if is_active and gap_total > 0:
-                pct_left = max(0, min(100, int(safe_remaining / gap_total * 100)))
+                pct_left = max(0, min(100, int(gap_remaining / gap_total * 100)))
                 if pct_left > 50:
                     bar_color = "#10B981"
                 elif pct_left > 25:
@@ -698,7 +699,7 @@ def live_dashboard():
                 "html":     (
                     f'<div class="{cls}">{lbl} {format_hm(display_min)} GAP '
                     f'<span style="opacity:0.6; font-weight:400; margin-left:8px;">'
-                    f'({window_start.strftime("%H:%M")}–{t2.strftime("%H:%M")})</span>'
+                    f'({window_start.strftime("%H:%M")}–{t2_safe.strftime("%H:%M")})</span>'
                     f'{progress_html}</div>'
                 ),
                 "time_key": t1.timestamp() + 1,
