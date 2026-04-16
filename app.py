@@ -327,7 +327,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
     return now + timedelta(minutes=eta_min), "revised"
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.9.1)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.9.3)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -482,7 +482,8 @@ def live_dashboard():
             use_opensky = (t_type == "scheduled"
                            or (t_type == "revised" and 0 < preliminary_mins < OPENSKY_PREFER_UNDER_MIN))
             if use_opensky:
-                osky_dt, osky_type = opensky_estimate_eta(flight_num, opensky_data, now_aest, aest)
+                # V11.9.3 BUGFIX: Removed the extra `aest` argument from this function call
+                osky_dt, osky_type = opensky_estimate_eta(flight_num, opensky_data, now_aest)
                 if osky_dt:
                     best_dt, t_type = osky_dt, osky_type
 
@@ -541,8 +542,6 @@ def live_dashboard():
         key=lambda x: x["dt"],
     )
 
-    # BUGFIX: If there are no recently landed flights, the gap from "Right Now" to the first flight was ignored.
-    # This injects a virtual marker for current time so the massive gap gets counted.
     if gap_candidates and gap_candidates[0]["dt"] > now_aest:
         gap_candidates.insert(0, {"dt": now_aest})
 
@@ -697,7 +696,6 @@ def live_dashboard():
         )
 
         tag = "Act" if (pf["is_landed"] or pf["time_type"] == "actual") else ("Est" if pf["time_type"] == "revised" else "Sch")
-        # BUGFIX: Swap Est to be darker (text_muted) and Sch to be lighter (text_faded) for better readability
         time_color = t.c_blue if tag == "Act" else (t.text_muted if tag == "Est" else t.text_faded)
 
         if tag == "Sch":
@@ -787,7 +785,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.9.2</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.9.3</div>",
         unsafe_allow_html=True,
     )
 
