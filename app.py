@@ -4,6 +4,7 @@ import pandas as pd
 import requests
 import logging
 import math
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
@@ -61,11 +62,16 @@ AIRLINE_ICAO = {
     "BR": "EVA", "IT": "TTW", "MM": "APJ", "TW": "TWB", "PG": "BKP",
 }
 
+# FIX 5 — use constant in the fragment decorator (was hardcoded "60s")
 UI_REFRESH_SEC           = 60
 API_DATA_TTL_SEC         = 600
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("bne-board")
+
+# FIX 4 — module-level fail cache + lock replaces thread-unsafe st.session_state access
+_photo_fails: dict       = {}
+_photo_fails_lock        = threading.Lock()
 
 # ─────────────────────────────────────────────
 #  2. THEME & STATUS CLASSIFICATION
@@ -293,15 +299,22 @@ def get_photo_from_api(reg: str) -> str:
     cached = _photo_cache_permanent(reg)
     if cached != "NOT_FOUND":
         return cached
-    fail_cache = st.session_state.setdefault("_photo_fails", {})
-    fail_entry = fail_cache.get(reg)
+
+    # FIX 4 — use module-level dict + lock instead of st.session_state (not thread-safe)
+    with _photo_fails_lock:
+        fail_entry = _photo_fails.get(reg)
+
     if fail_entry and (datetime.now() - fail_entry).total_seconds() < PHOTO_FAIL_TTL_SEC:
         return "NOT_FOUND"
+
     url = _fetch_photo_http(reg)
     if url != "NOT_FOUND":
-        _photo_cache_permanent.clear()
+        # FIX 3 — removed _photo_cache_permanent.clear() which was wiping ALL cached photos;
+        # the permanent cache will naturally populate on the next call for this reg
         return url
-    fail_cache[reg] = datetime.now()
+
+    with _photo_fails_lock:
+        _photo_fails[reg] = datetime.now()
     return "NOT_FOUND"
 
 
@@ -386,7 +399,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.12)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.13)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -394,7 +407,8 @@ if "api_error"    not in st.session_state: st.session_state.api_error    = None
 if "theme_light"  not in st.session_state: st.session_state.theme_light  = False
 
 
-@st.fragment(run_every="60s")
+# FIX 5 — use UI_REFRESH_SEC constant instead of hardcoded "60s"
+@st.fragment(run_every=f"{UI_REFRESH_SEC}s")
 def live_dashboard():
     aest     = pytz.timezone(TIMEZONE)
     now_aest = datetime.now(aest)
@@ -565,7 +579,10 @@ def live_dashboard():
         is_can = status_raw in ("canceled", "cancelled")
         is_div = status_raw == "diverted"
 
-        is_lan = (status_raw in ("landed", "arrived")) or (t_diff <= 0 and t_type in ("actual", "revised"))
+        # FIX 1 — only trust t_diff <= 0 for "landed" when we have a confirmed
+        # actual time; "revised" (incl. OpenSky estimates) expiring past zero
+        # does NOT mean the plane has landed — it means the estimate was wrong.
+        is_lan = (status_raw in ("landed", "arrived")) or (t_diff <= 0 and t_type == "actual")
         is_lan = is_lan and not is_can and not is_div
 
         landed_mins = max(0, -t_diff)
@@ -638,6 +655,9 @@ def live_dashboard():
             continue
 
         is_active = t1 <= now_aest < t2_safe
+
+        # FIX 2 — append to gap_list BEFORE the virtual continue so the
+        # summary strip "Next Gap" field can see this gap entry
         gap_list.append({"t1": t1, "t2": t2_safe, "total": gap_total,
                          "remaining": gap_remaining, "active": is_active})
 
@@ -878,7 +898,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.12</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.13</div>",
         unsafe_allow_html=True,
     )
 
