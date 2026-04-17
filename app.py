@@ -533,9 +533,14 @@ def live_dashboard():
         # cannot be an arrival here, regardless of which response schema is used.
         dep_origin_icao = str(dep_ap.get("icao", "")).upper()
         dep_origin_iata = str(dep_ap.get("iata", "")).upper()
-        # Diverted flights are exempt: a plane that turns back after takeoff
-        # genuinely departs BNE and returns to BNE, so we must not filter it.
-        if (dep_origin_icao == AIRPORT_ICAO or dep_origin_iata == "BNE") and status_raw != "diverted":
+        # Diverted and canceled flights are exempt from the BNE-departure filter:
+        # — A diverted flight that turns back after takeoff returns to BNE legitimately.
+        # — A return-to-gate (RTG) flight (e.g. pushed back, fault found, returned)
+        #   may be marked "canceled" rather than "diverted" by AeroDataBox; we still
+        #   want it to appear in the canceled section rather than be silently dropped.
+        _bne_origin = (dep_origin_icao == AIRPORT_ICAO or dep_origin_iata == "BNE")
+        _rtg_exempt = status_raw in ("diverted", "canceled", "cancelled")
+        if _bne_origin and not _rtg_exempt:
             log.info("Skipping %s — departure airport is BNE; this is an outbound flight", flight_num)
             continue
         # Secondary check for arrival-schema records: confirm destination is BNE.
@@ -934,7 +939,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.18</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.19</div>",
         unsafe_allow_html=True,
     )
 
