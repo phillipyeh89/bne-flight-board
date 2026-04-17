@@ -526,12 +526,19 @@ def live_dashboard():
         ac_r        = f.get("aircraft", {}).get("reg", "")
         origin_iata = str(dep_ap.get("iata", ""))
 
-        # FIX 7 — validate that the arrival airport is actually YBBN/BNE.
-        # AeroDataBox occasionally returns departing flights in the arrivals
-        # feed (e.g. NZ 203 BNE→CHC appeared as an arrival). Only check when
-        # the record has a top-level "arrival" key — the "movement" fallback
-        # carries the origin airport, not the destination, so applying the
-        # check there would incorrectly drop every flight using that schema.
+        # FIX 7 — filter flights that depart from BNE (i.e. are departures, not arrivals).
+        # AeroDataBox occasionally includes outbound flights in the arrivals feed
+        # (e.g. CZ 382 BNE→CAN, NZ 203 BNE→CHC). The most reliable cross-schema
+        # check is the departure airport: if a flight originates at YBBN/BNE it
+        # cannot be an arrival here, regardless of which response schema is used.
+        dep_origin_icao = str(dep_ap.get("icao", "")).upper()
+        dep_origin_iata = str(dep_ap.get("iata", "")).upper()
+        # Diverted flights are exempt: a plane that turns back after takeoff
+        # genuinely departs BNE and returns to BNE, so we must not filter it.
+        if (dep_origin_icao == AIRPORT_ICAO or dep_origin_iata == "BNE") and status_raw != "diverted":
+            log.info("Skipping %s — departure airport is BNE; this is an outbound flight", flight_num)
+            continue
+        # Secondary check for arrival-schema records: confirm destination is BNE.
         arrival_node = f.get("arrival")
         if arrival_node:
             arr_ap   = arrival_node.get("airport") or {}
@@ -927,7 +934,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.16</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.18</div>",
         unsafe_allow_html=True,
     )
 
