@@ -526,6 +526,21 @@ def live_dashboard():
         ac_r        = f.get("aircraft", {}).get("reg", "")
         origin_iata = str(dep_ap.get("iata", ""))
 
+        # FIX 7 — validate that the arrival airport is actually YBBN/BNE.
+        # AeroDataBox occasionally returns departing flights in the arrivals
+        # feed (e.g. NZ 203 BNE→CHC appeared as an arrival). Each record's
+        # destination is checked individually; if it explicitly names a
+        # different airport, the flight is skipped.
+        arr_ap   = arr.get("airport") or {}
+        arr_icao = str(arr_ap.get("icao", "")).upper()
+        arr_iata = str(arr_ap.get("iata", "")).upper()
+        if arr_icao and arr_icao != AIRPORT_ICAO:
+            log.info("Skipping %s — destination is %s, not %s", flight_num, arr_icao, AIRPORT_ICAO)
+            continue
+        if arr_iata and arr_iata not in ("BNE", ""):
+            log.info("Skipping %s — destination IATA is %s, not BNE", flight_num, arr_iata)
+            continue
+
         if not is_strictly_international(str(arr.get("terminal", "")),
                                          str(dep_ap.get("countryCode", "")),
                                          ac_m, origin_iata, ac_r):
@@ -583,6 +598,17 @@ def live_dashboard():
         # actual time; "revised" (incl. OpenSky estimates) expiring past zero
         # does NOT mean the plane has landed — it means the estimate was wrong.
         is_lan = (status_raw in ("landed", "arrived")) or (t_diff <= 0 and t_type == "actual")
+
+        # FIX 6 — time-based landed fallback for scheduled-only flights.
+        # If AeroDataBox never provided radar data and the flight is more than
+        # API_LAG_MINS past its scheduled time, and the API isn't reporting it
+        # as still airborne, assume it has landed. Prevents flights sitting on
+        # "NO UPDATE" indefinitely after they've actually arrived (e.g. JQ100).
+        if (not is_lan and t_type == "scheduled"
+                and t_diff < -API_LAG_MINS
+                and status_raw not in AIRBORNE_STATUSES):
+            is_lan = True
+
         is_lan = is_lan and not is_can and not is_div
 
         landed_mins = max(0, -t_diff)
@@ -898,7 +924,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.13</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.15</div>",
         unsafe_allow_html=True,
     )
 
