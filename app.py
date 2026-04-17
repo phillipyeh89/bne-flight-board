@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import pandas as pd
 import requests
 import logging
@@ -939,7 +938,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.19</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.20</div>",
         unsafe_allow_html=True,
     )
 
@@ -947,7 +946,7 @@ def live_dashboard():
 live_dashboard()
 
 # ── Live clock (uses real AEST, no drift) ──
-components.html("""
+st.html("""
 <script>
     const doc = window.parent.document;
     const aestFormatter = new Intl.DateTimeFormat('en-AU', {
@@ -959,4 +958,4 @@ components.html("""
         if (clockEl) { clockEl.innerText = aestFormatter.format(new Date()); }
     }, 1000);
 </script>
-""", height=0)
+""")
