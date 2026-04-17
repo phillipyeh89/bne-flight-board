@@ -618,7 +618,8 @@ def live_dashboard():
         # API_LAG_MINS past its scheduled time, and the API isn't reporting it
         # as still airborne, assume it has landed. Prevents flights sitting on
         # "NO UPDATE" indefinitely after they've actually arrived (e.g. JQ100).
-        if (not is_lan and t_type == "scheduled"
+        if (not is_lan
+        and t_type in ("scheduled", "revised")
                 and t_diff < -API_LAG_MINS
                 and status_raw not in AIRBORNE_STATUSES):
             is_lan = True
