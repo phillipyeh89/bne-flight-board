@@ -132,8 +132,8 @@ def get_dynamic_css(t: ThemeParams) -> str:
             background: {t.fallback_bg}; color: {t.text_muted}; font-weight: 700; font-size: 0.75em; letter-spacing: 0.5px;
         }}
 
-        @keyframes logoFade  {{ 0%, 45% {{ opacity: 1; }} 55%, 100% {{ opacity: 0; }} }}
-        @keyframes photoFade {{ 0%, 45% {{ opacity: 0; }} 55%, 95%  {{ opacity: 1; }} 100% {{ opacity: 0; }} }}
+        @keyframes logoFade  {{ 0%, 40% {{ opacity: 1; }} 50%, 90% {{ opacity: 0; }} 100% {{ opacity: 1; }} }}
+        @keyframes photoFade {{ 0%, 40% {{ opacity: 0; }} 50%, 90% {{ opacity: 1; }} 100% {{ opacity: 0; }} }}
 
         .logo-layer  {{ animation: logoFade 10s infinite;  background: #FFFFFF; padding: 4px; object-fit: contain !important; border-radius: 8px; z-index: 2; }}
         .photo-layer {{ animation: photoFade 10s infinite; object-fit: cover !important;   z-index: 1; }}
@@ -938,7 +938,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.20</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.21</div>",
         unsafe_allow_html=True,
     )
 
