@@ -528,18 +528,21 @@ def live_dashboard():
 
         # FIX 7 — validate that the arrival airport is actually YBBN/BNE.
         # AeroDataBox occasionally returns departing flights in the arrivals
-        # feed (e.g. NZ 203 BNE→CHC appeared as an arrival). Each record's
-        # destination is checked individually; if it explicitly names a
-        # different airport, the flight is skipped.
-        arr_ap   = arr.get("airport") or {}
-        arr_icao = str(arr_ap.get("icao", "")).upper()
-        arr_iata = str(arr_ap.get("iata", "")).upper()
-        if arr_icao and arr_icao != AIRPORT_ICAO:
-            log.info("Skipping %s — destination is %s, not %s", flight_num, arr_icao, AIRPORT_ICAO)
-            continue
-        if arr_iata and arr_iata not in ("BNE", ""):
-            log.info("Skipping %s — destination IATA is %s, not BNE", flight_num, arr_iata)
-            continue
+        # feed (e.g. NZ 203 BNE→CHC appeared as an arrival). Only check when
+        # the record has a top-level "arrival" key — the "movement" fallback
+        # carries the origin airport, not the destination, so applying the
+        # check there would incorrectly drop every flight using that schema.
+        arrival_node = f.get("arrival")
+        if arrival_node:
+            arr_ap   = arrival_node.get("airport") or {}
+            arr_icao = str(arr_ap.get("icao", "")).upper()
+            arr_iata = str(arr_ap.get("iata", "")).upper()
+            if arr_icao and arr_icao != AIRPORT_ICAO:
+                log.info("Skipping %s — destination is %s, not %s", flight_num, arr_icao, AIRPORT_ICAO)
+                continue
+            if arr_iata and arr_iata not in ("BNE", ""):
+                log.info("Skipping %s — destination IATA is %s, not BNE", flight_num, arr_iata)
+                continue
 
         if not is_strictly_international(str(arr.get("terminal", "")),
                                          str(dep_ap.get("countryCode", "")),
@@ -924,7 +927,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.15</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.16</div>",
         unsafe_allow_html=True,
     )
 
