@@ -831,14 +831,16 @@ def live_dashboard():
             st.markdown(pf["html"], unsafe_allow_html=True)
             continue
 
-        # Insert a visual break the first time we hit a landed card so there
-        # is clear breathing room between incoming and past-arrivals sections.
-        if pf["is_landed"] and not landed_divider_shown:
+        # Insert a visual break the first time we hit a non-recent landed card
+        # so there is clear breathing room between incoming and past arrivals.
+        if pf["is_landed"] and pf["landed_mins"] > RECENT_LANDED_MAX and not landed_divider_shown:
             st.markdown(
-                f"<div style='margin:20px 0 6px 0; display:flex; align-items:center; gap:8px;'>"
-                f"<hr style='flex:1; border:none; border-top:1px solid {t.border_muted}; margin:0;'/>"
-                f"<span style='font-size:0.7em; color:{t.text_muted}; font-weight:600; white-space:nowrap; letter-spacing:0.5px;'>EARLIER ARRIVALS</span>"
-                f"<hr style='flex:1; border:none; border-top:1px solid {t.border_muted}; margin:0;'/>"
+                f"<div style='margin:24px 0 8px 0; display:flex; align-items:center; gap:10px;'>"
+                f"<div style='flex:1; height:1px; background:{t.border_muted};'></div>"
+                f"<span style='font-size:0.72em; color:{t.text_muted}; font-weight:700; "
+                f"white-space:nowrap; letter-spacing:1px; text-transform:uppercase;'>"
+                f"Earlier Arrivals</span>"
+                f"<div style='flex:1; height:1px; background:{t.border_muted};'></div>"
                 f"</div>",
                 unsafe_allow_html=True,
             )
@@ -952,7 +954,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.22</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.23</div>",
         unsafe_allow_html=True,
     )
 
