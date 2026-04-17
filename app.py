@@ -560,6 +560,9 @@ def live_dashboard():
                                          ac_m, origin_iata, ac_r):
             continue
 
+        # TEMP DEBUG — log raw arrival node to check for baggage/carousel fields
+        log.warning("RAW ARR [%s]: %s", flight_num, arr)
+
         best_dt, t_type = extract_best_time(arr, aest)
         if not best_dt:
             continue
@@ -954,7 +957,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.23</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.24-debug</div>",
         unsafe_allow_html=True,
     )
 
