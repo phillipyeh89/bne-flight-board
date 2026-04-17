@@ -682,7 +682,13 @@ def live_dashboard():
         t1 = gap_candidates[i]["dt"]
         t2 = gap_candidates[i + 1]["dt"]
         is_virtual = gap_candidates[i].get("is_virtual", False)
-        t2_safe = t2 - timedelta(minutes=API_LAG_MINS)
+        # Only apply the API lag buffer when the next flight has only a scheduled
+        # time — the lag compensates for AeroDataBox being ~15min stale. If the
+        # flight already has a revised/actual radar time, it already reflects
+        # real-world position so subtracting the lag would double-count it.
+        next_flight   = gap_candidates[i + 1]
+        lag_mins      = API_LAG_MINS if next_flight.get("time_type", "scheduled") == "scheduled" else 0
+        t2_safe       = t2 - timedelta(minutes=lag_mins)
 
         gap_total = int((t2_safe - t1).total_seconds() / 60)
         # Virtual anchor gets a relaxed minimum — we always want to show how
@@ -954,7 +960,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.24</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.25</div>",
         unsafe_allow_html=True,
     )
 
