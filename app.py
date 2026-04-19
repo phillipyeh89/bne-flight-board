@@ -218,7 +218,8 @@ def classify_flight_status(*, is_canceled, is_diverted, is_landed, landed_mins,
     if t_type == "scheduled" and t_diff <= 0:
         return FlightStyle(t.c_amber, t.c_amber, t.bg_card, "NO UPDATE", "1.0", "none")
     if m_left < IMMINENT_MINS:
-        return FlightStyle(t.c_red, t.c_red, t.bg_card, f"In {format_hm(m_left)}", "1.0", "none")
+        label = "Arriving..." if m_left == 0 else f"In {format_hm(m_left)}"
+        return FlightStyle(t.c_red, t.c_red, t.bg_card, label, "1.0", "none")
     if delay_hours >= SEVERE_DELAY_HOURS:
         return FlightStyle("#7F1D1D", t.c_red, t.bg_card, f"🔴 +{format_hm(delay_mins)} Late", "1.0", "none")
     if delay_hours >= HEAVY_DELAY_HOURS:
@@ -465,11 +466,14 @@ def live_dashboard():
     _epoch  = datetime(2000, 1, 1, tzinfo=aest)
     anchor  = (_epoch + timedelta(seconds=(int((now_aest - _epoch).total_seconds()) // API_DATA_TTL_SEC) * API_DATA_TTL_SEC)).strftime("%Y-%m-%dT%H:%M")
 
-    raw_flights = fetch_flight_data(
-        anchor,
-        (now_aest - timedelta(hours=LOOKBACK_HOURS)).strftime("%Y-%m-%dT%H:%M"),
-        (now_aest + timedelta(hours=LOOKAHEAD_HOURS)).strftime("%Y-%m-%dT%H:%M"),
-    )
+    # FIX 8 — derive from_time/to_time from the quantised anchor, NOT from
+    # raw now_aest. Previously these changed every 60 s when the fragment
+    # reran, busting the st.cache_data key every refresh and making a real
+    # API call every minute instead of every API_DATA_TTL_SEC (10 min).
+    anchor_dt  = _epoch + timedelta(seconds=(int((now_aest - _epoch).total_seconds()) // API_DATA_TTL_SEC) * API_DATA_TTL_SEC)
+    from_time  = (anchor_dt - timedelta(hours=LOOKBACK_HOURS)).strftime("%Y-%m-%dT%H:%M")
+    to_time    = (anchor_dt + timedelta(hours=LOOKAHEAD_HOURS)).strftime("%Y-%m-%dT%H:%M")
+    raw_flights = fetch_flight_data(anchor, from_time, to_time)
     opensky_data = fetch_opensky_states(anchor)
 
     if st.session_state.api_error:
@@ -613,13 +617,16 @@ def live_dashboard():
         # does NOT mean the plane has landed — it means the estimate was wrong.
         is_lan = (status_raw in ("landed", "arrived")) or (t_diff <= 0 and t_type == "actual")
 
-        # FIX 6 — time-based landed fallback for scheduled-only flights.
-        # If AeroDataBox never provided radar data and the flight is more than
-        # API_LAG_MINS past its scheduled time, and the API isn't reporting it
-        # as still airborne, assume it has landed. Prevents flights sitting on
-        # "NO UPDATE" indefinitely after they've actually arrived (e.g. JQ100).
+        # FIX 6 — time-based landed fallback.
+        # Covers two cases:
+        # a) Scheduled-only flights (no radar data) past the API lag window →
+        #    prevents "NO UPDATE" stuck cards (e.g. JQ100).
+        # b) Revised (radar) flights whose ETA has expired past the lag window
+        #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
+        #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
+        # In both cases we only fire if the API isn't actively saying airborne.
         if (not is_lan
-        and t_type in ("scheduled", "revised")
+                and t_type in ("scheduled", "revised")
                 and t_diff < -API_LAG_MINS
                 and status_raw not in AIRBORNE_STATUSES):
             is_lan = True
@@ -961,7 +968,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.25</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.28</div>",
         unsafe_allow_html=True,
     )
 
