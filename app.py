@@ -434,25 +434,7 @@ def live_dashboard():
             f'🕒 <span id="bne-live-clock">{now_aest.strftime("%H:%M:%S")}</span></div>',
             unsafe_allow_html=True,
         )
-        api_t   = st.session_state.get("api_last_hit")
-        if api_t:
-            next_refresh_dt  = api_t + timedelta(seconds=API_DATA_TTL_SEC)
-            secs_until       = max(0, int((next_refresh_dt - now_aest).total_seconds()))
-            mins_until, secs = divmod(secs_until, 60)
-            refresh_txt      = f'{mins_until}m {secs:02d}s' if mins_until else f'{secs}s'
-            api_txt = (
-                f'API: {api_t.strftime("%H:%M")} '
-                f'<span style="color:{t.c_amber};">(~{API_LAG_MINS}m lag)</span>'
-                f'<br>Next refresh: <span id="bne-refresh-countdown" '
-                f'data-next="{int(next_refresh_dt.timestamp())}" '
-                f'style="color:{t.c_green};">{refresh_txt}</span>'
-            )
-        else:
-            api_txt = "API: --:--"
-        st.markdown(
-            f'<div style="font-size:0.7em;color:{t.text_faded};text-align:right;">{api_txt}</div>',
-            unsafe_allow_html=True,
-        )
+        api_info_placeholder = st.empty()
 
     with st.expander(" 👋👋👋 (Operational Guide)"):
         st.markdown(f"""
@@ -486,12 +468,33 @@ def live_dashboard():
     raw_flights = fetch_flight_data(anchor, from_time, to_time)
     opensky_data = fetch_opensky_states(anchor)
 
-    # Ensure api_last_hit is always set when we have data — fetch_flight_data
-    # only sets it on a real API call (cache misses), so on cache hits it stays
-    # None and the refresh countdown never renders. Use anchor_dt as the
-    # floor-quantised proxy for when the current data batch is from.
-    if raw_flights and not st.session_state.api_last_hit:
+    # Always keep api_last_hit current — on cache hits the function body
+    # doesn't run so we set it here using anchor_dt as the proxy.
+    if raw_flights and (not st.session_state.api_last_hit
+                        or st.session_state.api_last_hit < anchor_dt):
         st.session_state.api_last_hit = anchor_dt
+
+    # Now fill the header placeholder — we do this AFTER the fetch so
+    # api_last_hit is always populated before the countdown renders.
+    api_t = st.session_state.get("api_last_hit")
+    if api_t:
+        next_refresh_dt  = api_t + timedelta(seconds=API_DATA_TTL_SEC)
+        secs_until       = max(0, int((next_refresh_dt - now_aest).total_seconds()))
+        mins_until, secs = divmod(secs_until, 60)
+        refresh_txt      = f'{mins_until}m {secs:02d}s' if mins_until else f'{secs}s'
+        api_txt = (
+            f'API: {api_t.strftime("%H:%M")} '
+            f'<span style="color:{t.c_amber};">(~{API_LAG_MINS}m lag)</span>'
+            f'<br>Next refresh: <span id="bne-refresh-countdown" '
+            f'data-next="{int(next_refresh_dt.timestamp())}" '
+            f'style="color:{t.c_green};">{refresh_txt}</span>'
+        )
+    else:
+        api_txt = "API: --:--"
+    api_info_placeholder.markdown(
+        f'<div style="font-size:0.7em;color:{t.text_faded};text-align:right;">{api_txt}</div>',
+        unsafe_allow_html=True,
+    )
 
     if st.session_state.api_error:
         st.error(f"⚠️ API Error — {st.session_state.api_error}")
@@ -985,7 +988,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.35</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.36</div>",
         unsafe_allow_html=True,
     )
 
