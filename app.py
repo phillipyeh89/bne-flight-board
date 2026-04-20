@@ -225,7 +225,7 @@ def classify_flight_status(*, is_canceled, is_diverted, is_landed, landed_mins,
     if t_type == "scheduled" and t_diff <= 0:
         return FlightStyle(t.c_amber, t.c_amber, t.bg_card, "NO UPDATE", "1.0", "none")
     if m_left < IMMINENT_MINS:
-        label = "Arriving..." if m_left == 0 else f"In {format_hm(m_left)}"
+        label = "On Ground" if m_left == 0 else f"In {format_hm(m_left)}"
         return FlightStyle(t.c_red, t.c_red, t.bg_card, label, "1.0", "none")
     if delay_hours >= SEVERE_DELAY_HOURS:
         return FlightStyle("#7F1D1D", t.c_red, t.bg_card, f"🔴 +{format_hm(delay_mins)} Late", "1.0", "none")
@@ -1002,7 +1002,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.43</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.44</div>",
         unsafe_allow_html=True,
     )
 
