@@ -63,7 +63,7 @@ AIRLINE_ICAO = {
 
 # FIX 5 — use constant in the fragment decorator (was hardcoded "60s")
 UI_REFRESH_SEC           = 60
-API_DATA_TTL_SEC         = 600
+API_DATA_TTL_SEC         = 900  # 15 min cache — keeps monthly API units under 6,000 hard limit
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("bne-board")
@@ -433,9 +433,20 @@ def live_dashboard():
             unsafe_allow_html=True,
         )
         api_t   = st.session_state.get("api_last_hit")
-        api_txt = (f'API: {api_t.strftime("%H:%M")} '
-                   f'<span style="color:{t.c_amber};">(~{API_LAG_MINS}m lag)</span>'
-                   if api_t else "API: --:--")
+        if api_t:
+            next_refresh_dt  = api_t + timedelta(seconds=API_DATA_TTL_SEC)
+            secs_until       = max(0, int((next_refresh_dt - now_aest).total_seconds()))
+            mins_until, secs = divmod(secs_until, 60)
+            refresh_txt      = f'{mins_until}m {secs:02d}s' if mins_until else f'{secs}s'
+            api_txt = (
+                f'API: {api_t.strftime("%H:%M")} '
+                f'<span style="color:{t.c_amber};">(~{API_LAG_MINS}m lag)</span>'
+                f'<br>Next refresh: <span id="bne-refresh-countdown" '
+                f'data-next="{int(next_refresh_dt.timestamp())}" '
+                f'style="color:{t.c_green};">{refresh_txt}</span>'
+            )
+        else:
+            api_txt = "API: --:--"
         st.markdown(
             f'<div style="font-size:0.7em;color:{t.text_faded};text-align:right;">{api_txt}</div>',
             unsafe_allow_html=True,
@@ -968,7 +979,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.28</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.30</div>",
         unsafe_allow_html=True,
     )
 
@@ -986,6 +997,15 @@ st.html("""
     setInterval(function() {
         const clockEl = doc.getElementById('bne-live-clock');
         if (clockEl) { clockEl.innerText = aestFormatter.format(new Date()); }
+
+        const cdEl = doc.getElementById('bne-refresh-countdown');
+        if (cdEl) {
+            const nextTs = parseInt(cdEl.getAttribute('data-next'), 10);
+            const secsLeft = Math.max(0, nextTs - Math.floor(Date.now() / 1000));
+            const m = Math.floor(secsLeft / 60);
+            const s = secsLeft % 60;
+            cdEl.innerText = m > 0 ? m + 'm ' + String(s).padStart(2,'0') + 's' : s + 's';
+        }
     }, 1000);
 </script>
 """)
