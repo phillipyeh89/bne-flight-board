@@ -27,7 +27,7 @@ API_LAG_MINS             = 15   # AeroDataBox data is ~15 min behind real-time
 OPENSKY_PREFER_UNDER_MIN = 60   # use OpenSky over AeroDataBox for flights < 60 min out
 IMAGE_WORKERS            = 15
 PHOTO_FAIL_TTL_SEC       = 600  # retry failed photo lookups after 10 min
-SURGE_WINDOW_MINS        = 20   # cluster detection window
+SURGE_WINDOW_MINS        = 15   # cluster detection window
 SURGE_MIN_FLIGHTS        = 3    # minimum flights to trigger surge alert
 DOMESTIC_TERMINALS       = ('D', 'DOM', 'D-ANC', 'GAT')
 SMALL_AIRCRAFT_FILTER    = ('BEECH', 'FAIRCHILD', 'CESSNA', 'PIPER', 'PILATUS', 'KING AIR', 'METROLINER', 'SAAB')
@@ -1002,7 +1002,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.42</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.43</div>",
         unsafe_allow_html=True,
     )
 
