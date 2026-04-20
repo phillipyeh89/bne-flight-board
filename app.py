@@ -64,7 +64,13 @@ AIRLINE_ICAO = {
 
 # FIX 5 — use constant in the fragment decorator (was hardcoded "60s")
 UI_REFRESH_SEC           = 60
-API_DATA_TTL_SEC         = 900  # 15 min cache — keeps monthly API units under 6,000 hard limit
+API_DATA_TTL_SEC         = 1200 # 20 min cache (off-shift) — Tier 2 endpoint: 72×2×30=4,320 units/month vs 6,000 limit
+API_DATA_TTL_SHIFT_SEC   = 300  # 5 min cache during shift hours — 4× more responsive
+SHIFT_START_HOUR         = 4    # 04:00 AEST
+SHIFT_START_MIN          = 0
+SHIFT_END_HOUR           = 10   # 10:30 AEST
+SHIFT_END_MIN            = 30
+OPENSKY_TTL_SEC          = 60   # free source — refresh every fragment cycle for freshest radar positions
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("bne-board")
@@ -357,7 +363,7 @@ def _haversine_nm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return R * 2 * math.asin(math.sqrt(a))
 
 
-@st.cache_data(ttl=API_DATA_TTL_SEC, show_spinner=False)
+@st.cache_data(ttl=OPENSKY_TTL_SEC, show_spinner=False)
 def fetch_opensky_states(anchor: str) -> dict:
     if not OPENSKY_ENABLED:
         return {}
@@ -429,9 +435,11 @@ def live_dashboard():
             st.session_state.theme_light = not st.session_state.theme_light
             st.rerun()
     with c3:
+        shift_badge = (f'<span style="color:{t.c_green};font-size:0.75em;font-weight:700;margin-left:6px;">⚡ BOOST</span>'
+                       if _in_shift else "")
         st.markdown(
             f'<div style="font-size:0.8em;color:{t.text_muted};text-align:right;margin-top:5px;">'
-            f'🕒 <span id="bne-live-clock">{now_aest.strftime("%H:%M:%S")}</span></div>',
+            f'🕒 <span id="bne-live-clock">{now_aest.strftime("%H:%M:%S")}</span>{shift_badge}</div>',
             unsafe_allow_html=True,
         )
         api_info_placeholder = st.empty()
@@ -459,10 +467,16 @@ def live_dashboard():
 
     # ── Fetch ──────────────────────────────────────────────────────────────────
     _epoch     = datetime(2000, 1, 1, tzinfo=aest)
+    # Use a shorter cache TTL during shift hours for more responsive updates.
+    _shift_start = now_aest.replace(hour=SHIFT_START_HOUR, minute=SHIFT_START_MIN, second=0, microsecond=0)
+    _shift_end   = now_aest.replace(hour=SHIFT_END_HOUR,   minute=SHIFT_END_MIN,   second=0, microsecond=0)
+    _in_shift    = _shift_start <= now_aest < _shift_end
+    _ttl         = API_DATA_TTL_SHIFT_SEC if _in_shift else API_DATA_TTL_SEC
+
     # Single quantised anchor — all cache keys and time windows derive from this
-    # so the cache key is stable for the full API_DATA_TTL_SEC window.
-    anchor_dt  = _epoch + timedelta(seconds=(int((now_aest - _epoch).total_seconds()) // API_DATA_TTL_SEC) * API_DATA_TTL_SEC)
-    anchor     = anchor_dt.strftime("%Y-%m-%dT%H:%M")
+    # so the cache key is stable for the full _ttl window.
+    anchor_dt  = _epoch + timedelta(seconds=(int((now_aest - _epoch).total_seconds()) // _ttl) * _ttl)
+    anchor     = anchor_dt.strftime("%Y-%m-%dT%H:%M") + f"_ttl{_ttl}"
     from_time  = (anchor_dt - timedelta(hours=LOOKBACK_HOURS)).strftime("%Y-%m-%dT%H:%M")
     to_time    = (anchor_dt + timedelta(hours=LOOKAHEAD_HOURS)).strftime("%Y-%m-%dT%H:%M")
     raw_flights = fetch_flight_data(anchor, from_time, to_time)
@@ -988,7 +1002,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.36</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.41</div>",
         unsafe_allow_html=True,
     )
 
