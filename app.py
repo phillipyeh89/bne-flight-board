@@ -922,8 +922,8 @@ def live_dashboard():
             )
         else:
             time_display = (
-                f'<span class="mono" style="color:{t.text_muted};">Sch {pf["sch_time"]}</span>'
-                f' • <span class="mono" style="color:{time_color}; font-weight:700;">{tag} {pf["actual_time"]}</span>'
+                f'<span class="mono" style="color:{t.text_muted}; font-size:0.85em;">Sch {pf["sch_time"]}</span>'
+                f' • <span class="mono" style="color:{time_color}; font-weight:700; font-size:1.05em;">{tag} {pf["actual_time"]}</span>'
             )
 
         zoom_src = pf["photo_url"] if has_photo else pf["logo_url"]
@@ -1002,7 +1002,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.44</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.45</div>",
         unsafe_allow_html=True,
     )
 
