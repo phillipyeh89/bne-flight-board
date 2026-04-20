@@ -181,6 +181,28 @@ def get_dynamic_css(t: ThemeParams) -> str:
         .img-zoom-close-bg {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: pointer; z-index: 10000; }}
         .close-btn {{ position: absolute; top: 20px; right: 30px; color: {t.text_main}; font-size: 3.5em; font-weight: bold; cursor: pointer; z-index: 10002; line-height: 1; }}
     </style>
+    <script>
+        (function() {{
+            if (window._bneClockStarted) return;
+            window._bneClockStarted = true;
+            const aestFmt = new Intl.DateTimeFormat('en-AU', {{
+                timeZone: 'Australia/Brisbane',
+                hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+            }});
+            setInterval(function() {{
+                const clockEl = document.getElementById('bne-live-clock');
+                if (clockEl) clockEl.innerText = aestFmt.format(new Date());
+                const cdEl = document.getElementById('bne-refresh-countdown');
+                if (cdEl) {{
+                    const nextTs = parseInt(cdEl.getAttribute('data-next'), 10);
+                    const secsLeft = Math.max(0, nextTs - Math.floor(Date.now() / 1000));
+                    const m = Math.floor(secsLeft / 60);
+                    const s = secsLeft % 60;
+                    cdEl.innerText = m > 0 ? m + 'm ' + String(s).padStart(2,'0') + 's' : s + 's';
+                }}
+            }}, 1000);
+        }})();
+    </script>
     """
 
 
@@ -977,33 +999,11 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.32</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.33</div>",
         unsafe_allow_html=True,
     )
 
 
 live_dashboard()
 
-# ── Live clock (uses real AEST, no drift) ──
-st.html("""
-<script>
-    const doc = document;
-    const aestFormatter = new Intl.DateTimeFormat('en-AU', {
-        timeZone: 'Australia/Brisbane',
-        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
-    });
-    setInterval(function() {
-        const clockEl = doc.getElementById('bne-live-clock');
-        if (clockEl) { clockEl.innerText = aestFormatter.format(new Date()); }
-
-        const cdEl = doc.getElementById('bne-refresh-countdown');
-        if (cdEl) {
-            const nextTs = parseInt(cdEl.getAttribute('data-next'), 10);
-            const secsLeft = Math.max(0, nextTs - Math.floor(Date.now() / 1000));
-            const m = Math.floor(secsLeft / 60);
-            const s = secsLeft % 60;
-            cdEl.innerText = m > 0 ? m + 'm ' + String(s).padStart(2,'0') + 's' : s + 's';
-        }
-    }, 1000);
-</script>
-""")
+# Clock and refresh countdown run via inline <script> in get_dynamic_css
