@@ -373,9 +373,10 @@ def fetch_opensky_states(anchor: str) -> dict:
                 callsign  = (s[1] or "").strip().upper()
                 on_ground = s[8]
                 velocity  = s[9]
-                if callsign and not on_ground and velocity:
+                lat, lon = s[6], s[5]
+                if callsign and not on_ground and velocity and lat is not None and lon is not None:
                     result[callsign] = {
-                        "lat": s[6], "lon": s[5],
+                        "lat": lat, "lon": lon,
                         "velocity_kts": velocity * 1.94384,
                         "altitude_ft":  (s[7] or 0) * 3.281,
                     }
@@ -474,14 +475,11 @@ def live_dashboard():
         """, unsafe_allow_html=True)
 
     # ── Fetch ──────────────────────────────────────────────────────────────────
-    _epoch  = datetime(2000, 1, 1, tzinfo=aest)
-    anchor  = (_epoch + timedelta(seconds=(int((now_aest - _epoch).total_seconds()) // API_DATA_TTL_SEC) * API_DATA_TTL_SEC)).strftime("%Y-%m-%dT%H:%M")
-
-    # FIX 8 — derive from_time/to_time from the quantised anchor, NOT from
-    # raw now_aest. Previously these changed every 60 s when the fragment
-    # reran, busting the st.cache_data key every refresh and making a real
-    # API call every minute instead of every API_DATA_TTL_SEC (10 min).
+    _epoch     = datetime(2000, 1, 1, tzinfo=aest)
+    # Single quantised anchor — all cache keys and time windows derive from this
+    # so the cache key is stable for the full API_DATA_TTL_SEC window.
     anchor_dt  = _epoch + timedelta(seconds=(int((now_aest - _epoch).total_seconds()) // API_DATA_TTL_SEC) * API_DATA_TTL_SEC)
+    anchor     = anchor_dt.strftime("%Y-%m-%dT%H:%M")
     from_time  = (anchor_dt - timedelta(hours=LOOKBACK_HOURS)).strftime("%Y-%m-%dT%H:%M")
     to_time    = (anchor_dt + timedelta(hours=LOOKAHEAD_HOURS)).strftime("%Y-%m-%dT%H:%M")
     raw_flights = fetch_flight_data(anchor, from_time, to_time)
@@ -510,7 +508,7 @@ def live_dashboard():
         sch_str = sch.get("local", "") if isinstance(sch, dict) else ""
         phy_key = f"{str(dep_ap.get('iata', ''))}|{sch_str}|{f.get('aircraft', {}).get('model', '')}"
 
-        if phy_key and phy_key in physical_seen:
+        if phy_key and phy_key != "||" and phy_key in physical_seen:
             existing = physical_seen[phy_key]
             if not existing.get("aircraft", {}).get("reg") and f.get("aircraft", {}).get("reg"):
                 deduped_flights.remove(existing)
@@ -979,7 +977,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.30</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.31</div>",
         unsafe_allow_html=True,
     )
 
