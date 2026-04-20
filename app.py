@@ -977,7 +977,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.31</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.32</div>",
         unsafe_allow_html=True,
     )
 
@@ -987,7 +987,7 @@ live_dashboard()
 # ── Live clock (uses real AEST, no drift) ──
 st.html("""
 <script>
-    const doc = window.parent.document;
+    const doc = document;
     const aestFormatter = new Intl.DateTimeFormat('en-AU', {
         timeZone: 'Australia/Brisbane',
         hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
