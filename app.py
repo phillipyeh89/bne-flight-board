@@ -486,6 +486,13 @@ def live_dashboard():
     raw_flights = fetch_flight_data(anchor, from_time, to_time)
     opensky_data = fetch_opensky_states(anchor)
 
+    # Ensure api_last_hit is always set when we have data — fetch_flight_data
+    # only sets it on a real API call (cache misses), so on cache hits it stays
+    # None and the refresh countdown never renders. Use anchor_dt as the
+    # floor-quantised proxy for when the current data batch is from.
+    if raw_flights and not st.session_state.api_last_hit:
+        st.session_state.api_last_hit = anchor_dt
+
     if st.session_state.api_error:
         st.error(f"⚠️ API Error — {st.session_state.api_error}")
         st.session_state.api_error = None
@@ -978,7 +985,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.34</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.35</div>",
         unsafe_allow_html=True,
     )
 
