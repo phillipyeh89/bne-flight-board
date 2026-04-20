@@ -1002,7 +1002,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.41</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.42</div>",
         unsafe_allow_html=True,
     )
 
@@ -1025,9 +1025,13 @@ components.html("""
         if (cdEl) {
             const nextTs = parseInt(cdEl.getAttribute('data-next'), 10);
             const secsLeft = Math.max(0, nextTs - Math.floor(Date.now() / 1000));
-            const m = Math.floor(secsLeft / 60);
-            const s = secsLeft % 60;
-            cdEl.innerText = m > 0 ? m + 'm ' + String(s).padStart(2,'0') + 's' : s + 's';
+            if (secsLeft === 0) {
+                cdEl.innerText = 'Refreshing...';
+            } else {
+                const m = Math.floor(secsLeft / 60);
+                const s = secsLeft % 60;
+                cdEl.innerText = m > 0 ? m + 'm ' + String(s).padStart(2,'0') + 's' : s + 's';
+            }
         }
     }, 1000);
 </script>
