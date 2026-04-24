@@ -422,6 +422,11 @@ def live_dashboard():
     now_aest = datetime.now(aest)
     t        = get_theme(st.session_state.theme_light)
 
+    # Compute shift/boost window early so the header badge can use it
+    _shift_start = now_aest.replace(hour=SHIFT_START_HOUR, minute=SHIFT_START_MIN, second=0, microsecond=0)
+    _shift_end   = now_aest.replace(hour=SHIFT_END_HOUR,   minute=SHIFT_END_MIN,   second=0, microsecond=0)
+    _in_shift    = _shift_start <= now_aest < _shift_end
+
     # Inject dynamic CSS first so header styling is correct
     st.markdown(get_dynamic_css(t), unsafe_allow_html=True)
 
@@ -467,10 +472,7 @@ def live_dashboard():
 
     # ── Fetch ──────────────────────────────────────────────────────────────────
     _epoch     = datetime(2000, 1, 1, tzinfo=aest)
-    # Use a shorter cache TTL during shift hours for more responsive updates.
-    _shift_start = now_aest.replace(hour=SHIFT_START_HOUR, minute=SHIFT_START_MIN, second=0, microsecond=0)
-    _shift_end   = now_aest.replace(hour=SHIFT_END_HOUR,   minute=SHIFT_END_MIN,   second=0, microsecond=0)
-    _in_shift    = _shift_start <= now_aest < _shift_end
+    # Use a shorter cache TTL during shift/boost hours for more responsive updates.
     _ttl         = API_DATA_TTL_SHIFT_SEC if _in_shift else API_DATA_TTL_SEC
 
     # Single quantised anchor — all cache keys and time windows derive from this
@@ -1002,7 +1004,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.45</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.46</div>",
         unsafe_allow_html=True,
     )
 
