@@ -415,7 +415,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.52)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.54)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -927,10 +927,15 @@ def live_dashboard():
         tag        = "Act" if (pf["is_landed"] or pf["time_type"] == "actual") else ("Est" if pf["time_type"] == "revised" else "Sch")
         time_color = t.c_blue if tag == "Act" else (t.text_faded if tag == "Est" else t.text_muted)
 
+        # When status is Sch-only with no radar, suppress the misleading
+        # "In Xh Ym" countdown — we don't actually know when it'll arrive,
+        # so showing a precise countdown gives false confidence.
+        suppress_countdown = (tag == "Sch" and not pf["is_landed"]
+                              and not pf["is_canceled"] and not pf["is_diverted"])
+
         if tag == "Sch":
             time_display = (
                 f'<span class="mono" style="color:{t.text_muted};">Sch {pf["sch_time"]}</span>'
-                f' <span style="color:{t.text_faded}; font-size:0.7em; font-weight:600; margin-left:6px; opacity:0.7;">Check Board</span>'
             )
         else:
             time_display = (
@@ -940,6 +945,15 @@ def live_dashboard():
 
         zoom_src = pf["photo_url"] if has_photo else pf["logo_url"]
         gate_cls = "gate-tba" if pf["gate"] == "TBA" else "gate-num"
+
+        # Replace misleading "In Xh Ym" with a neutral "Awaiting" when we don't
+        # have radar data — keep the gate visible but don't pretend to know ETA.
+        if suppress_countdown:
+            status_col_text  = "Check Board"
+            status_col_color = t.text_faded
+        else:
+            status_col_text  = pf["status_text"]
+            status_col_color = pf["status_color"]
 
         st.markdown(f"""
         <div class="flight-card" style="border-left-color:{pf['border_color']}; background-color:{pf['bg_color']}; opacity:{pf['card_opacity']};">
@@ -952,7 +966,7 @@ def live_dashboard():
             <div class="status-col">
                 <div style="font-size:0.6em; color:{t.text_muted}; font-weight:700; letter-spacing:1px;">GATE</div>
                 <div class="mono {gate_cls}">{pf['gate']}</div>
-                <div style="font-size:0.85em; font-weight:700; color:{pf['status_color']}; margin-top:2px;">{pf['status_text']}</div>
+                <div style="font-size:0.85em; font-weight:700; color:{status_col_color}; margin-top:2px;">{status_col_text}</div>
             </div>
         </div>
         <input type="checkbox" id="{mid}" class="img-zoom-chk" style="display:none;">
@@ -1014,7 +1028,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.52</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.54</div>",
         unsafe_allow_html=True,
     )
 
