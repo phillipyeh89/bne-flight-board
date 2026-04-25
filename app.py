@@ -394,7 +394,6 @@ def fetch_opensky_states(anchor: str) -> dict:
                     result[callsign] = {
                         "lat": lat, "lon": lon,
                         "velocity_kts": velocity * 1.94384,
-                        "altitude_ft":  (s[7] or 0) * 3.281,
                     }
             return result
         elif r.status_code == 429:
@@ -416,7 +415,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.48)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.50)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -542,11 +541,13 @@ def live_dashboard():
         arr     = f.get("arrival") or f.get("movement") or {}
         sch     = arr.get("scheduledTime")
         sch_str = sch.get("local", "") if isinstance(sch, dict) else ""
-        phy_key = f"{str(dep_ap.get('iata', ''))}|{sch_str}|{f.get('aircraft', {}).get('model', '')}"
+        ac_dict_dd = f.get("aircraft") or {}
+        phy_key = f"{str(dep_ap.get('iata', ''))}|{sch_str}|{ac_dict_dd.get('model') or ''}"
 
         if phy_key and phy_key != "||" and phy_key in physical_seen:
             existing = physical_seen[phy_key]
-            if not existing.get("aircraft", {}).get("reg") and f.get("aircraft", {}).get("reg"):
+            existing_ac = existing.get("aircraft") or {}
+            if not (existing_ac.get("reg") or "") and (ac_dict_dd.get("reg") or ""):
                 deduped_flights.remove(existing)
                 physical_seen[phy_key] = f
                 deduped_flights.append(f)
@@ -554,8 +555,8 @@ def live_dashboard():
         physical_seen[phy_key] = f
         deduped_flights.append(f)
 
-    all_regs = list({f.get("aircraft", {}).get("reg", "")
-                     for f in deduped_flights if f.get("aircraft", {}).get("reg")})
+    all_regs = list({(f.get("aircraft") or {}).get("reg") or ""
+                     for f in deduped_flights if (f.get("aircraft") or {}).get("reg")})
     with ThreadPoolExecutor(max_workers=IMAGE_WORKERS) as executor:
         executor.map(get_photo_from_api, all_regs)
 
@@ -568,10 +569,11 @@ def live_dashboard():
 
         status_raw  = f.get("status", "").lower()
         dep_node    = f.get("departure") or {}
-        dep_ap      = dep_node.get("airport") or f.get("movement", {}).get("airport") or {}
+        dep_ap      = dep_node.get("airport") or (f.get("movement") or {}).get("airport") or {}
         arr         = f.get("arrival") or f.get("movement") or {}
-        ac_m        = f.get("aircraft", {}).get("model", "")
-        ac_r        = f.get("aircraft", {}).get("reg", "")
+        ac_dict     = f.get("aircraft") or {}
+        ac_m        = ac_dict.get("model") or ""
+        ac_r        = ac_dict.get("reg") or ""
         origin_iata = str(dep_ap.get("iata", ""))
 
         # FIX 7 — filter flights that depart from BNE (i.e. are departures, not arrivals).
@@ -694,7 +696,7 @@ def live_dashboard():
             "num":          flight_num,
             "origin":       city,
             "iata":         origin_iata,
-            "gate":         arr.get("gate", "TBA"),
+            "gate":         arr.get("gate") or "TBA",
             "ac_text":      f"{ac_m} ({ac_r})" if ac_m and ac_r else ac_m or ac_r,
             "actual_time":  best_dt.strftime("%H:%M"),
             "sch_time":     s_dt.strftime("%H:%M"),
@@ -1013,7 +1015,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.48</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.50</div>",
         unsafe_allow_html=True,
     )
 
