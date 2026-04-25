@@ -213,11 +213,20 @@ def classify_flight_status(*, is_canceled, is_diverted, is_landed, landed_mins,
         return FlightStyle(t.c_purple, t.c_purple, t.c_purple_bg, "✈️ DIVERTED", "0.8", "none")
 
     if is_landed:
+        landed_label = "Just Landed" if landed_mins == 0 else f"Landed {format_hm(landed_mins)} ago"
+        # Surface heavy delay context even after landing — operationally we
+        # still care that a flight arrived 2+ hours late (impacts pax flow,
+        # connection misses, etc.) rather than just showing "Landed".
+        if delay_hours >= HEAVY_DELAY_HOURS and landed_mins <= RECENT_LANDED_MAX:
+            delay_mins = max(0, int(round(delay_hours * 60)))
+            tag        = "🔴" if delay_hours >= SEVERE_DELAY_HOURS else "🟠"
+            label      = f"{tag} {landed_label} (+{format_hm(delay_mins)})"
+            return FlightStyle(t.c_amber, t.c_amber, t.bg_main, label, "0.75", "grayscale(20%)")
         if landed_mins <= RECENT_LANDED_MAX:
             return FlightStyle(t.c_green, t.c_green, t.bg_main,
-                               f"Landed {format_hm(landed_mins)} ago", "0.75", "grayscale(40%)")
+                               landed_label, "0.75", "grayscale(40%)")
         return FlightStyle(t.border_muted, t.text_muted, t.bg_main,
-                           f"Landed {format_hm(landed_mins)} ago", "0.4", "grayscale(80%)")
+                           landed_label, "0.4", "grayscale(80%)")
 
     m_left     = max(0, t_diff)
     delay_mins = max(0, int(round(delay_hours * 60)))
@@ -407,7 +416,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.47)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.48)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1004,7 +1013,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.47</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.48</div>",
         unsafe_allow_html=True,
     )
 
