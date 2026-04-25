@@ -407,7 +407,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.13)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.47)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -465,7 +465,7 @@ def live_dashboard():
         **Flight Status Tags:**
         * ⚠️ **Check Board**: No live radar data yet. Check physical airport FIDS boards.
         * 🟠 **Delayed**: Flight is running 3+ hours late.
-        * ⚡ **Surge**: 3+ flights arriving within 20 minutes — all hands on deck.
+        * ⚡ **Surge**: 3+ flights arriving within 15 minutes — all hands on deck.
 
         *Developed by Phillip Yeh to support the BNE Lotte Team.*
         """, unsafe_allow_html=True)
@@ -494,7 +494,7 @@ def live_dashboard():
     # api_last_hit is always populated before the countdown renders.
     api_t = st.session_state.get("api_last_hit")
     if api_t:
-        next_refresh_dt  = api_t + timedelta(seconds=API_DATA_TTL_SEC)
+        next_refresh_dt  = api_t + timedelta(seconds=_ttl)
         secs_until       = max(0, int((next_refresh_dt - now_aest).total_seconds()))
         mins_until, secs = divmod(secs_until, 60)
         refresh_txt      = f'{mins_until}m {secs:02d}s' if mins_until else f'{secs}s'
@@ -1004,7 +1004,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.46</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.47</div>",
         unsafe_allow_html=True,
     )
 
