@@ -415,7 +415,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.51)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.52)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -471,7 +471,7 @@ def live_dashboard():
         This app uses **two** data sources. If the primary API (AeroDataBox) has no radar data, it falls back to **OpenSky Network** (live ADS-B transponder data).
 
         **Flight Status Tags:**
-        * **FIDS**: No live radar data yet — refer to the physical airport FIDS boards.
+        * **Check Board**: No live radar data yet — refer to the physical airport FIDS boards.
         * 🟠 **Delayed**: Flight is running 3+ hours late.
         * ⚡ **Surge**: 3+ flights arriving within 15 minutes — all hands on deck.
 
@@ -930,7 +930,7 @@ def live_dashboard():
         if tag == "Sch":
             time_display = (
                 f'<span class="mono" style="color:{t.text_muted};">Sch {pf["sch_time"]}</span>'
-                f' <span style="color:{t.text_faded}; font-size:0.7em; font-weight:600; margin-left:6px; opacity:0.7;">FIDS</span>'
+                f' <span style="color:{t.text_faded}; font-size:0.7em; font-weight:600; margin-left:6px; opacity:0.7;">Check Board</span>'
             )
         else:
             time_display = (
@@ -1014,7 +1014,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.51</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.52</div>",
         unsafe_allow_html=True,
     )
 
