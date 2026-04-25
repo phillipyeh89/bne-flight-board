@@ -415,7 +415,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.50)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.51)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -457,7 +457,7 @@ def live_dashboard():
         )
         api_info_placeholder = st.empty()
 
-    with st.expander(" 👋👋👋 (Operational Guide)"):
+    with st.expander("ℹ️ Guide"):
         st.markdown(f"""
         **Why use this app?**
         I built this dashboard to help us manage our daily shifts more easily. Use it to predict peak traffic, coordinate floor tasks, and plan your break windows (Gaps) with confidence.
@@ -471,7 +471,7 @@ def live_dashboard():
         This app uses **two** data sources. If the primary API (AeroDataBox) has no radar data, it falls back to **OpenSky Network** (live ADS-B transponder data).
 
         **Flight Status Tags:**
-        * ⚠️ **Check Board**: No live radar data yet. Check physical airport FIDS boards.
+        * **FIDS**: No live radar data yet — refer to the physical airport FIDS boards.
         * 🟠 **Delayed**: Flight is running 3+ hours late.
         * ⚡ **Surge**: 3+ flights arriving within 15 minutes — all hands on deck.
 
@@ -507,14 +507,13 @@ def live_dashboard():
         mins_until, secs = divmod(secs_until, 60)
         refresh_txt      = f'{mins_until}m {secs:02d}s' if mins_until else f'{secs}s'
         api_txt = (
-            f'API: {api_t.strftime("%H:%M")} '
-            f'<span style="color:{t.c_amber};">(~{API_LAG_MINS}m lag)</span>'
-            f'<br>Next refresh: <span id="bne-refresh-countdown" '
+            f'<span style="color:{t.text_faded};">API {api_t.strftime("%H:%M")}</span>'
+            f' · <span id="bne-refresh-countdown" '
             f'data-next="{int(next_refresh_dt.timestamp())}" '
-            f'style="color:{t.c_green};">{refresh_txt}</span>'
+            f'style="color:{t.c_green};">↻ {refresh_txt}</span>'
         )
     else:
-        api_txt = "API: --:--"
+        api_txt = f'<span style="color:{t.text_faded};">API --:--</span>'
     api_info_placeholder.markdown(
         f'<div style="font-size:0.7em;color:{t.text_faded};text-align:right;">{api_txt}</div>',
         unsafe_allow_html=True,
@@ -931,7 +930,7 @@ def live_dashboard():
         if tag == "Sch":
             time_display = (
                 f'<span class="mono" style="color:{t.text_muted};">Sch {pf["sch_time"]}</span>'
-                f' <span style="color:{t.c_amber}; font-size:0.75em; font-weight:700; margin-left:6px;">⚠️ Check Board</span>'
+                f' <span style="color:{t.text_faded}; font-size:0.7em; font-weight:600; margin-left:6px; opacity:0.7;">FIDS</span>'
             )
         else:
             time_display = (
@@ -1015,7 +1014,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.50</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.51</div>",
         unsafe_allow_html=True,
     )
 
