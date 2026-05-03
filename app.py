@@ -415,7 +415,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.55)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.56)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -626,7 +626,11 @@ def live_dashboard():
             s_dt = best_dt
 
         has_departed = (dep_node.get("actualTime") is not None) or (status_raw in AIRBORNE_STATUSES)
-        if t_type == "revised" and abs((best_dt - s_dt).total_seconds()) < 60 and not has_departed:
+        # If the flight hasn't departed origin yet, any "revisedTime" is an
+        # airline schedule tweak — NOT radar data. Treat it as scheduled so
+        # the UI shows "Sch / Check Board" instead of falsely implying a
+        # live radar estimate exists.
+        if t_type == "revised" and not has_departed:
             t_type = "scheduled"
 
         # Not-operating-today filter: scheduled, no reg, no departure, < 3h out
@@ -1028,7 +1032,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.55</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.56</div>",
         unsafe_allow_html=True,
     )
 
