@@ -64,12 +64,7 @@ AIRLINE_ICAO = {
 
 # FIX 5 — use constant in the fragment decorator (was hardcoded "60s")
 UI_REFRESH_SEC           = 60
-API_DATA_TTL_SEC         = 1200 # 20 min cache (off-shift) — Tier 2 endpoint: 72×2×30=4,320 units/month vs 6,000 limit
-API_DATA_TTL_SHIFT_SEC   = 300  # 5 min cache during shift hours — 4× more responsive
-SHIFT_START_HOUR         = 4    # 04:00 AEST
-SHIFT_START_MIN          = 0
-SHIFT_END_HOUR           = 10   # 10:30 AEST
-SHIFT_END_MIN            = 30
+API_DATA_TTL_SEC         = 960  # 16 min cache — Tier 2 endpoint: 90×2×30=5,400 units/month vs 6,000 limit
 OPENSKY_TTL_SEC          = 60   # free source — refresh every fragment cycle for freshest radar positions
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -415,7 +410,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.56)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.57)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -430,11 +425,6 @@ def live_dashboard():
     now_aest = datetime.now(aest)
     t        = get_theme(st.session_state.theme_light)
 
-    # Compute shift/boost window early so the header badge can use it
-    _shift_start = now_aest.replace(hour=SHIFT_START_HOUR, minute=SHIFT_START_MIN, second=0, microsecond=0)
-    _shift_end   = now_aest.replace(hour=SHIFT_END_HOUR,   minute=SHIFT_END_MIN,   second=0, microsecond=0)
-    _in_shift    = _shift_start <= now_aest < _shift_end
-
     # Inject dynamic CSS first so header styling is correct
     st.markdown(get_dynamic_css(t), unsafe_allow_html=True)
 
@@ -448,11 +438,9 @@ def live_dashboard():
             st.session_state.theme_light = not st.session_state.theme_light
             st.rerun()
     with c3:
-        shift_badge = (f'<span style="color:{t.c_green};font-size:0.75em;font-weight:700;margin-left:6px;">⚡ BOOST</span>'
-                       if _in_shift else "")
         st.markdown(
             f'<div style="font-size:0.8em;color:{t.text_muted};text-align:right;margin-top:5px;">'
-            f'🕒 <span id="bne-live-clock">{now_aest.strftime("%H:%M:%S")}</span>{shift_badge}</div>',
+            f'🕒 <span id="bne-live-clock">{now_aest.strftime("%H:%M:%S")}</span></div>',
             unsafe_allow_html=True,
         )
         api_info_placeholder = st.empty()
@@ -480,13 +468,11 @@ def live_dashboard():
 
     # ── Fetch ──────────────────────────────────────────────────────────────────
     _epoch     = datetime(2000, 1, 1, tzinfo=aest)
-    # Use a shorter cache TTL during shift/boost hours for more responsive updates.
-    _ttl         = API_DATA_TTL_SHIFT_SEC if _in_shift else API_DATA_TTL_SEC
 
     # Single quantised anchor — all cache keys and time windows derive from this
-    # so the cache key is stable for the full _ttl window.
-    anchor_dt  = _epoch + timedelta(seconds=(int((now_aest - _epoch).total_seconds()) // _ttl) * _ttl)
-    anchor     = anchor_dt.strftime("%Y-%m-%dT%H:%M") + f"_ttl{_ttl}"
+    # so the cache key is stable for the full API_DATA_TTL_SEC window.
+    anchor_dt  = _epoch + timedelta(seconds=(int((now_aest - _epoch).total_seconds()) // API_DATA_TTL_SEC) * API_DATA_TTL_SEC)
+    anchor     = anchor_dt.strftime("%Y-%m-%dT%H:%M")
     from_time  = (anchor_dt - timedelta(hours=LOOKBACK_HOURS)).strftime("%Y-%m-%dT%H:%M")
     to_time    = (anchor_dt + timedelta(hours=LOOKAHEAD_HOURS)).strftime("%Y-%m-%dT%H:%M")
     raw_flights = fetch_flight_data(anchor, from_time, to_time)
@@ -502,7 +488,7 @@ def live_dashboard():
     # api_last_hit is always populated before the countdown renders.
     api_t = st.session_state.get("api_last_hit")
     if api_t:
-        next_refresh_dt  = api_t + timedelta(seconds=_ttl)
+        next_refresh_dt  = api_t + timedelta(seconds=API_DATA_TTL_SEC)
         secs_until       = max(0, int((next_refresh_dt - now_aest).total_seconds()))
         mins_until, secs = divmod(secs_until, 60)
         refresh_txt      = f'{mins_until}m {secs:02d}s' if mins_until else f'{secs}s'
@@ -1032,7 +1018,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.56</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.57</div>",
         unsafe_allow_html=True,
     )
 
