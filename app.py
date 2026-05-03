@@ -47,7 +47,7 @@ CITY_MAP = {
 YBBN_LAT, YBBN_LON = -27.3842, 153.1175
 # Broad box covering NZ, Pacific, SE Asia approach corridors for YBBN arrivals
 OPENSKY_BBOX = {"lamin": -38, "lamax": -10, "lomin": 135, "lomax": 170}
-OPENSKY_ENABLED      = True
+OPENSKY_ENABLED      = False  # disabled — Streamlit Cloud cannot reach OpenSky (8s timeouts every cycle)
 OPENSKY_MIN_SPEED_KT = 80
 OPENSKY_MAX_ETA_MIN  = 600
 
@@ -410,7 +410,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.57)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.58)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1018,7 +1018,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.57</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.58</div>",
         unsafe_allow_html=True,
     )
 
