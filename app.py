@@ -417,7 +417,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.66)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.67)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -436,22 +436,27 @@ def live_dashboard():
     # Inject dynamic CSS first so header styling is correct
     st.markdown(get_dynamic_css(t, st.session_state.font_size), unsafe_allow_html=True)
 
-    c1, c_btns, c3 = st.columns([4, 3, 2])
+    # On narrow mobile screens, multiple text buttons stack vertically.
+    # Use a single Streamlit selectbox in the sidebar-style menu instead,
+    # OR collapse all controls into one popover button.
+    c1, c_ctrl, c3 = st.columns([5, 1.2, 2])
     with c1:
         st.subheader("✈️ Arrivals")
-    with c_btns:
-        bA, bB, bT = st.columns(3)
-        with bA:
-            if st.button("A−", help="Smaller text", use_container_width=True):
-                st.session_state.font_size = max(13, st.session_state.font_size - 3)
-                st.rerun()
-        with bB:
-            if st.button("A+", help="Larger text", use_container_width=True):
-                st.session_state.font_size = min(24, st.session_state.font_size + 3)
-                st.rerun()
-        with bT:
-            toggle_icon = "🌙" if st.session_state.theme_light else "☀️"
-            if st.button(toggle_icon, help="Toggle light/dark theme", use_container_width=True):
+    with c_ctrl:
+        with st.popover("⚙️", use_container_width=True):
+            st.markdown("**Text Size**")
+            cA, cB = st.columns(2)
+            with cA:
+                if st.button("A−", help="Smaller", use_container_width=True, key="font_smaller"):
+                    st.session_state.font_size = max(13, st.session_state.font_size - 3)
+                    st.rerun()
+            with cB:
+                if st.button("A+", help="Larger", use_container_width=True, key="font_larger"):
+                    st.session_state.font_size = min(24, st.session_state.font_size + 3)
+                    st.rerun()
+            st.markdown("**Theme**")
+            toggle_icon = "🌙 Dark" if st.session_state.theme_light else "☀️ Light"
+            if st.button(toggle_icon, use_container_width=True, key="theme_toggle"):
                 st.session_state.theme_light = not st.session_state.theme_light
                 st.rerun()
     with c3:
@@ -1038,7 +1043,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.66</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.67</div>",
         unsafe_allow_html=True,
     )
 
