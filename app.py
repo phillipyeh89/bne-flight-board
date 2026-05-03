@@ -411,7 +411,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.61)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.62)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -924,7 +924,10 @@ def live_dashboard():
             f'</div>'
         )
 
-        tag        = "Act" if (pf["is_landed"] or pf["time_type"] == "actual") else ("Est" if pf["time_type"] == "revised" else "Sch")
+        # Only show "Act" tag when we have a confirmed actual time. A flight
+        # marked landed via FIX 6's time-based fallback has only scheduled or
+        # estimated time — so show the original tag, not a fake "Act".
+        tag        = "Act" if pf["time_type"] == "actual" else ("Est" if pf["time_type"] == "revised" else "Sch")
         time_color = t.c_blue if tag == "Act" else (t.text_faded if tag == "Est" else t.text_muted)
 
         # When status is Sch-only with no radar, suppress the misleading
@@ -946,8 +949,8 @@ def live_dashboard():
         zoom_src = pf["photo_url"] if has_photo else pf["logo_url"]
         gate_cls = "gate-tba" if pf["gate"] == "TBA" else "gate-num"
 
-        # Replace misleading "In Xh Ym" with a neutral "Awaiting" when we don't
-        # have radar data — keep the gate visible but don't pretend to know ETA.
+        # Replace the misleading "In Xh Ym" countdown with "Check Board" when
+        # we don't have radar data — keep the gate visible but don't fake an ETA.
         if suppress_countdown:
             status_col_text  = "⚠️ Check Board"
             status_col_color = t.c_amber
@@ -1028,7 +1031,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.61</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.62</div>",
         unsafe_allow_html=True,
     )
 
