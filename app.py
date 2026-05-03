@@ -337,19 +337,25 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
         "X-RapidAPI-Key":  st.secrets["X_RAPIDAPI_KEY"],
         "X-RapidAPI-Host": "aerodatabox.p.rapidapi.com",
     }
-    try:
-        r = requests.get(
-            url, headers=headers,
-            params={"direction": "Arrival", "withCancelled": "true", "withCodeshared": "false"},
-            timeout=10,
-        )
-        r.raise_for_status()
-        st.session_state.api_last_hit = datetime.now(pytz.timezone(TIMEZONE))
-        return r.json().get("arrivals", [])
-    except Exception as e:
-        log.error("AeroDataBox API error: %s", e)
-        st.session_state.api_error = str(e)
-        return []
+    params = {"direction": "Arrival", "withCancelled": "true", "withCodeshared": "false"}
+    # Try once with 15s timeout, retry once on timeout/connection error before giving up.
+    last_err = None
+    for attempt in (1, 2):
+        try:
+            r = requests.get(url, headers=headers, params=params, timeout=15)
+            r.raise_for_status()
+            st.session_state.api_last_hit = datetime.now(pytz.timezone(TIMEZONE))
+            return r.json().get("arrivals", [])
+        except (requests.Timeout, requests.ConnectionError) as e:
+            last_err = e
+            log.warning("AeroDataBox attempt %d failed (%s) — retrying", attempt, type(e).__name__)
+            continue
+        except Exception as e:
+            last_err = e
+            break
+    log.error("AeroDataBox API error: %s", last_err)
+    st.session_state.api_error = str(last_err)
+    return []
 
 
 def _iata_to_callsign(flight_number: str) -> str:
@@ -411,7 +417,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.62)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.63)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1031,7 +1037,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.62</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.63</div>",
         unsafe_allow_html=True,
     )
 
