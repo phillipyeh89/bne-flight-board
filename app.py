@@ -155,14 +155,6 @@ def get_dynamic_css(t: ThemeParams, font_size_px: int = 16) -> str:
             display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
             background: {t.bg_card}; border: 1px solid {t.border_muted}; border-radius: 8px;
             padding: 10px 14px; margin-bottom: 10px; font-size: 0.78em; color: {t.text_muted}; gap: 4px 0;
-            position: sticky; top: 0; z-index: 100;
-            box-shadow: 0 2px 12px rgba(0,0,0,0.4);
-        }}
-        /* Streamlit wraps blocks in containers that have overflow clipping which kills
-           position:sticky. Override that on every ancestor up to the viewport. */
-        section.main, section.main > div, .stApp > .main, .stApp .block-container,
-        [data-testid="stAppViewContainer"], [data-testid="stMain"] {{
-            overflow: visible !important;
         }}
         .summary-strip .s-item {{ text-align: center; min-width: 30%; }}
         .summary-strip .s-val  {{ font-weight: 700; font-size: 1.15em; display: block; }}
@@ -425,7 +417,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.65)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.66)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1046,7 +1038,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.65</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.66</div>",
         unsafe_allow_html=True,
     )
 
