@@ -417,7 +417,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.67)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.68)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -470,20 +470,31 @@ def live_dashboard():
     with st.expander("ℹ️ Guide"):
         st.markdown(f"""
         **Why use this app?**
-        I built this dashboard to help us manage our daily shifts more easily. Use it to predict peak traffic, coordinate floor tasks, and plan your break windows (Gaps) with confidence.
+        Built to help our team manage shifts — predict peak traffic, coordinate floor tasks, and plan break windows with confidence.
 
         **How to read the times:**
-        * <span class="mono" style="color:{t.c_blue};font-weight:bold;">Act</span>: **Actual** landing time. The crowd is on their way!
-        * <span class="mono" style="color:{t.text_faded};font-weight:bold;">Est</span>: **Estimated** arrival based on live radar. Very reliable.
-        * <span class="mono" style="color:{t.text_muted};font-weight:bold;">Sch</span>: **Scheduled** time only.
+        * <span class="mono" style="color:{t.c_blue};font-weight:bold;">Act</span>: **Actual** landing time confirmed. Pax are heading to the floor.
+        * <span class="mono" style="color:{t.text_faded};font-weight:bold;">Est</span>: **Estimated** arrival from live radar. Reliable but ~15 min lag.
+        * <span class="mono" style="color:{t.text_muted};font-weight:bold;">Sch</span>: **Scheduled** only — no radar data yet.
 
-        **Dual Radar:**
-        This app uses **two** data sources. If the primary API (AeroDataBox) has no radar data, it falls back to **OpenSky Network** (live ADS-B transponder data).
+        **Status Indicators:**
+        * <span style="color:{t.c_amber};">⚠️ **Check Board**</span>: No live radar — refer to the airport FIDS boards.
+        * <span style="color:{t.c_amber};">🟠 **Heavy delay**</span> (3h+) / <span style="color:{t.c_red};">🔴 **Severe delay**</span> (12h+).
+        * <span style="color:{t.c_red};">⚡ **Surge**</span>: 3+ flights arriving within 15 min — all hands on deck.
+        * <span style="color:{t.c_purple};">✈️ **Diverted**</span>: Not arriving at BNE.
 
-        **Flight Status Tags:**
-        * **Check Board**: No live radar data yet — refer to the physical airport FIDS boards.
-        * 🟠 **Delayed**: Flight is running 3+ hours late.
-        * ⚡ **Surge**: 3+ flights arriving within 15 minutes — all hands on deck.
+        **Gap Bars (between flights):**
+        * <span style="color:{t.c_green};">🟢 ACTIVE</span>: A break window is happening right now — countdown shows time left.
+        * 🔄 Upcoming gap — shows the future break window for planning.
+
+        **Earlier Arrivals:**
+        Flights landed within the last 60 min stay near the top in green. Older landings move below the "Earlier Arrivals" divider and fade out.
+
+        **Settings (⚙️):**
+        Tap the gear icon to adjust text size or switch between light/dark themes.
+
+        **Data Sources:**
+        Primary: AeroDataBox (~15 min lag). Supplemented with OpenSky live ADS-B for flights under 60 min out and for flights with no radar data yet.
 
         *Developed by Phillip Yeh to support the BNE Lotte Team.*
         """, unsafe_allow_html=True)
@@ -1043,7 +1054,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.67</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.68</div>",
         unsafe_allow_html=True,
     )
 
