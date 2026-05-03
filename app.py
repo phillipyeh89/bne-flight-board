@@ -116,12 +116,13 @@ def get_theme(is_light: bool) -> ThemeParams:
     )
 
 
-def get_dynamic_css(t: ThemeParams) -> str:
+def get_dynamic_css(t: ThemeParams, font_size_px: int = 16) -> str:
     return f"""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=JetBrains+Mono:wght@600&display=swap');
         #MainMenu {{visibility: hidden;}} header {{visibility: hidden;}}
-        .stApp {{ background-color: {t.bg_main}; }}
+        .stApp {{ background-color: {t.bg_main}; font-size: {font_size_px}px; }}
+        html {{ font-size: {font_size_px}px; }}
         .block-container {{padding-top: 1rem; font-family: 'Inter', sans-serif; max-width: 700px; color: {t.text_main};}}
         .mono {{ font-family: 'JetBrains Mono', monospace; letter-spacing: -0.5px; }}
 
@@ -144,9 +145,9 @@ def get_dynamic_css(t: ThemeParams) -> str:
             border-radius: 10px; padding: 10px 14px; margin-bottom: 8px; display: flex; align-items: center;
             color: {t.text_main}; box-shadow: 0 4px 10px rgba(0,0,0,0.15); border-left: 5px solid {t.c_blue}; transition: opacity 0.3s ease;
         }}
-        .info-col   {{ flex-grow: 1; min-width: 0; overflow: hidden; }}
+        .info-col   {{ flex-grow: 1; min-width: 0; overflow: hidden; word-wrap: break-word; }}
         .info-col .ac-line {{ font-size: 0.7em; color: {t.text_faded}; margin: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-        .status-col {{ text-align: right; min-width: 110px; display: flex; flex-direction: column; justify-content: center; }}
+        .status-col {{ text-align: right; min-width: 110px; max-width: 45%; display: flex; flex-direction: column; justify-content: center; flex-shrink: 0; }}
         .gate-num   {{ font-size: 1.85em; font-weight: 700; line-height: 1; }}
         .gate-tba   {{ font-size: 1.85em; font-weight: 700; line-height: 1; opacity: 0.35; }}
 
@@ -410,12 +411,13 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.59)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.61)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
 if "api_error"    not in st.session_state: st.session_state.api_error    = None
 if "theme_light"  not in st.session_state: st.session_state.theme_light  = False
+if "font_size"    not in st.session_state: st.session_state.font_size    = 16  # base px — 14 small / 16 normal / 19 large / 22 xl
 
 
 # FIX 5 — use UI_REFRESH_SEC constant instead of hardcoded "60s"
@@ -426,11 +428,19 @@ def live_dashboard():
     t        = get_theme(st.session_state.theme_light)
 
     # Inject dynamic CSS first so header styling is correct
-    st.markdown(get_dynamic_css(t), unsafe_allow_html=True)
+    st.markdown(get_dynamic_css(t, st.session_state.font_size), unsafe_allow_html=True)
 
-    c1, c2, c3 = st.columns([5, 1, 2])
+    c1, cA, cB, c2, c3 = st.columns([4, 0.7, 0.7, 0.9, 2])
     with c1:
         st.subheader("✈️ Arrivals")
+    with cA:
+        if st.button("A−", help="Smaller text", use_container_width=True):
+            st.session_state.font_size = max(13, st.session_state.font_size - 3)
+            st.rerun()
+    with cB:
+        if st.button("A+", help="Larger text", use_container_width=True):
+            st.session_state.font_size = min(24, st.session_state.font_size + 3)
+            st.rerun()
     with c2:
         # Button shows the OPPOSITE icon — click it to switch to that mode
         toggle_icon = "🌙" if st.session_state.theme_light else "☀️"
@@ -612,11 +622,11 @@ def live_dashboard():
             s_dt = best_dt
 
         has_departed = (dep_node.get("actualTime") is not None) or (status_raw in AIRBORNE_STATUSES)
-        # If the flight hasn't departed origin yet, any "revisedTime" is an
-        # airline schedule tweak — NOT radar data. Treat it as scheduled so
-        # the UI shows "Sch / Check Board" instead of falsely implying a
-        # live radar estimate exists.
-        if t_type == "revised" and not has_departed:
+        # If the flight hasn't departed and revisedTime is identical to scheduled
+        # (within 60s), it's not real updated info — treat as scheduled. But if
+        # there's a meaningful difference, the airline has updated the ETA based
+        # on operational knowledge (e.g. known origin delay), so trust it.
+        if t_type == "revised" and abs((best_dt - s_dt).total_seconds()) < 60 and not has_departed:
             t_type = "scheduled"
 
         # Not-operating-today filter: scheduled, no reg, no departure, < 3h out
@@ -1018,7 +1028,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.59</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.61</div>",
         unsafe_allow_html=True,
     )
 
