@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import requests
 import logging
@@ -416,7 +417,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.69)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.70)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1053,40 +1054,41 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.69</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.70</div>",
         unsafe_allow_html=True,
     )
 
 
 live_dashboard()
 
-# ── Live clock & refresh countdown (using st.html, the official replacement
-# for components.html — runs inline in main DOM, no iframe, no parent.document) ──
-st.html("""
+# ── Live clock & refresh countdown ──
+# components.html is deprecated (removal after 2026-06-01) but st.html does not
+# execute embedded <script> tags reliably in our Streamlit version. Stay with
+# components.html until either Streamlit fixes st.html or we migrate to a
+# different JS injection strategy.
+components.html("""
 <script>
-    if (!window._bneClockBooted) {
-        window._bneClockBooted = true;
-        const aestFmt = new Intl.DateTimeFormat('en-AU', {
-            timeZone: 'Australia/Brisbane',
-            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
-        });
-        setInterval(function() {
-            const clockEl = document.getElementById('bne-live-clock');
-            if (clockEl) clockEl.innerText = aestFmt.format(new Date());
+    const doc = window.parent.document;
+    const aestFmt = new Intl.DateTimeFormat('en-AU', {
+        timeZone: 'Australia/Brisbane',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+    });
+    setInterval(function() {
+        const clockEl = doc.getElementById('bne-live-clock');
+        if (clockEl) clockEl.innerText = aestFmt.format(new Date());
 
-            const cdEl = document.getElementById('bne-refresh-countdown');
-            if (cdEl) {
-                const nextTs = parseInt(cdEl.getAttribute('data-next'), 10);
-                const secsLeft = Math.max(0, nextTs - Math.floor(Date.now() / 1000));
-                if (secsLeft === 0) {
-                    cdEl.innerText = 'Refreshing...';
-                } else {
-                    const m = Math.floor(secsLeft / 60);
-                    const s = secsLeft % 60;
-                    cdEl.innerText = m > 0 ? m + 'm ' + String(s).padStart(2,'0') + 's' : s + 's';
-                }
+        const cdEl = doc.getElementById('bne-refresh-countdown');
+        if (cdEl) {
+            const nextTs = parseInt(cdEl.getAttribute('data-next'), 10);
+            const secsLeft = Math.max(0, nextTs - Math.floor(Date.now() / 1000));
+            if (secsLeft === 0) {
+                cdEl.innerText = 'Refreshing...';
+            } else {
+                const m = Math.floor(secsLeft / 60);
+                const s = secsLeft % 60;
+                cdEl.innerText = m > 0 ? m + 'm ' + String(s).padStart(2,'0') + 's' : s + 's';
             }
-        }, 1000);
-    }
+        }
+    }, 1000);
 </script>
-""")
+""", height=0)
