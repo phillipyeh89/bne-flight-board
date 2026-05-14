@@ -425,7 +425,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.71)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.73)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -767,13 +767,12 @@ def live_dashboard():
         t1 = gap_candidates[i]["dt"]
         t2 = gap_candidates[i + 1]["dt"]
         is_virtual = gap_candidates[i].get("is_virtual", False)
-        # Only apply the API lag buffer when the next flight has only a scheduled
-        # time — the lag compensates for AeroDataBox being ~15min stale. If the
-        # flight already has a revised/actual radar time, it already reflects
-        # real-world position so subtracting the lag would double-count it.
-        next_flight   = gap_candidates[i + 1]
-        lag_mins      = API_LAG_MINS if next_flight.get("time_type", "scheduled") == "scheduled" else 0
-        t2_safe       = t2 - timedelta(minutes=lag_mins)
+        # No lag buffer applied — using the next flight's best-known time as-is.
+        # For Sch-only flights we flag the uncertainty in the UI (tilde prefix)
+        # rather than pretending to know a precise gap end via arbitrary subtraction.
+        next_flight    = gap_candidates[i + 1]
+        next_is_sch    = next_flight.get("time_type", "scheduled") == "scheduled"
+        t2_safe        = t2
 
         gap_total = int((t2_safe - t1).total_seconds() / 60)
         # Virtual anchor gets a relaxed minimum — we always want to show how
@@ -795,6 +794,9 @@ def live_dashboard():
         cls = "gap-bar gap-active" if is_active else "gap-bar"
         lbl = "🟢 ACTIVE" if is_active else "🔄"
 
+        end_str = (f"{t2_safe.strftime('%H:%M')} (approx)" if next_is_sch
+                   else t2_safe.strftime("%H:%M"))
+
         if is_virtual:
             # Pre-shift bar: nothing has landed recently, just counting down
             # to the next arrival
@@ -804,7 +806,7 @@ def live_dashboard():
                 "html": (
                     f'<div class="{cls}">{lbl} {format_hm(gap_remaining)} BEFORE NEXT FLIGHT '
                     f'<span style="opacity:0.6; font-weight:400; margin-left:8px;">'
-                    f'(Ends {t2_safe.strftime("%H:%M")})</span></div>'
+                    f'(Ends {end_str})</span></div>'
                 ),
             })
             continue
@@ -828,7 +830,7 @@ def live_dashboard():
             "html": (
                 f'<div class="{cls}">{lbl} {format_hm(display_min)} GAP '
                 f'<span style="opacity:0.6; font-weight:400; margin-left:8px;">'
-                f'({window_start.strftime("%H:%M")}–{t2_safe.strftime("%H:%M")})</span>'
+                f'({window_start.strftime("%H:%M")}–{end_str})</span>'
                 f'{progress_html}</div>'
             ),
         })
@@ -1062,7 +1064,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.71</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.73</div>",
         unsafe_allow_html=True,
     )
 
