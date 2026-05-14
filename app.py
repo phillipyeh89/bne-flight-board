@@ -441,7 +441,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.77)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.79)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -498,27 +498,41 @@ def live_dashboard():
 
         **How to read the times:**
         * <span class="mono" style="color:{t.c_blue};font-weight:bold;">Act</span>: **Actual** landing time confirmed. Pax are heading to the floor.
-        * <span class="mono" style="color:{t.text_faded};font-weight:bold;">Est</span>: **Estimated** arrival from live radar. Reliable but ~15 min lag.
+        * <span class="mono" style="color:{t.text_faded};font-weight:bold;">Est</span>: **Estimated** arrival from live radar.
         * <span class="mono" style="color:{t.text_muted};font-weight:bold;">Sch</span>: **Scheduled** only — no radar data yet.
 
         **Status Indicators:**
         * <span style="color:{t.c_amber};">⚠️ **Check Board**</span>: No live radar — refer to the airport FIDS boards.
+        * <span style="color:{t.c_red};">**On Ground**</span>: Flight is past its ETA but landing not yet confirmed by API (usually taxiing).
+        * <span style="color:{t.c_green};">**Just Landed**</span> / **Landed Xm ago**: Plane is down — pax heading to the floor.
         * <span style="color:{t.c_amber};">🟠 **Heavy delay**</span> (3h+) / <span style="color:{t.c_red};">🔴 **Severe delay**</span> (12h+).
-        * <span style="color:{t.c_red};">⚡ **Surge**</span>: 3+ flights arriving within 15 min — all hands on deck.
+        * <span style="color:{t.c_red};">⚡ **Surge**</span>: 3+ flights AND high pax-load arriving within 15 min — all hands on deck. Widebodies (A350/A380/777/787) count more than narrowbodies.
         * <span style="color:{t.c_purple};">✈️ **Diverted**</span>: Not arriving at BNE.
 
         **Gap Bars (between flights):**
         * <span style="color:{t.c_green};">🟢 ACTIVE</span>: A break window is happening right now — countdown shows time left.
         * 🔄 Upcoming gap — shows the future break window for planning.
+        * `(HH:MM, approx)` means the gap end is based on a Sch-only flight — actual end may shift.
 
         **Earlier Arrivals:**
         Flights landed within the last 60 min stay near the top in green. Older landings move below the "Earlier Arrivals" divider and fade out.
+
+        **Flight Numbers are Clickable:**
+        Tap any flight number to open it in Flightradar24 (opens the FR24 app if installed).
+
+        **Header Info:**
+        * **Updated X min ago**: When data was last fetched from AeroDataBox.
+        * **(+~15m lag)**: AeroDataBox data is inherently ~15 minutes behind real-time.
+        * **Next refresh**: Live countdown to the next data fetch (every 16 min).
+
+        **Quiet Hours (01:00–03:00 AEST):**
+        The board sleeps overnight to save API quota — wakes up automatically before 04:00 shift start.
 
         **Settings (⚙️):**
         Tap the gear icon to adjust text size or switch between light/dark themes.
 
         **Data Sources:**
-        Primary: AeroDataBox (~15 min lag). Supplemented with OpenSky live ADS-B for flights under 60 min out and for flights with no radar data yet.
+        Primary: AeroDataBox (~15 min lag). OpenSky live ADS-B was used as a secondary radar source but is currently disabled (Streamlit hosting can't reach it reliably).
 
         *Developed by Phillip Yeh to support the BNE Lotte Team.*
         """, unsafe_allow_html=True)
@@ -556,16 +570,33 @@ def live_dashboard():
         secs_until       = max(0, int((next_refresh_dt - now_aest).total_seconds()))
         mins_until, secs = divmod(secs_until, 60)
         refresh_txt      = f'{mins_until}m {secs:02d}s' if mins_until else f'{secs}s'
+
+        # Make data freshness obvious to non-technical users:
+        # 1. "Updated X min ago" is more intuitive than a bare HH:MM timestamp
+        # 2. Show the inherent ~15min AeroDataBox lag so users know how stale
+        #    the underlying radar data is, not just when we fetched it
+        age_secs = max(0, int((now_aest - api_t).total_seconds()))
+        age_mins = age_secs // 60
+        if age_mins == 0:
+            age_txt = "just now"
+        elif age_mins == 1:
+            age_txt = "1 min ago"
+        else:
+            age_txt = f"{age_mins} min ago"
+
         api_txt = (
-            f'<span style="color:{t.text_faded};">API {api_t.strftime("%H:%M")}</span>'
-            f' · <span id="bne-refresh-countdown" '
+            f'<span style="color:{t.text_faded};">Updated {age_txt}</span>'
+            f' <span style="color:{t.c_amber}; opacity:0.8;" title="AeroDataBox data is ~15 min behind real-time">'
+            f'(+~15m lag)</span><br>'
+            f'<span style="color:{t.text_faded};">Next refresh: </span>'
+            f'<span id="bne-refresh-countdown" '
             f'data-next="{int(next_refresh_dt.timestamp())}" '
-            f'style="color:{t.c_green};">↻ {refresh_txt}</span>'
+            f'style="color:{t.c_green};">{refresh_txt}</span>'
         )
     else:
-        api_txt = f'<span style="color:{t.text_faded};">API --:--</span>'
+        api_txt = f'<span style="color:{t.text_faded};">Loading data...</span>'
     api_info_placeholder.markdown(
-        f'<div style="font-size:0.7em;color:{t.text_faded};text-align:right;">{api_txt}</div>',
+        f'<div style="font-size:0.7em;color:{t.text_faded};text-align:right; line-height:1.5;">{api_txt}</div>',
         unsafe_allow_html=True,
     )
 
@@ -1113,7 +1144,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.77</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.79</div>",
         unsafe_allow_html=True,
     )
 
