@@ -60,6 +60,9 @@ AIRLINE_ICAO = {
     "QR": "QTR", "EY": "ETD", "AI": "AIC", "AK": "AXM", "5J": "CEB",
     "NF": "AVN", "S7": "SBI", "CA": "CCA", "HX": "CRK", "UO": "HKE",
     "BR": "EVA", "IT": "TTW", "MM": "APJ", "TW": "TWB", "PG": "BKP",
+    "IE": "SOL", "ON": "RON", "OD": "MXD", "VJ": "VJC", "U2": "EZY",
+    "UA": "UAL", "DL": "DAL", "AA": "AAL", "AC": "ACA", "BA": "BAW",
+    "AF": "AFR", "KL": "KLM", "LH": "DLH", "SV": "SVA",
 }
 
 # FIX 5 — use constant in the fragment decorator (was hardcoded "60s")
@@ -428,7 +431,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.74)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.75)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1005,11 +1008,21 @@ def live_dashboard():
             status_col_text  = pf["status_text"]
             status_col_color = pf["status_color"]
 
+        # Build the Flightradar24 deep link from the IATA flight number via ICAO callsign.
+        # Example: "IE 727" → "SOL727" → "https://www.flightradar24.com/SOL727"
+        fr24_callsign = _iata_to_callsign(pf['num'])
+        fr24_url      = f"https://www.flightradar24.com/{fr24_callsign}"
+        flight_num_html = (
+            f'<a href="{fr24_url}" target="_blank" rel="noopener" '
+            f'style="color:inherit; text-decoration:none; border-bottom:1px dotted {t.text_muted};">'
+            f'{pf["num"]}</a>'
+        )
+
         st.markdown(f"""
         <div class="flight-card" style="border-left-color:{pf['border_color']}; background-color:{pf['bg_color']}; opacity:{pf['card_opacity']};">
             {img_html}
             <div class="info-col">
-                <div style="font-size:1.1em; font-weight:700;">{pf['num']}<span style="font-size:0.7em; color:{t.text_muted}; margin-left:8px;">{pf['origin']} [{pf['iata']}]</span></div>
+                <div style="font-size:1.1em; font-weight:700;">{flight_num_html}<span style="font-size:0.7em; color:{t.text_muted}; margin-left:8px;">{pf['origin']} [{pf['iata']}]</span></div>
                 <div class="ac-line">{pf['ac_text']}</div>
                 <div style="font-size:0.8em; color:{t.text_muted};">{time_display}</div>
             </div>
@@ -1078,7 +1091,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.74</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.75</div>",
         unsafe_allow_html=True,
     )
 
