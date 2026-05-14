@@ -191,6 +191,9 @@ def get_dynamic_css(t: ThemeParams, font_size_px: int = 16) -> str:
         .img-zoom-modal img {{ max-width: 90%; max-height: 80%; border-radius: 12px; border: 2px solid {t.border_muted}; object-fit: contain; z-index: 10001; }}
         .img-zoom-close-bg {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: pointer; z-index: 10000; }}
         .close-btn {{ position: absolute; top: 20px; right: 30px; color: {t.text_main}; font-size: 3.5em; font-weight: bold; cursor: pointer; z-index: 10002; line-height: 1; }}
+        /* Hide the popover chevron arrow next to the gear icon */
+        [data-testid="stPopover"] button [data-testid="stIconMaterial"]:last-of-type,
+        [data-testid="stPopover"] button svg:last-of-type {{ display: none !important; }}
     </style>
     """
 
@@ -425,7 +428,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.73)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.74)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -794,19 +797,30 @@ def live_dashboard():
         cls = "gap-bar gap-active" if is_active else "gap-bar"
         lbl = "🟢 ACTIVE" if is_active else "🔄"
 
-        end_str = (f"{t2_safe.strftime('%H:%M')} (approx)" if next_is_sch
+        end_str = (f"{t2_safe.strftime('%H:%M')}, approx" if next_is_sch
                    else t2_safe.strftime("%H:%M"))
 
         if is_virtual:
             # Pre-shift bar: nothing has landed recently, just counting down
-            # to the next arrival
+            # to the next arrival. Add the same progress bar as regular gaps
+            # so users can see visually how much of the window remains.
+            virtual_progress_html = ""
+            if gap_total > 0:
+                pct_left = max(0, min(100, int(gap_remaining / gap_total * 100)))
+                bar_color = t.c_green if pct_left > 50 else (t.c_amber if pct_left > 25 else t.c_red)
+                virtual_progress_html = (
+                    f'<div class="gap-progress-track">'
+                    f'<div class="gap-progress-fill" style="width:{pct_left}%; background:{bar_color};"></div>'
+                    f'</div>'
+                )
             processed.append({
                 "is_gap":   True,
                 "time_key": t1.timestamp() + 1,
                 "html": (
                     f'<div class="{cls}">{lbl} {format_hm(gap_remaining)} BEFORE NEXT FLIGHT '
                     f'<span style="opacity:0.6; font-weight:400; margin-left:8px;">'
-                    f'(Ends {end_str})</span></div>'
+                    f'(Ends {end_str})</span>'
+                    f'{virtual_progress_html}</div>'
                 ),
             })
             continue
@@ -1064,7 +1078,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.73</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.74</div>",
         unsafe_allow_html=True,
     )
 
