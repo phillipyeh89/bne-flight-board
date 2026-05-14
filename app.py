@@ -70,6 +70,12 @@ UI_REFRESH_SEC           = 60
 API_DATA_TTL_SEC         = 960  # 16 min cache — Tier 2 endpoint: 90×2×30=5,400 units/month vs 6,000 limit
 OPENSKY_TTL_SEC          = 60   # free source — refresh every fragment cycle for freshest radar positions
 
+# Quiet hours — skip API calls between these times to save units. BNE international
+# arrivals are minimal between ~01:00 and ~03:00 AEST, and Phillip's shift starts at
+# 04:00 — nobody actually needs live data at 02:00.
+QUIET_HOURS_START_H      = 1    # 01:00 AEST
+QUIET_HOURS_END_H        = 3    # 03:00 AEST
+
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("bne-board")
 
@@ -435,7 +441,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.76)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.77)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -526,6 +532,13 @@ def live_dashboard():
     anchor     = anchor_dt.strftime("%Y-%m-%dT%H:%M")
     from_time  = (anchor_dt - timedelta(hours=LOOKBACK_HOURS)).strftime("%Y-%m-%dT%H:%M")
     to_time    = (anchor_dt + timedelta(hours=LOOKAHEAD_HOURS)).strftime("%Y-%m-%dT%H:%M")
+    # Quiet hours: bail out before hitting the API at all. Saves ~120 units/month
+    # by not refreshing during dead hours when nobody is using the board anyway.
+    in_quiet_hours = QUIET_HOURS_START_H <= now_aest.hour < QUIET_HOURS_END_H
+    if in_quiet_hours:
+        st.info(f"🌙 Board is sleeping to save API quota. Wakes up at {QUIET_HOURS_END_H:02d}:00 AEST.")
+        return
+
     raw_flights = fetch_flight_data(anchor, from_time, to_time)
     opensky_data = fetch_opensky_states(anchor)
 
@@ -578,7 +591,12 @@ def live_dashboard():
         sch     = arr.get("scheduledTime")
         sch_str = sch.get("local", "") if isinstance(sch, dict) else ""
         ac_dict_dd = f.get("aircraft") or {}
-        phy_key = f"{str(dep_ap.get('iata', ''))}|{sch_str}|{ac_dict_dd.get('model') or ''}"
+        # Include airline ICAO prefix so two unrelated airlines with the same origin
+        # + scheduled minute don't collapse into one card when aircraft model isn't
+        # known yet (~3h pre-arrival window).
+        flight_num_dd  = f.get("number") or ""
+        airline_prefix = "".join(c for c in flight_num_dd if c.isalpha())[:3].upper()
+        phy_key = f"{airline_prefix}|{str(dep_ap.get('iata', ''))}|{sch_str}|{ac_dict_dd.get('model') or ''}"
 
         if phy_key and phy_key != "||" and phy_key in physical_seen:
             existing = physical_seen[phy_key]
@@ -1095,7 +1113,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.76</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.77</div>",
         unsafe_allow_html=True,
     )
 
