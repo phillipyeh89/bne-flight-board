@@ -101,11 +101,19 @@ class ThemeParams:
 def get_theme(is_light: bool) -> ThemeParams:
     if is_light:
         return ThemeParams(
-            bg_main="#F8FAFC", bg_card="#FFFFFF", text_main="#0F172A", text_muted="#475569",
-            text_faded="#94A3B8", border_muted="#CBD5E1", gap_bg="#FFFFFF", gap_active_bg="#ECFDF5",
-            gap_active_text="#059669", modal_bg="rgba(255,255,255,0.95)", fallback_bg="#F1F5F9",
-            c_blue="#2563EB", c_green="#059669", c_amber="#D97706", c_red="#DC2626",
-            c_purple="#6D28D9", c_purple_bg="#F3E8FF",
+            # Stronger contrast on light theme — original colours were too washed out:
+            # bg_main was nearly white making cards invisible; text_faded was too light
+            # against white cards; border_muted was barely visible.
+            bg_main="#E2E8F0",       # darker app bg so white cards stand out
+            bg_card="#FFFFFF",
+            text_main="#0F172A",
+            text_muted="#334155",    # darker for muted text
+            text_faded="#64748B",    # darker for aircraft type line (was #94A3B8)
+            border_muted="#94A3B8",  # darker borders (was #CBD5E1)
+            gap_bg="#FFFFFF", gap_active_bg="#D1FAE5",
+            gap_active_text="#047857", modal_bg="rgba(248,250,252,0.95)", fallback_bg="#CBD5E1",
+            c_blue="#1D4ED8", c_green="#047857", c_amber="#B45309", c_red="#B91C1C",
+            c_purple="#6D28D9", c_purple_bg="#EDE9FE",
         )
     return ThemeParams(
         bg_main="#0F172A", bg_card="#1E293B", text_main="white", text_muted="#94A3B8",
@@ -417,7 +425,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.70)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.71)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1054,7 +1062,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.70</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.71</div>",
         unsafe_allow_html=True,
     )
 
