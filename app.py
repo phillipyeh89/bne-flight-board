@@ -103,20 +103,24 @@ class ThemeParams:
 
 def get_theme(is_light: bool) -> ThemeParams:
     if is_light:
+        # Light mode philosophy: clean, bright, airy — NOT a darkened mirror of dark mode.
+        # Use a warm off-white background, pure white cards, and vivid mid-saturation
+        # accent colors that pop against light bg without feeling heavy.
         return ThemeParams(
-            # Stronger contrast on light theme — original colours were too washed out:
-            # bg_main was nearly white making cards invisible; text_faded was too light
-            # against white cards; border_muted was barely visible.
-            bg_main="#E2E8F0",       # darker app bg so white cards stand out
+            bg_main="#F1F5F9",        # subtle cool grey — slight tint so white cards lift
             bg_card="#FFFFFF",
-            text_main="#0F172A",
-            text_muted="#334155",    # darker for muted text
-            text_faded="#64748B",    # darker for aircraft type line (was #94A3B8)
-            border_muted="#94A3B8",  # darker borders (was #CBD5E1)
-            gap_bg="#FFFFFF", gap_active_bg="#D1FAE5",
-            gap_active_text="#047857", modal_bg="rgba(248,250,252,0.95)", fallback_bg="#CBD5E1",
-            c_blue="#1D4ED8", c_green="#047857", c_amber="#B45309", c_red="#B91C1C",
-            c_purple="#6D28D9", c_purple_bg="#EDE9FE",
+            text_main="#1E293B",       # dark slate, not pure black (softer to read)
+            text_muted="#475569",
+            text_faded="#64748B",
+            border_muted="#CBD5E1",    # back to lighter borders — softer look
+            gap_bg="#FFFFFF", gap_active_bg="#ECFDF5",
+            gap_active_text="#059669", modal_bg="rgba(241,245,249,0.95)", fallback_bg="#E2E8F0",
+            # Accent colours — vibrant mid-tones (500-level), not darkened 700+:
+            c_blue="#3B82F6",          # bright blue — feels like "info"
+            c_green="#10B981",         # vivid mint green
+            c_amber="#F59E0B",         # warm gold/amber
+            c_red="#EF4444",           # punchy red
+            c_purple="#8B5CF6", c_purple_bg="#F3E8FF",
         )
     return ThemeParams(
         bg_main="#0F172A", bg_card="#1E293B", text_main="white", text_muted="#94A3B8",
@@ -431,7 +435,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.75)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.76)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1091,7 +1095,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.75</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.76</div>",
         unsafe_allow_html=True,
     )
 
