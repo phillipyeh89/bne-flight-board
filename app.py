@@ -23,7 +23,7 @@ GAP_DISPLAY_MIN          = 5    # minimum remaining time in gap to display
 HEAVY_DELAY_HOURS        = 3    # orange warning threshold
 SEVERE_DELAY_HOURS       = 12   # red critical threshold
 IMMINENT_MINS            = 40   # red "hot" threshold (25 real + 15 lag compensation)
-API_LAG_MINS             = 15   # AeroDataBox data is ~15 min behind real-time
+API_LAG_MINS             = 20   # AeroDataBox + cache + render compounds to ~20 min behind real-time
 OPENSKY_PREFER_UNDER_MIN = 60   # use OpenSky over AeroDataBox for flights < 60 min out
 IMAGE_WORKERS            = 15
 PHOTO_FAIL_TTL_SEC       = 600  # retry failed photo lookups after 10 min
@@ -441,7 +441,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.79)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.81)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -586,8 +586,8 @@ def live_dashboard():
 
         api_txt = (
             f'<span style="color:{t.text_faded};">Updated {age_txt}</span>'
-            f' <span style="color:{t.c_amber}; opacity:0.8;" title="AeroDataBox data is ~15 min behind real-time">'
-            f'(+~15m lag)</span><br>'
+            f' <span style="color:{t.c_amber}; opacity:0.8;" title="Total delay through AeroDataBox + cache + render is ~20 min">'
+            f'(+~20m lag)</span><br>'
             f'<span style="color:{t.text_faded};">Next refresh: </span>'
             f'<span id="bne-refresh-countdown" '
             f'data-next="{int(next_refresh_dt.timestamp())}" '
@@ -968,6 +968,28 @@ def live_dashboard():
         if best_count >= 2 and best_start:
             busiest_txt = f'{best_start.strftime("%H:%M")}–{best_end.strftime("%H:%M")} ({best_count})'
 
+    # Stale data warning — if the last successful API fetch is more than 2x the
+    # normal cache TTL old, something is broken (API errors, network issues, etc).
+    # Silently outdated data is dangerous because users may act on stale info
+    # without realising. Show a prominent red banner.
+    if api_t:
+        age_minutes = int((now_aest - api_t).total_seconds() / 60)
+        stale_threshold_min = int(API_DATA_TTL_SEC / 60 * 2)
+        if age_minutes > stale_threshold_min:
+            st.markdown(f"""
+            <div style="background:{t.c_red}; color:white; padding:10px 14px;
+                        border-radius:8px; margin-bottom:10px; font-weight:700;
+                        font-size:0.85em; display:flex; align-items:center; gap:8px;">
+                <span style="font-size:1.2em;">⚠️</span>
+                <div>
+                    <div>STALE DATA — last update was {age_minutes} min ago</div>
+                    <div style="font-weight:400; font-size:0.85em; opacity:0.9; margin-top:2px;">
+                        API refresh is failing. Treat all times below with caution and check the airport FIDS board.
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
     st.markdown(f"""
     <div class="summary-strip">
         <div class="s-item"><span class="s-val" style="color:{t.c_blue};">{len(incoming)}</span>Incoming</div>
@@ -1144,7 +1166,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.79</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.81</div>",
         unsafe_allow_html=True,
     )
 
