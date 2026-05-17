@@ -23,7 +23,7 @@ GAP_DISPLAY_MIN          = 5    # minimum remaining time in gap to display
 HEAVY_DELAY_HOURS        = 3    # orange warning threshold
 SEVERE_DELAY_HOURS       = 12   # red critical threshold
 IMMINENT_MINS            = 40   # red "hot" threshold (25 real + 15 lag compensation)
-API_LAG_MINS             = 15   # AeroDataBox + cache + render compounds to ~15 min behind real-time
+API_LAG_MINS             = 10   # AeroDataBox lag observed in practice — typical 5-15 min range
 OPENSKY_PREFER_UNDER_MIN = 60   # use OpenSky over AeroDataBox for flights < 60 min out
 IMAGE_WORKERS            = 15
 PHOTO_FAIL_TTL_SEC       = 600  # retry failed photo lookups after 10 min
@@ -441,7 +441,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.81)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.82)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -586,8 +586,8 @@ def live_dashboard():
 
         api_txt = (
             f'<span style="color:{t.text_faded};">Updated {age_txt}</span>'
-            f' <span style="color:{t.c_amber}; opacity:0.8;" title="Total delay through AeroDataBox + cache + render is ~20 min">'
-            f'(+~20m lag)</span><br>'
+            f' <span style="color:{t.c_amber}; opacity:0.8;" title="AeroDataBox data typically lags real-time by 5-15 min">'
+            f'(+~10m lag)</span><br>'
             f'<span style="color:{t.text_faded};">Next refresh: </span>'
             f'<span id="bne-refresh-countdown" '
             f'data-next="{int(next_refresh_dt.timestamp())}" '
@@ -1166,7 +1166,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.81</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.82</div>",
         unsafe_allow_html=True,
     )
 
