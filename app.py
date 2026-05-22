@@ -469,7 +469,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.91)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.93)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -480,8 +480,7 @@ if "gate_history" not in st.session_state: st.session_state.gate_history = {}  #
 
 
 # FIX 5 — use UI_REFRESH_SEC constant instead of hardcoded "60s"
-@st.fragment(run_every=f"{UI_REFRESH_SEC}s")
-def live_dashboard():
+def _live_dashboard_impl():
     aest     = pytz.timezone(TIMEZONE)
     now_aest = datetime.now(aest)
     t        = get_theme(st.session_state.theme_light)
@@ -848,18 +847,23 @@ def live_dashboard():
     # Compare each flight's current gate against what we last saw. If it changed
     # (and both old/new are real gates, not TBA), flag it so the card can show
     # "was XX". History persists in session_state across the 60s fragment reruns.
-    gate_hist = st.session_state.gate_history
-    for p in processed:
-        if p.get("is_gap") or p.get("is_surge"):
-            continue
-        fn   = p.get("num")
-        cur  = p.get("gate")
-        if not fn or cur in (None, "TBA"):
-            continue
-        prev = gate_hist.get(fn)
-        if prev and prev != "TBA" and prev != cur:
-            p["prev_gate"] = prev          # genuine change — flag for display
-        gate_hist[fn] = cur                # update history to current
+    # Wrapped in try/except so a detection issue can never blank the whole board.
+    try:
+        gate_hist = st.session_state.get("gate_history", {})
+        for p in processed:
+            if p.get("is_gap") or p.get("is_surge"):
+                continue
+            fn   = p.get("num")
+            cur  = p.get("gate")
+            if not fn or cur in (None, "TBA"):
+                continue
+            prev = gate_hist.get(fn)
+            if prev and prev != "TBA" and prev != cur:
+                p["prev_gate"] = prev          # genuine change — flag for display
+            gate_hist[fn] = cur                # update history to current
+        st.session_state.gate_history = gate_hist
+    except Exception as e:
+        log.warning("Gate change detection failed: %s", e)
 
     # ── Gap Detection ─────────────────────────────────────────────────────────
     gap_candidates = sorted(
@@ -1233,9 +1237,22 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.91</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.93</div>",
         unsafe_allow_html=True,
     )
+
+
+@st.fragment(run_every=f"{UI_REFRESH_SEC}s")
+def live_dashboard():
+    try:
+        _live_dashboard_impl()
+    except Exception as e:
+        # Surface the real error instead of leaving a blank board, and log the
+        # full traceback so we can diagnose. The board will retry on next refresh.
+        import traceback
+        log.error("Dashboard render failed: %s\n%s", e, traceback.format_exc())
+        st.error(f"⚠️ Something went wrong rendering the board: {e}")
+        st.caption("This will retry automatically on the next refresh. If it persists, screenshot this and send to Phillip.")
 
 
 live_dashboard()
