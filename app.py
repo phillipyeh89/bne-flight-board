@@ -27,7 +27,7 @@ API_LAG_MINS             = 10   # AeroDataBox lag observed in practice — typic
 EST_COMPENSATION_MINS    = 9    # AeroDataBox Est runs ~9 min later than actual touchdown (observed);
                                 # subtract this from live radar estimates to better predict real arrival
 OPENSKY_PREFER_UNDER_MIN = 60   # use OpenSky over AeroDataBox for flights < 60 min out
-IMAGE_WORKERS            = 6    # gentler concurrency — 15 was triggering Planespotters rate limits
+IMAGE_WORKERS            = 3    # Planespotters free API rate-limits aggressively (429s) — keep concurrency low
 PHOTO_FAIL_TTL_SEC       = 180  # retry failed photo lookups after 3 min (was 10 — too long for transient failures)
 SURGE_WINDOW_MINS        = 15   # cluster detection window
 SURGE_MIN_FLIGHTS        = 3    # minimum flights to trigger surge alert
@@ -87,6 +87,11 @@ log = logging.getLogger("bne-board")
 _photo_url_cache: dict   = {}
 _photo_fails: dict       = {}
 _photo_lock              = threading.Lock()
+# Throttle: enforce a minimum gap between outbound Planespotters requests across
+# all threads so we don't burst past the free API's rate limit (was getting 429s).
+_photo_throttle_lock     = threading.Lock()
+_photo_last_request      = [0.0]   # mutable holder for last-request timestamp
+PHOTO_MIN_INTERVAL_SEC   = 0.4     # ~2.5 requests/sec max
 
 # ─────────────────────────────────────────────
 #  2. THEME & STATUS CLASSIFICATION
@@ -317,14 +322,20 @@ def _fetch_photo_http(reg: str) -> str:
     """Returns a photo URL, or 'NOT_FOUND' (genuine: photo doesn't exist),
     or 'TRANSIENT_FAIL' (timeout/rate-limit/server error — should be retried,
     not cached permanently)."""
+    # Global throttle — space out requests so concurrent threads don't burst
+    # past Planespotters' rate limit.
+    with _photo_throttle_lock:
+        import time as _time
+        elapsed = _time.time() - _photo_last_request[0]
+        if elapsed < PHOTO_MIN_INTERVAL_SEC:
+            _time.sleep(PHOTO_MIN_INTERVAL_SEC - elapsed)
+        _photo_last_request[0] = _time.time()
     try:
         r = requests.get(
             f"https://api.planespotters.net/pub/photos/reg/{reg}",
-            headers={"User-Agent": "BNE-Board-App/2.0"},
+            headers={"User-Agent": "BNE-Arrivals-Board/1.0 (+https://github.com/phillipyeh89/bne-flight-board)"},
             timeout=6.0,
         )
-        # TEMP DEBUG — remove once photos confirmed working
-        log.warning("PHOTO DEBUG reg=%s status=%s body=%.200s", reg, r.status_code, r.text)
         if r.status_code == 200:
             photos = r.json().get("photos", [])
             if photos:
@@ -458,7 +469,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.88-debug)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.90)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1194,7 +1205,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.88-debug</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.90</div>",
         unsafe_allow_html=True,
     )
 
