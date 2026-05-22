@@ -7,7 +7,6 @@ import math
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from concurrent.futures import ThreadPoolExecutor
 import pytz
 
 # ─────────────────────────────────────────────
@@ -86,6 +85,7 @@ log = logging.getLogger("bne-board")
 #   _photo_fails     : reg -> datetime of last TRANSIENT failure (retry after PHOTO_FAIL_TTL_SEC)
 _photo_url_cache: dict   = {}
 _photo_fails: dict       = {}
+_photo_pending: set      = set()   # regs currently being fetched in the background
 _photo_lock              = threading.Lock()
 # Throttle: enforce a minimum gap between outbound Planespotters requests across
 # all threads so we don't burst past the free API's rate limit (was getting 429s).
@@ -349,37 +349,45 @@ def _fetch_photo_http(reg: str) -> str:
         return "TRANSIENT_FAIL"      # timeout / connection error — retry later
 
 
+def _background_fetch_photo(reg: str):
+    """Worker run in a daemon thread — fetches a photo and updates the cache.
+    Never blocks the UI. Photos appear on the next 60s refresh once cached."""
+    url = _fetch_photo_http(reg)
+    with _photo_lock:
+        _photo_pending.discard(reg)
+        if url not in ("NOT_FOUND", "TRANSIENT_FAIL"):
+            _photo_url_cache[reg] = url            # cache success
+        elif url == "NOT_FOUND":
+            _photo_url_cache[reg] = "NOT_FOUND"    # genuine miss — stop retrying
+        else:
+            _photo_fails[reg] = datetime.now()     # transient — allow retry later
+
+
 def get_photo_from_api(reg: str) -> str:
+    """NON-BLOCKING. Returns a cached photo URL instantly if available, otherwise
+    kicks off a background fetch and returns 'NOT_FOUND' for now. The photo will
+    appear on a subsequent refresh once the background fetch completes — this keeps
+    the board from freezing while waiting on Planespotters."""
     if not reg:
         return "NOT_FOUND"
 
-    # Return cached result if we have one: a success URL or a genuine miss.
     with _photo_lock:
         if reg in _photo_url_cache:
-            return _photo_url_cache[reg]
+            return _photo_url_cache[reg]           # cached (URL or genuine miss)
         fail_entry = _photo_fails.get(reg)
+        already_fetching = reg in _photo_pending
 
-    # Throttle retry of recent transient failures (rate limit / timeout) so we
-    # don't hammer Planespotters — but recover within PHOTO_FAIL_TTL_SEC.
+    # Don't retry recent transient failures yet
     if fail_entry and (datetime.now() - fail_entry).total_seconds() < PHOTO_FAIL_TTL_SEC:
         return "NOT_FOUND"
 
-    url = _fetch_photo_http(reg)
-
-    if url not in ("NOT_FOUND", "TRANSIENT_FAIL"):
+    # Kick off a background fetch (once) if not already running
+    if not already_fetching:
         with _photo_lock:
-            _photo_url_cache[reg] = url            # cache success
-        return url
+            _photo_pending.add(reg)
+        threading.Thread(target=_background_fetch_photo, args=(reg,), daemon=True).start()
 
-    if url == "NOT_FOUND":
-        with _photo_lock:
-            _photo_url_cache[reg] = "NOT_FOUND"    # genuine miss — cache, stop retrying
-        return "NOT_FOUND"
-
-    # TRANSIENT_FAIL — record timestamp for throttled retry, do NOT cache permanently
-    with _photo_lock:
-        _photo_fails[reg] = datetime.now()
-    return "NOT_FOUND"
+    return "NOT_FOUND"   # not ready yet — will show on next refresh
 
 
 @st.cache_data(ttl=API_DATA_TTL_SEC, show_spinner=False)
@@ -469,7 +477,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.93)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.94)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -668,10 +676,13 @@ def _live_dashboard_impl():
         physical_seen[phy_key] = f
         deduped_flights.append(f)
 
+    # Pre-warm photo cache without blocking — get_photo_from_api spawns background
+    # fetches and returns immediately, so the board renders right away and photos
+    # fill in on subsequent refreshes.
     all_regs = list({(f.get("aircraft") or {}).get("reg") or ""
                      for f in deduped_flights if (f.get("aircraft") or {}).get("reg")})
-    with ThreadPoolExecutor(max_workers=IMAGE_WORKERS) as executor:
-        executor.map(get_photo_from_api, all_regs)
+    for _reg in all_regs:
+        get_photo_from_api(_reg)
 
     # ── Process flights ───────────────────────────────────────────────────────
     processed = []
@@ -1237,7 +1248,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.93</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.94</div>",
         unsafe_allow_html=True,
     )
 
