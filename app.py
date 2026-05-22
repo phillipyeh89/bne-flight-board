@@ -81,9 +81,12 @@ QUIET_HOURS_END_H        = 3    # 03:00 AEST
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("bne-board")
 
-# FIX 4 — module-level fail cache + lock replaces thread-unsafe st.session_state access
+# Photo caches (module-level, thread-safe via single lock):
+#   _photo_url_cache : reg -> photo URL (success) or "NOT_FOUND" (genuine miss, don't retry)
+#   _photo_fails     : reg -> datetime of last TRANSIENT failure (retry after PHOTO_FAIL_TTL_SEC)
+_photo_url_cache: dict   = {}
 _photo_fails: dict       = {}
-_photo_fails_lock        = threading.Lock()
+_photo_lock              = threading.Lock()
 
 # ─────────────────────────────────────────────
 #  2. THEME & STATUS CLASSIFICATION
@@ -310,16 +313,6 @@ def get_airline_logo_url(flight_number: str) -> str:
 
 
 # ── Photo fetching with smart retry ──────────────────────────────────────────
-@st.cache_data(show_spinner=False)
-def _photo_cache_permanent(reg: str) -> str:
-    result = _fetch_photo_http(reg)
-    # Don't let a transient failure get cached permanently — raise so st.cache_data
-    # doesn't store it, forcing a fresh attempt on the next call.
-    if result == "TRANSIENT_FAIL":
-        raise RuntimeError("transient photo fetch failure")
-    return result
-
-
 def _fetch_photo_http(reg: str) -> str:
     """Returns a photo URL, or 'NOT_FOUND' (genuine: photo doesn't exist),
     or 'TRANSIENT_FAIL' (timeout/rate-limit/server error — should be retried,
@@ -347,30 +340,31 @@ def get_photo_from_api(reg: str) -> str:
     if not reg:
         return "NOT_FOUND"
 
-    # Permanent cache holds genuine results (URL or genuine NOT_FOUND). It RAISES
-    # on transient failures so they don't get cached — catch that and fall through
-    # to the retry path below.
-    try:
-        cached = _photo_cache_permanent(reg)
-        if cached != "NOT_FOUND":
-            return cached
-        # genuine NOT_FOUND (photo doesn't exist) — no point retrying
-        return "NOT_FOUND"
-    except Exception:
-        pass  # transient failure — fall through to throttled retry
-
-    # Throttle retries of transient failures (rate limit / timeout) so we don't
-    # hammer Planespotters, but recover within PHOTO_FAIL_TTL_SEC (3 min).
-    with _photo_fails_lock:
+    # Return cached result if we have one: a success URL or a genuine miss.
+    with _photo_lock:
+        if reg in _photo_url_cache:
+            return _photo_url_cache[reg]
         fail_entry = _photo_fails.get(reg)
+
+    # Throttle retry of recent transient failures (rate limit / timeout) so we
+    # don't hammer Planespotters — but recover within PHOTO_FAIL_TTL_SEC.
     if fail_entry and (datetime.now() - fail_entry).total_seconds() < PHOTO_FAIL_TTL_SEC:
         return "NOT_FOUND"
 
     url = _fetch_photo_http(reg)
+
     if url not in ("NOT_FOUND", "TRANSIENT_FAIL"):
+        with _photo_lock:
+            _photo_url_cache[reg] = url            # cache success
         return url
 
-    with _photo_fails_lock:
+    if url == "NOT_FOUND":
+        with _photo_lock:
+            _photo_url_cache[reg] = "NOT_FOUND"    # genuine miss — cache, stop retrying
+        return "NOT_FOUND"
+
+    # TRANSIENT_FAIL — record timestamp for throttled retry, do NOT cache permanently
+    with _photo_lock:
         _photo_fails[reg] = datetime.now()
     return "NOT_FOUND"
 
@@ -462,7 +456,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.86)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.87)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1198,7 +1192,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.86</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.87</div>",
         unsafe_allow_html=True,
     )
 
