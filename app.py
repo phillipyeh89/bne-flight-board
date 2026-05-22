@@ -23,7 +23,7 @@ HEAVY_DELAY_HOURS        = 3    # orange warning threshold
 SEVERE_DELAY_HOURS       = 12   # red critical threshold
 IMMINENT_MINS            = 40   # red "hot" threshold (25 real + 15 lag compensation)
 API_LAG_MINS             = 10   # AeroDataBox lag observed in practice — typical 5-15 min range
-EST_COMPENSATION_MINS    = 9    # AeroDataBox Est runs ~9 min later than actual touchdown (observed);
+EST_COMPENSATION_MINS    = 10   # AeroDataBox Est runs ~10 min later than actual touchdown (observed);
                                 # subtract this from live radar estimates to better predict real arrival
 OPENSKY_PREFER_UNDER_MIN = 60   # use OpenSky over AeroDataBox for flights < 60 min out
 IMAGE_WORKERS            = 3    # Planespotters free API rate-limits aggressively (429s) — keep concurrency low
@@ -477,7 +477,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.94)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.95)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -759,11 +759,18 @@ def _live_dashboard_impl():
             t_type = "scheduled"
 
         # Compensation: AeroDataBox's live "Est" (revised) times consistently run
-        # ~9 min later than the actual observed touchdown (verified against real
-        # landings — VA58, JQ104, etc.). Shift Est times earlier so the board
-        # predicts real arrival more closely. Only applies to in-flight radar
-        # estimates — scheduled and confirmed-actual times are never altered.
-        if t_type == "revised" and has_departed:
+        # ~10 min later than the actual observed touchdown (verified against real
+        # landings — VA58, JQ104, QF52). Shift Est times earlier so the board
+        # predicts real arrival more closely.
+        #
+        # Apply to ALL revised times (not just has_departed) — a flight with a
+        # genuine revised ETA is being radar-tracked regardless of whether
+        # AeroDataBox has updated its status field to "enroute". The earlier
+        # has_departed gate meant flights whose status hadn't flipped to airborne
+        # never got compensated, which is why some still showed ~10 min late.
+        # (Pre-departure schedule-tweaks were already converted to "scheduled"
+        # above, so anything still "revised" here is a real in-flight estimate.)
+        if t_type == "revised":
             best_dt = best_dt - timedelta(minutes=EST_COMPENSATION_MINS)
 
         # Not-operating-today filter: scheduled, no reg, no departure, < 3h out
@@ -1248,7 +1255,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.94</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.95</div>",
         unsafe_allow_html=True,
     )
 
