@@ -27,8 +27,8 @@ API_LAG_MINS             = 10   # AeroDataBox lag observed in practice — typic
 EST_COMPENSATION_MINS    = 9    # AeroDataBox Est runs ~9 min later than actual touchdown (observed);
                                 # subtract this from live radar estimates to better predict real arrival
 OPENSKY_PREFER_UNDER_MIN = 60   # use OpenSky over AeroDataBox for flights < 60 min out
-IMAGE_WORKERS            = 15
-PHOTO_FAIL_TTL_SEC       = 600  # retry failed photo lookups after 10 min
+IMAGE_WORKERS            = 6    # gentler concurrency — 15 was triggering Planespotters rate limits
+PHOTO_FAIL_TTL_SEC       = 180  # retry failed photo lookups after 3 min (was 10 — too long for transient failures)
 SURGE_WINDOW_MINS        = 15   # cluster detection window
 SURGE_MIN_FLIGHTS        = 3    # minimum flights to trigger surge alert
 DOMESTIC_TERMINALS       = ('D', 'DOM', 'D-ANC', 'GAT')
@@ -312,43 +312,62 @@ def get_airline_logo_url(flight_number: str) -> str:
 # ── Photo fetching with smart retry ──────────────────────────────────────────
 @st.cache_data(show_spinner=False)
 def _photo_cache_permanent(reg: str) -> str:
-    return _fetch_photo_http(reg)
+    result = _fetch_photo_http(reg)
+    # Don't let a transient failure get cached permanently — raise so st.cache_data
+    # doesn't store it, forcing a fresh attempt on the next call.
+    if result == "TRANSIENT_FAIL":
+        raise RuntimeError("transient photo fetch failure")
+    return result
 
 
 def _fetch_photo_http(reg: str) -> str:
+    """Returns a photo URL, or 'NOT_FOUND' (genuine: photo doesn't exist),
+    or 'TRANSIENT_FAIL' (timeout/rate-limit/server error — should be retried,
+    not cached permanently)."""
     try:
         r = requests.get(
             f"https://api.planespotters.net/pub/photos/reg/{reg}",
             headers={"User-Agent": "BNE-Board-App/2.0"},
-            timeout=3.0,
+            timeout=6.0,
         )
         if r.status_code == 200:
             photos = r.json().get("photos", [])
             if photos:
                 return photos[0]["thumbnail_large"]["src"]
+            return "NOT_FOUND"      # genuine: API responded, no photo on file
+        if r.status_code == 429 or r.status_code >= 500:
+            return "TRANSIENT_FAIL"  # rate limited / server error — retry later
+        return "NOT_FOUND"
     except Exception as e:
         log.warning("Photo fetch failed for reg=%s: %s", reg, e)
-    return "NOT_FOUND"
+        return "TRANSIENT_FAIL"      # timeout / connection error — retry later
 
 
 def get_photo_from_api(reg: str) -> str:
     if not reg:
         return "NOT_FOUND"
-    cached = _photo_cache_permanent(reg)
-    if cached != "NOT_FOUND":
-        return cached
 
-    # FIX 4 — use module-level dict + lock instead of st.session_state (not thread-safe)
+    # Permanent cache holds genuine results (URL or genuine NOT_FOUND). It RAISES
+    # on transient failures so they don't get cached — catch that and fall through
+    # to the retry path below.
+    try:
+        cached = _photo_cache_permanent(reg)
+        if cached != "NOT_FOUND":
+            return cached
+        # genuine NOT_FOUND (photo doesn't exist) — no point retrying
+        return "NOT_FOUND"
+    except Exception:
+        pass  # transient failure — fall through to throttled retry
+
+    # Throttle retries of transient failures (rate limit / timeout) so we don't
+    # hammer Planespotters, but recover within PHOTO_FAIL_TTL_SEC (3 min).
     with _photo_fails_lock:
         fail_entry = _photo_fails.get(reg)
-
     if fail_entry and (datetime.now() - fail_entry).total_seconds() < PHOTO_FAIL_TTL_SEC:
         return "NOT_FOUND"
 
     url = _fetch_photo_http(reg)
-    if url != "NOT_FOUND":
-        # FIX 3 — removed _photo_cache_permanent.clear() which was wiping ALL cached photos;
-        # the permanent cache will naturally populate on the next call for this reg
+    if url not in ("NOT_FOUND", "TRANSIENT_FAIL"):
         return url
 
     with _photo_fails_lock:
@@ -443,7 +462,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.84)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.86)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1093,10 +1112,13 @@ def live_dashboard():
             status_col_text  = pf["status_text"]
             status_col_color = pf["status_color"]
 
-        # Build the Flightradar24 deep link from the IATA flight number via ICAO callsign.
-        # Example: "IE 727" → "SOL727" → "https://www.flightradar24.com/SOL727"
-        fr24_callsign = _iata_to_callsign(pf['num'])
-        fr24_url      = f"https://www.flightradar24.com/{fr24_callsign}"
+        # Build the Flightradar24 deep link using the IATA flight number in the
+        # /data/flights/ format (lowercase, no spaces). This points to the flight's
+        # data page which works whether or not the flight is currently airborne.
+        # The old /<callsign> format only worked for live flights and frequently
+        # resolved to the wrong aircraft when callsigns clashed or weren't airborne.
+        fr24_flight_id = pf['num'].replace(" ", "").lower()
+        fr24_url       = f"https://www.flightradar24.com/data/flights/{fr24_flight_id}"
         flight_num_html = (
             f'<a href="{fr24_url}" target="_blank" rel="noopener" '
             f'style="color:inherit; text-decoration:none; border-bottom:1px dotted {t.text_muted};">'
@@ -1176,7 +1198,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.84</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.86</div>",
         unsafe_allow_html=True,
     )
 
