@@ -323,6 +323,8 @@ def _fetch_photo_http(reg: str) -> str:
             headers={"User-Agent": "BNE-Board-App/2.0"},
             timeout=6.0,
         )
+        # TEMP DEBUG — remove once photos confirmed working
+        log.warning("PHOTO DEBUG reg=%s status=%s body=%.200s", reg, r.status_code, r.text)
         if r.status_code == 200:
             photos = r.json().get("photos", [])
             if photos:
@@ -456,7 +458,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.87)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.88-debug)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1192,7 +1194,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.87</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.88-debug</div>",
         unsafe_allow_html=True,
     )
 
