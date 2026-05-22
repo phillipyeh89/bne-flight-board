@@ -469,13 +469,14 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.90)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.91)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
 if "api_error"    not in st.session_state: st.session_state.api_error    = None
 if "theme_light"  not in st.session_state: st.session_state.theme_light  = False
 if "font_size"    not in st.session_state: st.session_state.font_size    = 16  # base px — 14 small / 16 normal / 19 large / 22 xl
+if "gate_history" not in st.session_state: st.session_state.gate_history = {}  # flight_num -> last seen gate, for change detection
 
 
 # FIX 5 — use UI_REFRESH_SEC constant instead of hardcoded "60s"
@@ -819,6 +820,7 @@ def live_dashboard():
 
         processed.append({
             "num":          flight_num,
+            "prev_gate":    None,  # populated below if a gate change is detected
             "origin":       city,
             "iata":         origin_iata,
             "gate":         arr.get("gate") or "TBA",
@@ -841,6 +843,23 @@ def live_dashboard():
             "img_filter":   style.img_filter,
             "landed_mins":  landed_mins,
         })
+
+    # ── Gate Change Detection ─────────────────────────────────────────────────
+    # Compare each flight's current gate against what we last saw. If it changed
+    # (and both old/new are real gates, not TBA), flag it so the card can show
+    # "was XX". History persists in session_state across the 60s fragment reruns.
+    gate_hist = st.session_state.gate_history
+    for p in processed:
+        if p.get("is_gap") or p.get("is_surge"):
+            continue
+        fn   = p.get("num")
+        cur  = p.get("gate")
+        if not fn or cur in (None, "TBA"):
+            continue
+        prev = gate_hist.get(fn)
+        if prev and prev != "TBA" and prev != cur:
+            p["prev_gate"] = prev          # genuine change — flag for display
+        gate_hist[fn] = cur                # update history to current
 
     # ── Gap Detection ─────────────────────────────────────────────────────────
     gap_candidates = sorted(
@@ -1110,6 +1129,15 @@ def live_dashboard():
         zoom_src = pf["photo_url"] if has_photo else pf["logo_url"]
         gate_cls = "gate-tba" if pf["gate"] == "TBA" else "gate-num"
 
+        # Gate-change badge — small amber "was XX" tag if the gate changed recently
+        gate_change_badge = ""
+        if pf.get("prev_gate"):
+            gate_change_badge = (
+                f'<span style="display:block; font-size:0.32em; font-weight:700; '
+                f'color:{t.c_amber}; letter-spacing:0.5px; margin-top:1px;">'
+                f'⚠ was {pf["prev_gate"]}</span>'
+            )
+
         # Replace the misleading "In Xh Ym" countdown with "Check Board" when
         # we don't have radar data — keep the gate visible but don't fake an ETA.
         if suppress_countdown:
@@ -1142,7 +1170,7 @@ def live_dashboard():
             </div>
             <div class="status-col">
                 <div style="font-size:0.6em; color:{t.text_muted}; font-weight:700; letter-spacing:1px;">GATE</div>
-                <div class="mono {gate_cls}">{pf['gate']}</div>
+                <div class="mono {gate_cls}">{pf['gate']}{gate_change_badge}</div>
                 <div style="font-size:0.85em; font-weight:700; color:{status_col_color}; margin-top:2px;">{status_col_text}</div>
             </div>
         </div>
@@ -1205,7 +1233,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.90</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.91</div>",
         unsafe_allow_html=True,
     )
 
