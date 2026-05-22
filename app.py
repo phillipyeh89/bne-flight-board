@@ -24,6 +24,8 @@ HEAVY_DELAY_HOURS        = 3    # orange warning threshold
 SEVERE_DELAY_HOURS       = 12   # red critical threshold
 IMMINENT_MINS            = 40   # red "hot" threshold (25 real + 15 lag compensation)
 API_LAG_MINS             = 10   # AeroDataBox lag observed in practice — typical 5-15 min range
+EST_COMPENSATION_MINS    = 9    # AeroDataBox Est runs ~9 min later than actual touchdown (observed);
+                                # subtract this from live radar estimates to better predict real arrival
 OPENSKY_PREFER_UNDER_MIN = 60   # use OpenSky over AeroDataBox for flights < 60 min out
 IMAGE_WORKERS            = 15
 PHOTO_FAIL_TTL_SEC       = 600  # retry failed photo lookups after 10 min
@@ -441,7 +443,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.82)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.84)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -498,7 +500,7 @@ def live_dashboard():
 
         **How to read the times:**
         * <span class="mono" style="color:{t.c_blue};font-weight:bold;">Act</span>: **Actual** landing time confirmed. Pax are heading to the floor.
-        * <span class="mono" style="color:{t.text_faded};font-weight:bold;">Est</span>: **Estimated** arrival from live radar.
+        * <span class="mono" style="color:{t.text_faded};font-weight:bold;">Est</span>: **Estimated** arrival from live radar, adjusted ~9 min earlier to match observed real arrivals.
         * <span class="mono" style="color:{t.text_muted};font-weight:bold;">Sch</span>: **Scheduled** only — no radar data yet.
 
         **Status Indicators:**
@@ -718,6 +720,14 @@ def live_dashboard():
         # on operational knowledge (e.g. known origin delay), so trust it.
         if t_type == "revised" and abs((best_dt - s_dt).total_seconds()) < 60 and not has_departed:
             t_type = "scheduled"
+
+        # Compensation: AeroDataBox's live "Est" (revised) times consistently run
+        # ~9 min later than the actual observed touchdown (verified against real
+        # landings — VA58, JQ104, etc.). Shift Est times earlier so the board
+        # predicts real arrival more closely. Only applies to in-flight radar
+        # estimates — scheduled and confirmed-actual times are never altered.
+        if t_type == "revised" and has_departed:
+            best_dt = best_dt - timedelta(minutes=EST_COMPENSATION_MINS)
 
         # Not-operating-today filter: scheduled, no reg, no departure, < 3h out
         hours_until = (best_dt - now_aest).total_seconds() / 3600
@@ -1166,7 +1176,7 @@ def live_dashboard():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.82</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.84</div>",
         unsafe_allow_html=True,
     )
 
