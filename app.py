@@ -21,7 +21,7 @@ GAP_MIN_MINUTES          = 20   # minimum gap size to display
 GAP_DISPLAY_MIN          = 5    # minimum remaining time in gap to display
 HEAVY_DELAY_HOURS        = 3    # orange warning threshold
 SEVERE_DELAY_HOURS       = 12   # red critical threshold
-IMMINENT_MINS            = 40   # red "hot" threshold (25 real + 15 lag compensation)
+IMMINENT_MINS            = 40   # red "hot" threshold — flight arriving within 40 min
 API_LAG_MINS             = 10   # AeroDataBox lag observed in practice — typical 5-15 min range
 EST_COMPENSATION_MINS    = 10   # AeroDataBox Est runs ~10 min later than actual touchdown (observed);
                                 # subtract this from live radar estimates to better predict real arrival
@@ -29,7 +29,8 @@ OPENSKY_PREFER_UNDER_MIN = 60   # use OpenSky over AeroDataBox for flights < 60 
 IMAGE_WORKERS            = 3    # Planespotters free API rate-limits aggressively (429s) — keep concurrency low
 PHOTO_FAIL_TTL_SEC       = 180  # retry failed photo lookups after 3 min (was 10 — too long for transient failures)
 SURGE_WINDOW_MINS        = 15   # cluster detection window
-SURGE_MIN_FLIGHTS        = 3    # minimum flights to trigger surge alert
+SURGE_MIN_FLIGHTS        = 3    # minimum flights in cluster to consider
+SURGE_MIN_WEIGHT         = 4    # min total pax-weight to trigger (2 widebodies = 6 triggers; 3 narrowbodies = 3 doesn't... see logic)
 DOMESTIC_TERMINALS       = ('D', 'DOM', 'D-ANC', 'GAT')
 SMALL_AIRCRAFT_FILTER    = ('BEECH', 'FAIRCHILD', 'CESSNA', 'PIPER', 'PILATUS', 'KING AIR', 'METROLINER', 'SAAB')
 
@@ -91,6 +92,9 @@ _photo_lock              = threading.Lock()
 # all threads so we don't burst past the free API's rate limit (was getting 429s).
 _photo_throttle_lock     = threading.Lock()
 _photo_last_request      = [0.0]   # mutable holder for last-request timestamp
+# Cap concurrent background photo threads — without this, 30 cache-miss regs
+# would spawn 30 threads at once (harmless due to the throttle, but wasteful).
+_photo_semaphore         = threading.Semaphore(IMAGE_WORKERS)
 PHOTO_MIN_INTERVAL_SEC   = 0.4     # ~2.5 requests/sec max
 
 # ─────────────────────────────────────────────
@@ -115,6 +119,14 @@ class ThemeParams:
     c_red: str
     c_purple: str
     c_purple_bg: str
+    # Theme-aware delay/surge colours — light mode needs softer variants;
+    # hardcoded dark-reds look heavy/muddy on a bright background.
+    c_severe_border: str   # border on 12h+ delayed cards
+    c_heavy_border: str    # border on 3h+ delayed cards
+    surge_bg_start: str    # surge banner gradient start
+    surge_bg_end: str      # surge banner gradient end
+    surge_text: str        # surge banner text
+    surge_border: str      # surge banner left border
 
 
 def get_theme(is_light: bool) -> ThemeParams:
@@ -137,6 +149,13 @@ def get_theme(is_light: bool) -> ThemeParams:
             c_amber="#F59E0B",         # warm gold/amber
             c_red="#EF4444",           # punchy red
             c_purple="#8B5CF6", c_purple_bg="#F3E8FF",
+            # Light-mode delay/surge — pastel backgrounds, readable dark-red text
+            c_severe_border="#FCA5A5",
+            c_heavy_border="#FCD34D",
+            surge_bg_start="#FEE2E2",
+            surge_bg_end="#FECACA",
+            surge_text="#B91C1C",
+            surge_border="#EF4444",
         )
     return ThemeParams(
         bg_main="#0F172A", bg_card="#1E293B", text_main="white", text_muted="#94A3B8",
@@ -144,6 +163,12 @@ def get_theme(is_light: bool) -> ThemeParams:
         gap_active_text="#A7F3D0", modal_bg="rgba(15,23,42,0.92)", fallback_bg="#1E293B",
         c_blue="#60A5FA", c_green="#34D399", c_amber="#F59E0B", c_red="#F87171",
         c_purple="#C4B5FD", c_purple_bg="#1E1B4B",
+        c_severe_border="#7F1D1D",
+        c_heavy_border="#92400E",
+        surge_bg_start="#7F1D1D",
+        surge_bg_end="#991B1B",
+        surge_text="#FCA5A5",
+        surge_border="#EF4444",
     )
 
 
@@ -201,8 +226,8 @@ def get_dynamic_css(t: ThemeParams, font_size_px: int = 16) -> str:
         .gap-progress-fill {{ height: 100%; border-radius: 3px; transition: width 1s linear; }}
 
         .surge-banner {{
-            background: linear-gradient(90deg, #7F1D1D 0%, #991B1B 100%); border-left: 5px solid #EF4444; border-radius: 8px;
-            padding: 7px 14px; margin: 6px 0 8px 0; color: #FCA5A5; font-size: 0.82em; font-weight: 700; display: flex; align-items: center; gap: 8px;
+            background: linear-gradient(90deg, {t.surge_bg_start} 0%, {t.surge_bg_end} 100%); border-left: 5px solid {t.surge_border}; border-radius: 8px;
+            padding: 7px 14px; margin: 6px 0 8px 0; color: {t.surge_text}; font-size: 0.82em; font-weight: 700; display: flex; align-items: center; gap: 8px;
         }}
         .surge-banner .surge-icon {{ font-size: 1.1em; }}
 
@@ -267,9 +292,9 @@ def classify_flight_status(*, is_canceled, is_diverted, is_landed, landed_mins,
         label = "On Ground" if m_left == 0 else f"In {format_hm(m_left)}"
         return FlightStyle(t.c_red, t.c_red, t.bg_card, label, "1.0", "none")
     if delay_hours >= SEVERE_DELAY_HOURS:
-        return FlightStyle("#7F1D1D", t.c_red, t.bg_card, f"🔴 +{format_hm(delay_mins)} Late", "1.0", "none")
+        return FlightStyle(t.c_severe_border, t.c_red, t.bg_card, f"🔴 +{format_hm(delay_mins)} Late", "1.0", "none")
     if delay_hours >= HEAVY_DELAY_HOURS:
-        return FlightStyle("#92400E", t.c_amber, t.bg_card, f"🟠 +{format_hm(delay_mins)} Late", "1.0", "none")
+        return FlightStyle(t.c_heavy_border, t.c_amber, t.bg_card, f"🟠 +{format_hm(delay_mins)} Late", "1.0", "none")
     return FlightStyle(t.c_blue, t.c_blue, t.bg_card, f"In {format_hm(m_left)}", "1.0", "none")
 
 
@@ -279,6 +304,18 @@ def classify_flight_status(*, is_canceled, is_diverted, is_landed, landed_mins,
 def format_hm(total_minutes: int) -> str:
     h, m = divmod(total_minutes, 60)
     return f"{m:02d}m" if h == 0 else f"{h:02d}h {m:02d}m"
+
+
+def get_aircraft_pax_weight(model: str) -> int:
+    """Approximate pax-load weight by aircraft size class. 3 narrowbodies
+    (~450 pax) and 2 widebodies (~900 pax) are very different operational
+    events; weighting by size makes surge alerts reflect real pax volume."""
+    m = (model or "").upper()
+    if any(x in m for x in ("777", "787", "A350", "A380", "A330", "A340", "747")):
+        return 3   # widebody
+    if any(x in m for x in ("737", "A319", "A320", "A321", "A220", "E190", "E195")):
+        return 1   # narrowbody
+    return 0       # regional/small
 
 
 def extract_best_time(node: dict, tz):
@@ -352,7 +389,8 @@ def _fetch_photo_http(reg: str) -> str:
 def _background_fetch_photo(reg: str):
     """Worker run in a daemon thread — fetches a photo and updates the cache.
     Never blocks the UI. Photos appear on the next 60s refresh once cached."""
-    url = _fetch_photo_http(reg)
+    with _photo_semaphore:
+        url = _fetch_photo_http(reg)
     with _photo_lock:
         _photo_pending.discard(reg)
         if url not in ("NOT_FOUND", "TRANSIENT_FAIL"):
@@ -477,7 +515,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.96-debug)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.97)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -542,7 +580,7 @@ def _live_dashboard_impl():
         * <span style="color:{t.c_red};">**On Ground**</span>: Flight is past its ETA but landing not yet confirmed by API (usually taxiing).
         * <span style="color:{t.c_green};">**Just Landed**</span> / **Landed Xm ago**: Plane is down — pax heading to the floor.
         * <span style="color:{t.c_amber};">🟠 **Heavy delay**</span> (3h+) / <span style="color:{t.c_red};">🔴 **Severe delay**</span> (12h+).
-        * <span style="color:{t.c_red};">⚡ **Surge**</span>: 3+ flights AND high pax-load arriving within 15 min — all hands on deck. Widebodies (A350/A380/777/787) count more than narrowbodies.
+        * <span style="color:{t.c_red};">⚡ **Surge**</span>: 3+ flights within 15 min, or 2+ widebodies (A350/A380/777/787) close together — all hands on deck.
         * <span style="color:{t.c_purple};">✈️ **Diverted**</span>: Not arriving at BNE.
 
         **Gap Bars (between flights):**
@@ -1011,7 +1049,11 @@ def _live_dashboard_impl():
                 cluster_idx.append(j)
             else:
                 break
-        if len(cluster) >= SURGE_MIN_FLIGHTS:
+        # Trigger on either raw flight count OR pax-weight: 3+ flights of any
+        # size is operationally busy, and 2 widebodies (weight 6) also qualify
+        # even though it's only 2 flights.
+        cluster_weight = sum(get_aircraft_pax_weight(f.get("ac_text", "")) for f in cluster)
+        if len(cluster) >= SURGE_MIN_FLIGHTS or cluster_weight >= SURGE_MIN_WEIGHT:
             surge_used.update(cluster_idx)
             w_start = cluster[0]["dt"]
             w_end   = cluster[-1]["dt"]
@@ -1264,7 +1306,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.96-debug</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.97</div>",
         unsafe_allow_html=True,
     )
 
