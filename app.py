@@ -477,7 +477,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.95)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.96-debug)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -692,6 +692,11 @@ def _live_dashboard_impl():
             continue
 
         status_raw  = f.get("status", "").lower()
+        # TEMP DEBUG — log full raw object for any flight whose status looks unusual
+        # (diverted/redirected) so we can see what AeroDataBox gives us for a
+        # diverted-in flight. Remove once we've captured one.
+        if "divert" in status_raw or "redirect" in status_raw:
+            log.warning("DIVERT DEBUG [%s]: %s", f.get("number"), f)
         dep_node    = f.get("departure") or {}
         dep_ap      = dep_node.get("airport") or (f.get("movement") or {}).get("airport") or {}
         arr         = f.get("arrival") or f.get("movement") or {}
@@ -814,11 +819,15 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # In both cases we only fire if the API isn't actively saying airborne.
+        # CRITICAL: only fire if the flight has actually departed origin. A flight
+        # that hasn't departed yet but is past its scheduled arrival is DELAYED at
+        # origin, NOT landed (e.g. NZ 205 Sch 08:05 but actually leaving at 09:00 →
+        # don't mark "Landed 15m ago" — it's still on the ground at origin).
         if (not is_lan
                 and t_type in ("scheduled", "revised")
                 and t_diff < -API_LAG_MINS
-                and status_raw not in AIRBORNE_STATUSES):
+                and status_raw not in AIRBORNE_STATUSES
+                and has_departed):
             is_lan = True
 
         is_lan = is_lan and not is_can and not is_div
@@ -1255,7 +1264,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.95</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.96-debug</div>",
         unsafe_allow_html=True,
     )
 
