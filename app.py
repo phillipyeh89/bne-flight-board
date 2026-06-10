@@ -457,8 +457,11 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
 
 
 def _iata_to_callsign(flight_number: str) -> str:
-    prefix = "".join(c for c in flight_number if c.isalpha())[:2].upper()
-    digits = "".join(c for c in flight_number if c.isdigit())
+    # IATA airline codes are the first 2 chars and may contain digits (3K, 5J),
+    # so take a positional prefix rather than filtering alpha chars only.
+    compact = flight_number.replace(" ", "").upper()
+    prefix, rest = compact[:2], compact[2:]
+    digits = "".join(c for c in rest if c.isdigit())
     return f"{AIRLINE_ICAO.get(prefix, prefix)}{digits}"
 
 
@@ -515,7 +518,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.97)
+#  4. UI SETUP & FRAGMENT EXECUTION (V11.98)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1220,13 +1223,17 @@ def _live_dashboard_impl():
             status_col_text  = pf["status_text"]
             status_col_color = pf["status_color"]
 
-        # Build the Flightradar24 deep link using the IATA flight number in the
-        # /data/flights/ format (lowercase, no spaces). This points to the flight's
-        # data page which works whether or not the flight is currently airborne.
-        # The old /<callsign> format only worked for live flights and frequently
-        # resolved to the wrong aircraft when callsigns clashed or weren't airborne.
-        fr24_flight_id = pf['num'].replace(" ", "").lower()
-        fr24_url       = f"https://www.flightradar24.com/data/flights/{fr24_flight_id}"
+        # FR24 link — hybrid strategy:
+        # • Flights with radar data (Est/Act = airborne or just landed) → callsign
+        #   URL (e.g. /SIA265) which opens the LIVE MAP view showing the aircraft.
+        # • Sch-only flights → /data/flights/ page; the callsign URL fails or
+        #   resolves to the wrong aircraft when the flight isn't airborne (the
+        #   original bug that made us abandon callsign URLs entirely).
+        if pf["time_type"] in ("revised", "actual"):
+            fr24_url = f"https://www.flightradar24.com/{_iata_to_callsign(pf['num'])}"
+        else:
+            fr24_flight_id = pf['num'].replace(" ", "").lower()
+            fr24_url       = f"https://www.flightradar24.com/data/flights/{fr24_flight_id}"
         flight_num_html = (
             f'<a href="{fr24_url}" target="_blank" rel="noopener" '
             f'style="color:inherit; text-decoration:none; border-bottom:1px dotted {t.text_muted};">'
@@ -1306,7 +1313,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.97</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.98</div>",
         unsafe_allow_html=True,
     )
 
