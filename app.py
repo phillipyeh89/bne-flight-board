@@ -45,6 +45,205 @@ CITY_MAP = {
     "Guangzhou Baiyun": "Guangzhou",
 }
 
+# ── i18n ──────────────────────────────────────────────────────────────────────
+# UI languages for the Lotte team: English, Traditional Chinese (Taiwan),
+# Korean, Japanese. {x}/{n} are format placeholders.
+LANG_OPTIONS = {"en": "English", "zh": "繁體中文", "ko": "한국어", "ja": "日本語"}
+
+TRANSLATIONS = {
+    "en": {
+        "just_landed":   "Just Landed",
+        "landed_ago":    "Landed {x} ago",
+        "in_time":       "In {x}",
+        "on_ground":     "On Ground",
+        "no_update":     "NO UPDATE",
+        "canceled":      "CANCELED",
+        "diverted":      "✈️ DIVERTED",
+        "check_board":   "⚠️ Check Board",
+        "late":          "+{x} Late",
+        "incoming":      "Incoming",
+        "next_gap":      "Next Gap",
+        "busiest":       "Busiest",
+        "now_fmt":       "NOW ({m}m)",
+        "gate":          "GATE",
+        "active":        "🟢 ACTIVE",
+        "gap_fmt":       "{x} GAP",
+        "before_next":   "{x} BEFORE NEXT FLIGHT",
+        "ends":          "Ends {x}",
+        "approx":        "approx",
+        "earlier":       "Earlier Arrivals",
+        "updated_ago":   "Updated {x} ago",
+        "just_now":      "Updated just now",
+        "min_ago":       "{n} min ago",
+        "lag_note":      "(+~10m lag)",
+        "lag_tip":       "AeroDataBox data typically lags real-time by 5-15 min",
+        "next_refresh":  "Next refresh: ",
+        "loading":       "Loading data...",
+        "text_size":     "Text Size",
+        "theme":         "Theme",
+        "language":      "Language",
+        "dark":          "🌙 Dark",
+        "light":         "☀️ Light",
+        "quiet":         "🌙 Board is sleeping to save API quota. Wakes up at {h}:00 AEST.",
+        "stale_title":   "STALE DATA — last update was {n} min ago",
+        "stale_body":    "API refresh is failing. Treat all times below with caution and check the airport FIDS board.",
+        "diverted_hdr":  "✈️ Diverted — not arriving at BNE",
+        "canceled_hdr":  "❌ Canceled",
+        "ss_title":      "📋 Shift Summary (last {h}h)",
+        "ss_landed":     "✅ {n} flights landed",
+        "ss_late":       "🟠 {n} arrived 1h+ late",
+        "ss_canceled":   "❌ {n} canceled",
+        "ss_diverted":   "✈️ {n} diverted",
+        "ss_quiet":      "Nothing landed in the window yet.",
+    },
+    "zh": {
+        "just_landed":   "剛降落",
+        "landed_ago":    "{x}前降落",
+        "in_time":       "還有 {x}",
+        "on_ground":     "已落地滑行中",
+        "no_update":     "無更新",
+        "canceled":      "已取消",
+        "diverted":      "✈️ 轉降他場",
+        "check_board":   "⚠️ 請看機場看板",
+        "late":          "誤點 +{x}",
+        "incoming":      "進港中",
+        "next_gap":      "下個空檔",
+        "busiest":       "最忙時段",
+        "now_fmt":       "現在（{m}分）",
+        "gate":          "登機門",
+        "active":        "🟢 進行中",
+        "gap_fmt":       "{x} 空檔",
+        "before_next":   "距下一班 {x}",
+        "ends":          "{x} 結束",
+        "approx":        "約",
+        "earlier":       "較早抵達",
+        "updated_ago":   "更新於 {x}前",
+        "just_now":      "剛剛更新",
+        "min_ago":       "{n} 分鐘",
+        "lag_note":      "（+約10分延遲）",
+        "lag_tip":       "AeroDataBox 資料通常比即時慢 5-15 分鐘",
+        "next_refresh":  "下次更新：",
+        "loading":       "載入中...",
+        "text_size":     "字體大小",
+        "theme":         "主題",
+        "language":      "語言",
+        "dark":          "🌙 深色",
+        "light":         "☀️ 淺色",
+        "quiet":         "🌙 看板休眠中以節省 API 額度，將於 AEST {h}:00 喚醒。",
+        "stale_title":   "資料過期 — 最後更新為 {n} 分鐘前",
+        "stale_body":    "API 更新失敗中。以下時間僅供參考，請以機場看板為準。",
+        "diverted_hdr":  "✈️ 轉降 — 不會抵達 BNE",
+        "canceled_hdr":  "❌ 已取消",
+        "ss_title":      "📋 班次摘要（過去 {h} 小時）",
+        "ss_landed":     "✅ 已降落 {n} 班",
+        "ss_late":       "🟠 誤點 1 小時以上 {n} 班",
+        "ss_canceled":   "❌ 取消 {n} 班",
+        "ss_diverted":   "✈️ 轉降 {n} 班",
+        "ss_quiet":      "目前時段內尚無降落航班。",
+    },
+    "ko": {
+        "just_landed":   "방금 착륙",
+        "landed_ago":    "{x} 전 착륙",
+        "in_time":       "{x} 후",
+        "on_ground":     "지상 이동 중",
+        "no_update":     "업데이트 없음",
+        "canceled":      "취소됨",
+        "diverted":      "✈️ 회항",
+        "check_board":   "⚠️ 안내판 확인",
+        "late":          "+{x} 지연",
+        "incoming":      "도착 예정",
+        "next_gap":      "다음 공백",
+        "busiest":       "최대 혼잡",
+        "now_fmt":       "지금 ({m}분)",
+        "gate":          "게이트",
+        "active":        "🟢 진행 중",
+        "gap_fmt":       "{x} 공백",
+        "before_next":   "다음 항공편까지 {x}",
+        "ends":          "{x} 종료",
+        "approx":        "약",
+        "earlier":       "이전 도착",
+        "updated_ago":   "{x} 전 업데이트",
+        "just_now":      "방금 업데이트",
+        "min_ago":       "{n}분",
+        "lag_note":      "(+약 10분 지연)",
+        "lag_tip":       "AeroDataBox 데이터는 보통 실시간보다 5-15분 늦습니다",
+        "next_refresh":  "다음 새로고침: ",
+        "loading":       "로딩 중...",
+        "text_size":     "글자 크기",
+        "theme":         "테마",
+        "language":      "언어",
+        "dark":          "🌙 다크",
+        "light":         "☀️ 라이트",
+        "quiet":         "🌙 API 절약을 위해 대기 모드입니다. AEST {h}:00에 다시 시작됩니다.",
+        "stale_title":   "오래된 데이터 — 마지막 업데이트 {n}분 전",
+        "stale_body":    "API 갱신이 실패하고 있습니다. 아래 시간은 참고용이며 공항 안내판을 확인하세요.",
+        "diverted_hdr":  "✈️ 회항 — BNE에 도착하지 않음",
+        "canceled_hdr":  "❌ 취소됨",
+        "ss_title":      "📋 근무 요약 (지난 {h}시간)",
+        "ss_landed":     "✅ {n}편 착륙",
+        "ss_late":       "🟠 1시간 이상 지연 {n}편",
+        "ss_canceled":   "❌ 취소 {n}편",
+        "ss_diverted":   "✈️ 회항 {n}편",
+        "ss_quiet":      "아직 착륙한 항공편이 없습니다.",
+    },
+    "ja": {
+        "just_landed":   "着陸直後",
+        "landed_ago":    "{x}前に着陸",
+        "in_time":       "あと{x}",
+        "on_ground":     "地上走行中",
+        "no_update":     "更新なし",
+        "canceled":      "欠航",
+        "diverted":      "✈️ ダイバート",
+        "check_board":   "⚠️ 案内板確認",
+        "late":          "+{x} 遅延",
+        "incoming":      "到着予定",
+        "next_gap":      "次の空き時間",
+        "busiest":       "最混雑",
+        "now_fmt":       "現在（{m}分）",
+        "gate":          "ゲート",
+        "active":        "🟢 進行中",
+        "gap_fmt":       "{x} 空き",
+        "before_next":   "次の便まで {x}",
+        "ends":          "{x} 終了",
+        "approx":        "約",
+        "earlier":       "以前の到着",
+        "updated_ago":   "{x}前に更新",
+        "just_now":      "たった今更新",
+        "min_ago":       "{n}分",
+        "lag_note":      "（+約10分遅延）",
+        "lag_tip":       "AeroDataBoxのデータは通常リアルタイムより5〜15分遅れます",
+        "next_refresh":  "次の更新: ",
+        "loading":       "読み込み中...",
+        "text_size":     "文字サイズ",
+        "theme":         "テーマ",
+        "language":      "言語",
+        "dark":          "🌙 ダーク",
+        "light":         "☀️ ライト",
+        "quiet":         "🌙 API節約のためスリープ中。AEST {h}:00に再開します。",
+        "stale_title":   "古いデータ — 最終更新は{n}分前",
+        "stale_body":    "API更新が失敗しています。以下の時刻は参考程度とし、空港の案内板をご確認ください。",
+        "diverted_hdr":  "✈️ ダイバート — BNEには到着しません",
+        "canceled_hdr":  "❌ 欠航",
+        "ss_title":      "📋 シフトサマリー（過去{h}時間）",
+        "ss_landed":     "✅ {n}便が着陸",
+        "ss_late":       "🟠 1時間以上の遅延 {n}便",
+        "ss_canceled":   "❌ 欠航 {n}便",
+        "ss_diverted":   "✈️ ダイバート {n}便",
+        "ss_quiet":      "この時間帯にはまだ着陸便がありません。",
+    },
+}
+
+
+def L(key: str, **kw) -> str:
+    """Translate a UI string into the currently selected language. Falls back
+    to English if the key is missing from the active language pack."""
+    lang = st.session_state.get("lang", "en")
+    template = TRANSLATIONS.get(lang, TRANSLATIONS["en"]).get(key) or TRANSLATIONS["en"].get(key, key)
+    try:
+        return template.format(**kw) if kw else template
+    except (KeyError, IndexError):
+        return template
+
 # ── OpenSky Network ──────────────────────────────────────────────────────────
 YBBN_LAT, YBBN_LON = -27.3842, 153.1175
 # Broad box covering NZ, Pacific, SE Asia approach corridors for YBBN arrivals
@@ -261,14 +460,14 @@ def classify_flight_status(*, is_canceled, is_diverted, is_landed, landed_mins,
     if is_canceled:
         archived = (now - s_dt).total_seconds() / 60 > 15
         if archived:
-            return FlightStyle(t.border_muted, t.text_muted, t.bg_main, "CANCELED", "0.5", "grayscale(100%)")
-        return FlightStyle(t.c_red, t.c_red, t.bg_card, "CANCELED", "0.5", "grayscale(100%)")
+            return FlightStyle(t.border_muted, t.text_muted, t.bg_main, L("canceled"), "0.5", "grayscale(100%)")
+        return FlightStyle(t.c_red, t.c_red, t.bg_card, L("canceled"), "0.5", "grayscale(100%)")
 
     if is_diverted:
-        return FlightStyle(t.c_purple, t.c_purple, t.c_purple_bg, "✈️ DIVERTED", "0.8", "none")
+        return FlightStyle(t.c_purple, t.c_purple, t.c_purple_bg, L("diverted"), "0.8", "none")
 
     if is_landed:
-        landed_label = "Just Landed" if landed_mins == 0 else f"Landed {format_hm(landed_mins)} ago"
+        landed_label = L("just_landed") if landed_mins == 0 else L("landed_ago", x=format_hm(landed_mins))
         # Surface heavy delay context even after landing — operationally we
         # still care that a flight arrived 2+ hours late (impacts pax flow,
         # connection misses, etc.) rather than just showing "Landed".
@@ -287,15 +486,15 @@ def classify_flight_status(*, is_canceled, is_diverted, is_landed, landed_mins,
     delay_mins = max(0, int(round(delay_hours * 60)))
 
     if t_type == "scheduled" and t_diff <= 0:
-        return FlightStyle(t.c_amber, t.c_amber, t.bg_card, "NO UPDATE", "1.0", "none")
+        return FlightStyle(t.c_amber, t.c_amber, t.bg_card, L("no_update"), "1.0", "none")
     if m_left < IMMINENT_MINS:
-        label = "On Ground" if m_left == 0 else f"In {format_hm(m_left)}"
+        label = L("on_ground") if m_left == 0 else L("in_time", x=format_hm(m_left))
         return FlightStyle(t.c_red, t.c_red, t.bg_card, label, "1.0", "none")
     if delay_hours >= SEVERE_DELAY_HOURS:
-        return FlightStyle(t.c_severe_border, t.c_red, t.bg_card, f"🔴 +{format_hm(delay_mins)} Late", "1.0", "none")
+        return FlightStyle(t.c_severe_border, t.c_red, t.bg_card, "🔴 " + L("late", x=format_hm(delay_mins)), "1.0", "none")
     if delay_hours >= HEAVY_DELAY_HOURS:
-        return FlightStyle(t.c_heavy_border, t.c_amber, t.bg_card, f"🟠 +{format_hm(delay_mins)} Late", "1.0", "none")
-    return FlightStyle(t.c_blue, t.c_blue, t.bg_card, f"In {format_hm(m_left)}", "1.0", "none")
+        return FlightStyle(t.c_heavy_border, t.c_amber, t.bg_card, "🟠 " + L("late", x=format_hm(delay_mins)), "1.0", "none")
+    return FlightStyle(t.c_blue, t.c_blue, t.bg_card, L("in_time", x=format_hm(m_left)), "1.0", "none")
 
 
 # ─────────────────────────────────────────────
@@ -518,7 +717,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V11.98)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.0)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -526,6 +725,7 @@ if "api_error"    not in st.session_state: st.session_state.api_error    = None
 if "theme_light"  not in st.session_state: st.session_state.theme_light  = False
 if "font_size"    not in st.session_state: st.session_state.font_size    = 16  # base px — 14 small / 16 normal / 19 large / 22 xl
 if "gate_history" not in st.session_state: st.session_state.gate_history = {}  # flight_num -> last seen gate, for change detection
+if "lang"         not in st.session_state: st.session_state.lang         = "en"  # en / zh / ko / ja
 
 
 # FIX 5 — use UI_REFRESH_SEC constant instead of hardcoded "60s"
@@ -545,7 +745,7 @@ def _live_dashboard_impl():
         st.subheader("✈️ Arrivals")
     with c_ctrl:
         with st.popover("⚙️", use_container_width=True):
-            st.markdown("**Text Size**")
+            st.markdown(f"**{L('text_size')}**")
             cA, cB = st.columns(2)
             with cA:
                 if st.button("A−", help="Smaller", use_container_width=True, key="font_smaller"):
@@ -555,10 +755,21 @@ def _live_dashboard_impl():
                 if st.button("A+", help="Larger", use_container_width=True, key="font_larger"):
                     st.session_state.font_size = min(24, st.session_state.font_size + 3)
                     st.rerun()
-            st.markdown("**Theme**")
-            toggle_icon = "🌙 Dark" if st.session_state.theme_light else "☀️ Light"
+            st.markdown(f"**{L('theme')}**")
+            toggle_icon = L("dark") if st.session_state.theme_light else L("light")
             if st.button(toggle_icon, use_container_width=True, key="theme_toggle"):
                 st.session_state.theme_light = not st.session_state.theme_light
+                st.rerun()
+            st.markdown(f"**{L('language')}**")
+            _lang_keys = list(LANG_OPTIONS.keys())
+            _sel = st.selectbox(
+                L("language"), _lang_keys,
+                index=_lang_keys.index(st.session_state.lang),
+                format_func=lambda k: LANG_OPTIONS[k],
+                key="lang_select", label_visibility="collapsed",
+            )
+            if _sel != st.session_state.lang:
+                st.session_state.lang = _sel
                 st.rerun()
     with c3:
         st.markdown(
@@ -568,51 +779,140 @@ def _live_dashboard_impl():
         )
         api_info_placeholder = st.empty()
 
+    _lang = st.session_state.lang
     with st.expander("ℹ️ Guide"):
-        st.markdown(f"""
-        **Why use this app?**
-        Built to help our team manage shifts — predict peak traffic, coordinate floor tasks, and plan break windows with confidence.
+        if _lang == "zh":
+            st.markdown(f"""
+            **時間標籤：**
+            * <span class="mono" style="color:{t.c_blue};font-weight:bold;">Act</span>：**實際**降落時間已確認，旅客即將抵達櫃檯。
+            * <span class="mono" style="color:{t.text_faded};font-weight:bold;">Est</span>：雷達**預估**抵達時間，已提前約 10 分鐘校正以貼近實際降落。
+            * <span class="mono" style="color:{t.text_muted};font-weight:bold;">Sch</span>：僅有**表定**時間，尚無雷達資料。
 
-        **How to read the times:**
-        * <span class="mono" style="color:{t.c_blue};font-weight:bold;">Act</span>: **Actual** landing time confirmed. Pax are heading to the floor.
-        * <span class="mono" style="color:{t.text_faded};font-weight:bold;">Est</span>: **Estimated** arrival from live radar, adjusted ~9 min earlier to match observed real arrivals.
-        * <span class="mono" style="color:{t.text_muted};font-weight:bold;">Sch</span>: **Scheduled** only — no radar data yet.
+            **狀態指標：**
+            * <span style="color:{t.c_amber};">⚠️ **請看機場看板**</span>：無雷達資料，請以機場 FIDS 看板為準。
+            * <span style="color:{t.c_red};">**已落地滑行中**</span>：已過預計時間但 API 尚未確認降落（通常在滑行）。
+            * <span style="color:{t.c_green};">**剛降落**</span> / **X前降落**：飛機已落地。
+            * 🟠 **重度誤點**（3小時+）/ 🔴 **嚴重誤點**（12小時+）。
+            * <span style="color:{t.c_red};">⚡ **高峰**</span>：15 分鐘內 3 班以上、或 2 架以上廣體機（A350/A380/777/787）接連抵達。
+            * <span style="color:{t.c_purple};">✈️ **轉降他場**</span>：不會抵達 BNE。
 
-        **Status Indicators:**
-        * <span style="color:{t.c_amber};">⚠️ **Check Board**</span>: No live radar — refer to the airport FIDS boards.
-        * <span style="color:{t.c_red};">**On Ground**</span>: Flight is past its ETA but landing not yet confirmed by API (usually taxiing).
-        * <span style="color:{t.c_green};">**Just Landed**</span> / **Landed Xm ago**: Plane is down — pax heading to the floor.
-        * <span style="color:{t.c_amber};">🟠 **Heavy delay**</span> (3h+) / <span style="color:{t.c_red};">🔴 **Severe delay**</span> (12h+).
-        * <span style="color:{t.c_red};">⚡ **Surge**</span>: 3+ flights within 15 min, or 2+ widebodies (A350/A380/777/787) close together — all hands on deck.
-        * <span style="color:{t.c_purple};">✈️ **Diverted**</span>: Not arriving at BNE.
+            **空檔條（航班之間）：** 🟢 進行中 = 現在就是休息空檔，倒數顯示剩餘時間；🔄 = 未來的空檔；「約」表示下一班僅有表定時間，結束時間可能變動。
 
-        **Gap Bars (between flights):**
-        * <span style="color:{t.c_green};">🟢 ACTIVE</span>: A break window is happening right now — countdown shows time left.
-        * 🔄 Upcoming gap — shows the future break window for planning.
-        * `(HH:MM, approx)` means the gap end is based on a Sch-only flight — actual end may shift.
+            **較早抵達：** 60 分鐘內降落的航班以綠色顯示在上方，更早的移到「較早抵達」分隔線之下淡出。
 
-        **Earlier Arrivals:**
-        Flights landed within the last 60 min stay near the top in green. Older landings move below the "Earlier Arrivals" divider and fade out.
+            **航班號可點擊：** 點擊可開啟 Flightradar24（已安裝 App 會直接開啟）。
 
-        **Flight Numbers are Clickable:**
-        Tap any flight number to open it in Flightradar24 (opens the FR24 app if installed).
+            **頂部資訊：** 更新時間（資料抓取時間）、（+約10分延遲）= AeroDataBox 本身的延遲、下次更新倒數（每 16 分鐘）。
 
-        **Header Info:**
-        * **Updated X min ago**: When data was last fetched from AeroDataBox.
-        * **(+~15m lag)**: AeroDataBox data is inherently ~15 minutes behind real-time.
-        * **Next refresh**: Live countdown to the next data fetch (every 16 min).
+            **休眠時段（01:00–03:00 AEST）：** 看板夜間休眠以節省 API 額度，04:00 早班開始前自動喚醒。
 
-        **Quiet Hours (01:00–03:00 AEST):**
-        The board sleeps overnight to save API quota — wakes up automatically before 04:00 shift start.
+            **設定（⚙️）：** 調整字體大小、深淺色主題、語言。
 
-        **Settings (⚙️):**
-        Tap the gear icon to adjust text size or switch between light/dark themes.
+            *由 Phillip Yeh 開發，支援 BNE Lotte 團隊。*
+            """, unsafe_allow_html=True)
+        elif _lang == "ko":
+            st.markdown(f"""
+            **시간 태그:**
+            * <span class="mono" style="color:{t.c_blue};font-weight:bold;">Act</span>: **실제** 착륙 시간 확정 — 승객이 곧 도착합니다.
+            * <span class="mono" style="color:{t.text_faded};font-weight:bold;">Est</span>: 레이더 기반 **예상** 도착 시간 (실제 착륙에 맞춰 약 10분 앞당겨 보정됨).
+            * <span class="mono" style="color:{t.text_muted};font-weight:bold;">Sch</span>: **예정** 시간만 있음 — 레이더 데이터 없음.
 
-        **Data Sources:**
-        Primary: AeroDataBox (~15 min lag). OpenSky live ADS-B was used as a secondary radar source but is currently disabled (Streamlit hosting can't reach it reliably).
+            **상태 표시:**
+            * <span style="color:{t.c_amber};">⚠️ **안내판 확인**</span>: 레이더 데이터 없음 — 공항 FIDS 안내판을 확인하세요.
+            * <span style="color:{t.c_red};">**지상 이동 중**</span>: 예정 시간이 지났지만 API에서 착륙 미확인 (보통 활주로 이동 중).
+            * <span style="color:{t.c_green};">**방금 착륙**</span> / **X 전 착륙**: 착륙 완료.
+            * 🟠 **심한 지연** (3시간+) / 🔴 **매우 심한 지연** (12시간+).
+            * <span style="color:{t.c_red};">⚡ **혼잡 경보**</span>: 15분 내 3편 이상 또는 대형기 (A350/A380/777/787) 2편 이상 연속 도착.
+            * <span style="color:{t.c_purple};">✈️ **회항**</span>: BNE에 도착하지 않음.
 
-        *Developed by Phillip Yeh to support the BNE Lotte Team.*
-        """, unsafe_allow_html=True)
+            **공백 바 (항공편 사이):** 🟢 진행 중 = 지금이 휴식 시간, 카운트다운은 남은 시간; 🔄 = 예정된 공백; "약"은 다음 편이 예정 시간만 있어 변동 가능함을 의미.
+
+            **이전 도착:** 60분 이내 착륙 편은 상단에 녹색으로 표시, 더 오래된 편은 "이전 도착" 구분선 아래로 이동.
+
+            **항공편 번호 클릭 가능:** Flightradar24가 열립니다 (앱 설치 시 앱으로).
+
+            **상단 정보:** 업데이트 시간, (+약 10분 지연) = AeroDataBox 자체 지연, 다음 새로고침 카운트다운 (16분마다).
+
+            **대기 시간 (01:00–03:00 AEST):** API 절약을 위해 야간 대기 모드, 04:00 근무 시작 전 자동 재개.
+
+            **설정 (⚙️):** 글자 크기, 다크/라이트 테마, 언어 변경.
+
+            *BNE Lotte 팀을 위해 Phillip Yeh가 개발.*
+            """, unsafe_allow_html=True)
+        elif _lang == "ja":
+            st.markdown(f"""
+            **時刻タグ:**
+            * <span class="mono" style="color:{t.c_blue};font-weight:bold;">Act</span>: **実際**の着陸時刻が確定 — 乗客がまもなく到着します。
+            * <span class="mono" style="color:{t.text_faded};font-weight:bold;">Est</span>: レーダーによる**推定**到着時刻（実際の着陸に合わせ約10分早めに補正済み）。
+            * <span class="mono" style="color:{t.text_muted};font-weight:bold;">Sch</span>: **定刻**のみ — レーダーデータなし。
+
+            **ステータス表示:**
+            * <span style="color:{t.c_amber};">⚠️ **案内板確認**</span>: レーダーデータなし — 空港のFIDS案内板をご確認ください。
+            * <span style="color:{t.c_red};">**地上走行中**</span>: 予定時刻を過ぎていますがAPIで着陸未確認（通常はタキシング中）。
+            * <span style="color:{t.c_green};">**着陸直後**</span> / **X前に着陸**: 着陸済み。
+            * 🟠 **大幅遅延**（3時間+）/ 🔴 **深刻な遅延**（12時間+）。
+            * <span style="color:{t.c_red};">⚡ **ピーク**</span>: 15分以内に3便以上、またはワイドボディ機（A350/A380/777/787）2機以上が連続到着。
+            * <span style="color:{t.c_purple};">✈️ **ダイバート**</span>: BNEには到着しません。
+
+            **空きバー（便と便の間）:** 🟢 進行中 = 今が休憩時間、カウントダウンは残り時間; 🔄 = 今後の空き; 「約」は次便が定刻のみのため終了時刻が変動する可能性を示します。
+
+            **以前の到着:** 60分以内に着陸した便は上部に緑色で表示、それより古い便は「以前の到着」の区切り線の下へ移動。
+
+            **便名はクリック可能:** Flightradar24が開きます（アプリがあればアプリで）。
+
+            **ヘッダー情報:** 更新時刻、（+約10分遅延）= AeroDataBox自体の遅延、次の更新カウントダウン（16分ごと）。
+
+            **スリープ時間（01:00–03:00 AEST）:** API節約のため夜間スリープ、04:00のシフト開始前に自動再開。
+
+            **設定（⚙️）:** 文字サイズ、ダーク/ライトテーマ、言語の変更。
+
+            *BNE Lotteチームのため Phillip Yeh が開発。*
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            **Why use this app?**
+            Built to help our team manage shifts — predict peak traffic, coordinate floor tasks, and plan break windows with confidence.
+
+            **How to read the times:**
+            * <span class="mono" style="color:{t.c_blue};font-weight:bold;">Act</span>: **Actual** landing time confirmed. Pax are heading to the floor.
+            * <span class="mono" style="color:{t.text_faded};font-weight:bold;">Est</span>: **Estimated** arrival from live radar, adjusted ~10 min earlier to match observed real arrivals.
+            * <span class="mono" style="color:{t.text_muted};font-weight:bold;">Sch</span>: **Scheduled** only — no radar data yet.
+
+            **Status Indicators:**
+            * <span style="color:{t.c_amber};">⚠️ **Check Board**</span>: No live radar — refer to the airport FIDS boards.
+            * <span style="color:{t.c_red};">**On Ground**</span>: Flight is past its ETA but landing not yet confirmed by API (usually taxiing).
+            * <span style="color:{t.c_green};">**Just Landed**</span> / **Landed Xm ago**: Plane is down — pax heading to the floor.
+            * <span style="color:{t.c_amber};">🟠 **Heavy delay**</span> (3h+) / <span style="color:{t.c_red};">🔴 **Severe delay**</span> (12h+).
+            * <span style="color:{t.c_red};">⚡ **Surge**</span>: 3+ flights within 15 min, or 2+ widebodies (A350/A380/777/787) close together — all hands on deck.
+            * <span style="color:{t.c_purple};">✈️ **Diverted**</span>: Not arriving at BNE.
+
+            **Gap Bars (between flights):**
+            * <span style="color:{t.c_green};">🟢 ACTIVE</span>: A break window is happening right now — countdown shows time left.
+            * 🔄 Upcoming gap — shows the future break window for planning.
+            * `(HH:MM, approx)` means the gap end is based on a Sch-only flight — actual end may shift.
+
+            **Earlier Arrivals:**
+            Flights landed within the last 60 min stay near the top in green. Older landings move below the "Earlier Arrivals" divider and fade out.
+
+            **Flight Numbers are Clickable:**
+            Tap any flight number to open it in Flightradar24 (opens the FR24 app if installed; live-map view for airborne flights).
+
+            **Header Info:**
+            * **Updated X min ago**: When data was last fetched from AeroDataBox.
+            * **(+~10m lag)**: AeroDataBox data typically runs ~10 minutes behind real-time.
+            * **Next refresh**: Live countdown to the next data fetch (every 16 min).
+
+            **Quiet Hours (01:00–03:00 AEST):**
+            The board sleeps overnight to save API quota — wakes up automatically before 04:00 shift start.
+
+            **Settings (⚙️):**
+            Tap the gear icon to adjust text size, switch themes, or change language (English / 繁體中文 / 한국어 / 日本語).
+
+            **Data Sources:**
+            Primary: AeroDataBox. OpenSky live ADS-B was used as a secondary radar source but is currently disabled (Streamlit hosting can't reach it reliably).
+
+            *Developed by Phillip Yeh to support the BNE Lotte Team.*
+            """, unsafe_allow_html=True)
 
     # ── Fetch ──────────────────────────────────────────────────────────────────
     _epoch     = datetime(2000, 1, 1, tzinfo=aest)
@@ -627,7 +927,7 @@ def _live_dashboard_impl():
     # by not refreshing during dead hours when nobody is using the board anyway.
     in_quiet_hours = QUIET_HOURS_START_H <= now_aest.hour < QUIET_HOURS_END_H
     if in_quiet_hours:
-        st.info(f"🌙 Board is sleeping to save API quota. Wakes up at {QUIET_HOURS_END_H:02d}:00 AEST.")
+        st.info(L("quiet", h=f"{QUIET_HOURS_END_H:02d}"))
         return
 
     raw_flights = fetch_flight_data(anchor, from_time, to_time)
@@ -655,23 +955,21 @@ def _live_dashboard_impl():
         age_secs = max(0, int((now_aest - api_t).total_seconds()))
         age_mins = age_secs // 60
         if age_mins == 0:
-            age_txt = "just now"
-        elif age_mins == 1:
-            age_txt = "1 min ago"
+            updated_txt = L("just_now")
         else:
-            age_txt = f"{age_mins} min ago"
+            updated_txt = L("updated_ago", x=L("min_ago", n=age_mins))
 
         api_txt = (
-            f'<span style="color:{t.text_faded};">Updated {age_txt}</span>'
-            f' <span style="color:{t.c_amber}; opacity:0.8;" title="AeroDataBox data typically lags real-time by 5-15 min">'
-            f'(+~10m lag)</span><br>'
-            f'<span style="color:{t.text_faded};">Next refresh: </span>'
+            f'<span style="color:{t.text_faded};">{updated_txt}</span>'
+            f' <span style="color:{t.c_amber}; opacity:0.8;" title="{L("lag_tip")}">'
+            f'{L("lag_note")}</span><br>'
+            f'<span style="color:{t.text_faded};">{L("next_refresh")}</span>'
             f'<span id="bne-refresh-countdown" '
             f'data-next="{int(next_refresh_dt.timestamp())}" '
             f'style="color:{t.c_green};">{refresh_txt}</span>'
         )
     else:
-        api_txt = f'<span style="color:{t.text_faded};">Loading data...</span>'
+        api_txt = f'<span style="color:{t.text_faded};">{L("loading")}</span>'
     api_info_placeholder.markdown(
         f'<div style="font-size:0.7em;color:{t.text_faded};text-align:right; line-height:1.5;">{api_txt}</div>',
         unsafe_allow_html=True,
@@ -860,15 +1158,20 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # CRITICAL: only fire if the flight has actually departed origin. A flight
-        # that hasn't departed yet but is past its scheduled arrival is DELAYED at
-        # origin, NOT landed (e.g. NZ 205 Sch 08:05 but actually leaving at 09:00 →
-        # don't mark "Landed 15m ago" — it's still on the ground at origin).
+        # Split by data quality (V12.0 fix for the stuck-"On Ground" bug):
+        # • "revised" (radar Est exists) → the flight is genuinely being tracked
+        #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
+        #   flips status to airborne, so requiring has_departed left genuinely
+        #   landed flights stuck "On Ground" forever (EK434/KE407/QF52 on V11.98).
+        #   Fire on elapsed time alone.
+        # • "scheduled" (no radar) → could be delayed at origin (NZ 205 case:
+        #   Sch 08:05 but actually departing 09:00) → require departure
+        #   confirmation before assuming it landed.
         if (not is_lan
-                and t_type in ("scheduled", "revised")
                 and t_diff < -API_LAG_MINS
                 and status_raw not in AIRBORNE_STATUSES
-                and has_departed):
+                and (t_type == "revised"
+                     or (t_type == "scheduled" and has_departed))):
             is_lan = True
 
         is_lan = is_lan and not is_can and not is_div
@@ -909,6 +1212,7 @@ def _live_dashboard_impl():
             "card_opacity": style.card_opacity,
             "img_filter":   style.img_filter,
             "landed_mins":  landed_mins,
+            "delay_hours":  delay,
         })
 
     # ── Gate Change Detection ─────────────────────────────────────────────────
@@ -978,9 +1282,9 @@ def _live_dashboard_impl():
                          "remaining": gap_remaining, "active": is_active})
 
         cls = "gap-bar gap-active" if is_active else "gap-bar"
-        lbl = "🟢 ACTIVE" if is_active else "🔄"
+        lbl = L("active") if is_active else "🔄"
 
-        end_str = (f"{t2_safe.strftime('%H:%M')}, approx" if next_is_sch
+        end_str = (f"{t2_safe.strftime('%H:%M')}, {L('approx')}" if next_is_sch
                    else t2_safe.strftime("%H:%M"))
 
         if is_virtual:
@@ -1000,9 +1304,9 @@ def _live_dashboard_impl():
                 "is_gap":   True,
                 "time_key": t1.timestamp() + 1,
                 "html": (
-                    f'<div class="{cls}">{lbl} {format_hm(gap_remaining)} BEFORE NEXT FLIGHT '
+                    f'<div class="{cls}">{lbl} {L("before_next", x=format_hm(gap_remaining))} '
                     f'<span style="opacity:0.6; font-weight:400; margin-left:8px;">'
-                    f'(Ends {end_str})</span>'
+                    f'({L("ends", x=end_str)})</span>'
                     f'{virtual_progress_html}</div>'
                 ),
             })
@@ -1025,7 +1329,7 @@ def _live_dashboard_impl():
             "is_gap":   True,
             "time_key": t1.timestamp() + 1,
             "html": (
-                f'<div class="{cls}">{lbl} {format_hm(display_min)} GAP '
+                f'<div class="{cls}">{lbl} {L("gap_fmt", x=format_hm(display_min))} '
                 f'<span style="opacity:0.6; font-weight:400; margin-left:8px;">'
                 f'({window_start.strftime("%H:%M")}–{end_str})</span>'
                 f'{progress_html}</div>'
@@ -1079,7 +1383,7 @@ def _live_dashboard_impl():
     for g in sorted(gap_list, key=lambda x: x["t1"]):
         if g["t2"] > now_aest:
             if g["active"]:
-                next_gap_txt = f'<span style="color:{t.c_green};">NOW ({g["remaining"]}m)</span>'
+                next_gap_txt = f'<span style="color:{t.c_green};">{L("now_fmt", m=g["remaining"])}</span>'
             else:
                 next_gap_txt = f'{g["t1"].strftime("%H:%M")} ({g["total"]}m)'
             break
@@ -1099,6 +1403,33 @@ def _live_dashboard_impl():
         if best_count >= 2 and best_start:
             busiest_txt = f'{best_start.strftime("%H:%M")}–{best_end.strftime("%H:%M")} ({best_count})'
 
+    # ── Shift Summary (handover aid) ──────────────────────────────────────────
+    # Quick recap of the lookback window for shift handover: how many landed,
+    # how many were significantly late, cancellations and diversions.
+    try:
+        _flights_only = [p for p in processed if not p.get("is_gap") and not p.get("is_surge")]
+        ss_landed   = [p for p in _flights_only if p["is_landed"]]
+        ss_late     = [p for p in ss_landed if p.get("delay_hours", 0) >= 1]
+        ss_canceled = [p for p in _flights_only if p["is_canceled"]]
+        ss_diverted = [p for p in _flights_only if p["is_diverted"]]
+        with st.expander(L("ss_title", h=LOOKBACK_HOURS)):
+            if ss_landed or ss_canceled or ss_diverted:
+                _parts = [L("ss_landed", n=len(ss_landed))]
+                if ss_late:
+                    _late_names = ", ".join(p["num"] for p in ss_late[:6])
+                    _parts.append(L("ss_late", n=len(ss_late)) + f" — {_late_names}")
+                if ss_canceled:
+                    _can_names = ", ".join(p["num"] for p in ss_canceled[:6])
+                    _parts.append(L("ss_canceled", n=len(ss_canceled)) + f" — {_can_names}")
+                if ss_diverted:
+                    _div_names = ", ".join(p["num"] for p in ss_diverted[:6])
+                    _parts.append(L("ss_diverted", n=len(ss_diverted)) + f" — {_div_names}")
+                st.markdown("  \n".join(_parts))
+            else:
+                st.markdown(L("ss_quiet"))
+    except Exception as e:
+        log.warning("Shift summary failed: %s", e)
+
     # Stale data warning — if the last successful API fetch is more than 2x the
     # normal cache TTL old, something is broken (API errors, network issues, etc).
     # Silently outdated data is dangerous because users may act on stale info
@@ -1113,9 +1444,9 @@ def _live_dashboard_impl():
                         font-size:0.85em; display:flex; align-items:center; gap:8px;">
                 <span style="font-size:1.2em;">⚠️</span>
                 <div>
-                    <div>STALE DATA — last update was {age_minutes} min ago</div>
+                    <div>{L("stale_title", n=age_minutes)}</div>
                     <div style="font-weight:400; font-size:0.85em; opacity:0.9; margin-top:2px;">
-                        API refresh is failing. Treat all times below with caution and check the airport FIDS board.
+                        {L("stale_body")}
                     </div>
                 </div>
             </div>
@@ -1123,9 +1454,9 @@ def _live_dashboard_impl():
 
     st.markdown(f"""
     <div class="summary-strip">
-        <div class="s-item"><span class="s-val" style="color:{t.c_blue};">{len(incoming)}</span>Incoming</div>
-        <div class="s-item"><span class="s-val" style="color:{t.c_green};">{next_gap_txt}</span>Next Gap</div>
-        <div class="s-item"><span class="s-val" style="color:{t.c_amber};">{busiest_txt}</span>Busiest</div>
+        <div class="s-item"><span class="s-val" style="color:{t.c_blue};">{len(incoming)}</span>{L("incoming")}</div>
+        <div class="s-item"><span class="s-val" style="color:{t.c_green};">{next_gap_txt}</span>{L("next_gap")}</div>
+        <div class="s-item"><span class="s-val" style="color:{t.c_amber};">{busiest_txt}</span>{L("busiest")}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -1155,7 +1486,7 @@ def _live_dashboard_impl():
                 f"<div style='flex:1; height:1px; background:{t.border_muted};'></div>"
                 f"<span style='font-size:0.72em; color:{t.text_muted}; font-weight:700; "
                 f"white-space:nowrap; letter-spacing:1px; text-transform:uppercase;'>"
-                f"Earlier Arrivals</span>"
+                f"{L("earlier")}</span>"
                 f"<div style='flex:1; height:1px; background:{t.border_muted};'></div>"
                 f"</div>",
                 unsafe_allow_html=True,
@@ -1249,7 +1580,7 @@ def _live_dashboard_impl():
                 <div style="font-size:0.8em; color:{t.text_muted};">{time_display}</div>
             </div>
             <div class="status-col">
-                <div style="font-size:0.6em; color:{t.text_muted}; font-weight:700; letter-spacing:1px;">GATE</div>
+                <div style="font-size:0.6em; color:{t.text_muted}; font-weight:700; letter-spacing:1px;">{L("gate")}</div>
                 <div class="mono {gate_cls}">{pf['gate']}{gate_change_badge}</div>
                 <div style="font-size:0.85em; font-weight:700; color:{status_col_color}; margin-top:2px;">{status_col_text}</div>
             </div>
@@ -1267,7 +1598,7 @@ def _live_dashboard_impl():
     if divs:
         st.markdown(
             f"<hr style='margin:15px 0 8px 0; opacity:0.2;'>"
-            f"<div style='color:{t.c_purple}; font-size:0.85em; font-weight:700; margin-bottom:5px;'>✈️ Diverted — not arriving at BNE</div>",
+            f"<div style='color:{t.c_purple}; font-size:0.85em; font-weight:700; margin-bottom:5px;'>{L("diverted_hdr")}</div>",
             unsafe_allow_html=True,
         )
         for pf in divs:
@@ -1292,7 +1623,7 @@ def _live_dashboard_impl():
     if cans:
         st.markdown(
             f"<hr style='margin:15px 0 8px 0; opacity:0.2;'>"
-            f"<div style='color:{t.c_red}; font-size:0.85em; font-weight:700; margin-bottom:5px;'>❌ Canceled</div>",
+            f"<div style='color:{t.c_red}; font-size:0.85em; font-weight:700; margin-bottom:5px;'>{L("canceled_hdr")}</div>",
             unsafe_allow_html=True,
         )
         for pf in cans:
@@ -1313,7 +1644,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V11.98</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.0</div>",
         unsafe_allow_html=True,
     )
 
