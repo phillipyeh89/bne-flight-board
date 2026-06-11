@@ -89,12 +89,6 @@ TRANSLATIONS = {
         "stale_body":    "API refresh is failing. Treat all times below with caution and check the airport FIDS board.",
         "diverted_hdr":  "✈️ Diverted — not arriving at BNE",
         "canceled_hdr":  "❌ Canceled",
-        "ss_title":      "📋 Shift Summary (last {h}h)",
-        "ss_landed":     "✅ {n} flights landed",
-        "ss_late":       "🟠 {n} arrived 1h+ late",
-        "ss_canceled":   "❌ {n} canceled",
-        "ss_diverted":   "✈️ {n} diverted",
-        "ss_quiet":      "Nothing landed in the window yet.",
     },
     "zh": {
         "just_landed":   "剛降落",
@@ -134,12 +128,6 @@ TRANSLATIONS = {
         "stale_body":    "API 更新失敗中。以下時間僅供參考，請以機場看板為準。",
         "diverted_hdr":  "✈️ 轉降 — 不會抵達 BNE",
         "canceled_hdr":  "❌ 已取消",
-        "ss_title":      "📋 班次摘要（過去 {h} 小時）",
-        "ss_landed":     "✅ 已降落 {n} 班",
-        "ss_late":       "🟠 誤點 1 小時以上 {n} 班",
-        "ss_canceled":   "❌ 取消 {n} 班",
-        "ss_diverted":   "✈️ 轉降 {n} 班",
-        "ss_quiet":      "目前時段內尚無降落航班。",
     },
     "ko": {
         "just_landed":   "방금 착륙",
@@ -179,12 +167,6 @@ TRANSLATIONS = {
         "stale_body":    "API 갱신이 실패하고 있습니다. 아래 시간은 참고용이며 공항 안내판을 확인하세요.",
         "diverted_hdr":  "✈️ 회항 — BNE에 도착하지 않음",
         "canceled_hdr":  "❌ 취소됨",
-        "ss_title":      "📋 근무 요약 (지난 {h}시간)",
-        "ss_landed":     "✅ {n}편 착륙",
-        "ss_late":       "🟠 1시간 이상 지연 {n}편",
-        "ss_canceled":   "❌ 취소 {n}편",
-        "ss_diverted":   "✈️ 회항 {n}편",
-        "ss_quiet":      "아직 착륙한 항공편이 없습니다.",
     },
     "ja": {
         "just_landed":   "着陸直後",
@@ -224,12 +206,6 @@ TRANSLATIONS = {
         "stale_body":    "API更新が失敗しています。以下の時刻は参考程度とし、空港の案内板をご確認ください。",
         "diverted_hdr":  "✈️ ダイバート — BNEには到着しません",
         "canceled_hdr":  "❌ 欠航",
-        "ss_title":      "📋 シフトサマリー（過去{h}時間）",
-        "ss_landed":     "✅ {n}便が着陸",
-        "ss_late":       "🟠 1時間以上の遅延 {n}便",
-        "ss_canceled":   "❌ 欠航 {n}便",
-        "ss_diverted":   "✈️ ダイバート {n}便",
-        "ss_quiet":      "この時間帯にはまだ着陸便がありません。",
     },
 }
 
@@ -717,7 +693,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.0)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.2)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1158,7 +1134,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.0 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.2 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -1212,7 +1188,6 @@ def _live_dashboard_impl():
             "card_opacity": style.card_opacity,
             "img_filter":   style.img_filter,
             "landed_mins":  landed_mins,
-            "delay_hours":  delay,
         })
 
     # ── Gate Change Detection ─────────────────────────────────────────────────
@@ -1403,33 +1378,6 @@ def _live_dashboard_impl():
         if best_count >= 2 and best_start:
             busiest_txt = f'{best_start.strftime("%H:%M")}–{best_end.strftime("%H:%M")} ({best_count})'
 
-    # ── Shift Summary (handover aid) ──────────────────────────────────────────
-    # Quick recap of the lookback window for shift handover: how many landed,
-    # how many were significantly late, cancellations and diversions.
-    try:
-        _flights_only = [p for p in processed if not p.get("is_gap") and not p.get("is_surge")]
-        ss_landed   = [p for p in _flights_only if p["is_landed"]]
-        ss_late     = [p for p in ss_landed if p.get("delay_hours", 0) >= 1]
-        ss_canceled = [p for p in _flights_only if p["is_canceled"]]
-        ss_diverted = [p for p in _flights_only if p["is_diverted"]]
-        with st.expander(L("ss_title", h=LOOKBACK_HOURS)):
-            if ss_landed or ss_canceled or ss_diverted:
-                _parts = [L("ss_landed", n=len(ss_landed))]
-                if ss_late:
-                    _late_names = ", ".join(p["num"] for p in ss_late[:6])
-                    _parts.append(L("ss_late", n=len(ss_late)) + f" — {_late_names}")
-                if ss_canceled:
-                    _can_names = ", ".join(p["num"] for p in ss_canceled[:6])
-                    _parts.append(L("ss_canceled", n=len(ss_canceled)) + f" — {_can_names}")
-                if ss_diverted:
-                    _div_names = ", ".join(p["num"] for p in ss_diverted[:6])
-                    _parts.append(L("ss_diverted", n=len(ss_diverted)) + f" — {_div_names}")
-                st.markdown("  \n".join(_parts))
-            else:
-                st.markdown(L("ss_quiet"))
-    except Exception as e:
-        log.warning("Shift summary failed: %s", e)
-
     # Stale data warning — if the last successful API fetch is more than 2x the
     # normal cache TTL old, something is broken (API errors, network issues, etc).
     # Silently outdated data is dangerous because users may act on stale info
@@ -1554,13 +1502,14 @@ def _live_dashboard_impl():
             status_col_text  = pf["status_text"]
             status_col_color = pf["status_color"]
 
-        # FR24 link — hybrid strategy:
-        # • Flights with radar data (Est/Act = airborne or just landed) → callsign
-        #   URL (e.g. /SIA265) which opens the LIVE MAP view showing the aircraft.
-        # • Sch-only flights → /data/flights/ page; the callsign URL fails or
-        #   resolves to the wrong aircraft when the flight isn't airborne (the
-        #   original bug that made us abandon callsign URLs entirely).
-        if pf["time_type"] in ("revised", "actual"):
+        # FR24 link — live-map callsign URL ONLY for flights still in the air
+        # (radar Est in the future). Landed and "On Ground" flights are no longer
+        # broadcasting that callsign, so the live URL fails or resolves to a
+        # completely different aircraft — send those to the /data/flights/ page.
+        _is_airborne = (pf["time_type"] == "revised"
+                        and not pf["is_landed"]
+                        and pf["dt"] > now_aest)
+        if _is_airborne:
             fr24_url = f"https://www.flightradar24.com/{_iata_to_callsign(pf['num'])}"
         else:
             fr24_flight_id = pf['num'].replace(" ", "").lower()
@@ -1644,7 +1593,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.0</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.2</div>",
         unsafe_allow_html=True,
     )
 
