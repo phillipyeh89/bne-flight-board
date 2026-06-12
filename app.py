@@ -21,7 +21,7 @@ GAP_MIN_MINUTES          = 20   # minimum gap size to display
 GAP_DISPLAY_MIN          = 5    # minimum remaining time in gap to display
 HEAVY_DELAY_HOURS        = 3    # orange warning threshold
 SEVERE_DELAY_HOURS       = 12   # red critical threshold
-IMMINENT_MINS            = 40   # red "hot" threshold — flight arriving within 40 min
+IMMINENT_MINS            = 25   # red "hot" threshold — flight arriving within 25 min
 API_LAG_MINS             = 10   # AeroDataBox lag observed in practice — typical 5-15 min range
 EST_COMPENSATION_MINS    = 10   # AeroDataBox Est runs ~10 min later than actual touchdown (observed);
                                 # subtract this from live radar estimates to better predict real arrival
@@ -43,6 +43,13 @@ CITY_MAP = {
     "Lapu-Lapu City": "Cebu", "Denpasar-Bali Island": "Bali",
     "Ho Chi Minh City": "Saigon", "Yaren District": "Nauru",
     "Guangzhou Baiyun": "Guangzhou",
+    # Obscure airport-town names → names floor staff actually recognise
+    "Avarua": "Cook Islands",            # RAR — Rarotonga's main town
+    "Burnt Pine": "Norfolk Island",      # NLK — town on Norfolk Island
+    "Luganville": "Santo (Vanuatu)",     # SON — Espiritu Santo
+    "Bandar Seri Begawan": "Brunei",     # BWN — Royal Brunei
+    "Taoyuan": "Taipei",                 # TPE — China Airlines
+    "Taoyuan City": "Taipei",
 }
 
 # ── i18n ──────────────────────────────────────────────────────────────────────
@@ -701,7 +708,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.3)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.4)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1142,7 +1149,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.3 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.4 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -1600,7 +1607,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.3</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.4</div>",
         unsafe_allow_html=True,
     )
 
