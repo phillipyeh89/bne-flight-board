@@ -72,9 +72,11 @@ TRANSLATIONS = {
         "ends":          "Ends {x}",
         "approx":        "approx",
         "earlier":       "Earlier Arrivals",
+        "surge_fmt":     "SURGE {a}–{b} ({n} flights)",
+        "was_gate":      "⚠ was {x}",
         "updated_ago":   "Updated {x} ago",
         "just_now":      "Updated just now",
-        "min_ago":       "{n} min ago",
+        "min_ago":       "{n} min",
         "lag_note":      "(+~10m lag)",
         "lag_tip":       "AeroDataBox data typically lags real-time by 5-15 min",
         "next_refresh":  "Next refresh: ",
@@ -111,6 +113,8 @@ TRANSLATIONS = {
         "ends":          "{x} 結束",
         "approx":        "約",
         "earlier":       "較早抵達",
+        "surge_fmt":     "高峰 {a}–{b}（{n} 班）",
+        "was_gate":      "⚠ 原 {x}",
         "updated_ago":   "更新於 {x}前",
         "just_now":      "剛剛更新",
         "min_ago":       "{n} 分鐘",
@@ -150,6 +154,8 @@ TRANSLATIONS = {
         "ends":          "{x} 종료",
         "approx":        "약",
         "earlier":       "이전 도착",
+        "surge_fmt":     "혼잡 {a}–{b} ({n}편)",
+        "was_gate":      "⚠ 이전 {x}",
         "updated_ago":   "{x} 전 업데이트",
         "just_now":      "방금 업데이트",
         "min_ago":       "{n}분",
@@ -189,6 +195,8 @@ TRANSLATIONS = {
         "ends":          "{x} 終了",
         "approx":        "約",
         "earlier":       "以前の到着",
+        "surge_fmt":     "ピーク {a}–{b}（{n}便）",
+        "was_gate":      "⚠ 旧 {x}",
         "updated_ago":   "{x}前に更新",
         "just_now":      "たった今更新",
         "min_ago":       "{n}分",
@@ -693,7 +701,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.2)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.3)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1134,7 +1142,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.2 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.3 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -1344,8 +1352,7 @@ def _live_dashboard_impl():
                 "time_key": w_start.timestamp() - 1,
                 "html": (
                     f'<div class="surge-banner"><span class="surge-icon">⚡</span>'
-                    f'SURGE {w_start.strftime("%H:%M")}–{w_end.strftime("%H:%M")} '
-                    f'({len(cluster)} flights)</div>'
+                    f'{L("surge_fmt", a=w_start.strftime("%H:%M"), b=w_end.strftime("%H:%M"), n=len(cluster))}</div>'
                 ),
             })
 
@@ -1490,7 +1497,7 @@ def _live_dashboard_impl():
             gate_change_badge = (
                 f'<span style="display:block; font-size:0.32em; font-weight:700; '
                 f'color:{t.c_amber}; letter-spacing:0.5px; margin-top:1px;">'
-                f'⚠ was {pf["prev_gate"]}</span>'
+                f'{L("was_gate", x=pf["prev_gate"])}</span>'
             )
 
         # Replace the misleading "In Xh Ym" countdown with "Check Board" when
@@ -1593,7 +1600,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.2</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.3</div>",
         unsafe_allow_html=True,
     )
 
