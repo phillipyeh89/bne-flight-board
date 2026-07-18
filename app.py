@@ -81,6 +81,8 @@ TRANSLATIONS = {
         "earlier":       "Earlier Arrivals",
         "surge_fmt":     "SURGE {a}–{b} ({n} flights)",
         "was_gate":      "⚠ was {x}",
+        "seats":         "{n} seats",
+        "freighter":     "📦 Freighter",
         "updated_ago":   "Updated {x} ago",
         "just_now":      "Updated just now",
         "min_ago":       "{n} min",
@@ -122,6 +124,8 @@ TRANSLATIONS = {
         "earlier":       "較早抵達",
         "surge_fmt":     "高峰 {a}–{b}（{n} 班）",
         "was_gate":      "⚠ 原 {x}",
+        "seats":         "{n} 座",
+        "freighter":     "📦 貨機",
         "updated_ago":   "更新於 {x}前",
         "just_now":      "剛剛更新",
         "min_ago":       "{n} 分鐘",
@@ -163,6 +167,8 @@ TRANSLATIONS = {
         "earlier":       "이전 도착",
         "surge_fmt":     "혼잡 {a}–{b} ({n}편)",
         "was_gate":      "⚠ 이전 {x}",
+        "seats":         "{n}석",
+        "freighter":     "📦 화물기",
         "updated_ago":   "{x} 전 업데이트",
         "just_now":      "방금 업데이트",
         "min_ago":       "{n}분",
@@ -204,6 +210,8 @@ TRANSLATIONS = {
         "earlier":       "以前の到着",
         "surge_fmt":     "ピーク {a}–{b}（{n}便）",
         "was_gate":      "⚠ 旧 {x}",
+        "seats":         "{n}席",
+        "freighter":     "📦 貨物機",
         "updated_ago":   "{x}前に更新",
         "just_now":      "たった今更新",
         "min_ago":       "{n}分",
@@ -277,6 +285,12 @@ log = logging.getLogger("bne-board")
 _photo_url_cache: dict   = {}
 _photo_fails: dict       = {}
 _photo_pending: set      = set()   # regs currently being fetched in the background
+# Aircraft details cache (Tier 1 endpoint, 1 unit/call). reg -> info dict, or
+# "NONE" when the API had nothing useful. Fetched lazily in background threads,
+# cached for the life of the process — age/seats/freighter status never change.
+_ac_info_cache: dict     = {}
+_ac_info_pending: set    = set()
+_ac_info_lock            = threading.Lock()
 _photo_lock              = threading.Lock()
 # Throttle: enforce a minimum gap between outbound Planespotters requests across
 # all threads so we don't burst past the free API's rate limit (was getting 429s).
@@ -591,6 +605,69 @@ def _background_fetch_photo(reg: str):
             _photo_fails[reg] = datetime.now()     # transient — allow retry later
 
 
+def _fetch_aircraft_info_http(reg: str):
+    """Fetch aircraft details from AeroDataBox (Tier 1 = 1 unit). Returns a
+    small dict of the fields we display, or "NONE" if nothing useful, or None
+    on transient failure (retry naturally on a later cache miss)."""
+    try:
+        r = requests.get(
+            f"https://aerodatabox.p.rapidapi.com/aircrafts/reg/{reg}/all",
+            headers={
+                "X-RapidAPI-Key":  st.secrets["X_RAPIDAPI_KEY"],
+                "X-RapidAPI-Host": "aerodatabox.p.rapidapi.com",
+            },
+            timeout=8,
+        )
+        if r.status_code != 200:
+            return None if (r.status_code == 429 or r.status_code >= 500) else "NONE"
+        data = r.json()
+        # /all returns a list of matches; prefer the active airframe.
+        if isinstance(data, dict):
+            data = [data]
+        if not isinstance(data, list) or not data:
+            return "NONE"
+        ac = next((a for a in data if a.get("active")), data[0]) or {}
+        info = {}
+        # Defensive extraction — only keep fields that are actually present.
+        if ac.get("numSeats"):
+            info["seats"] = int(ac["numSeats"])
+        age = ac.get("ageYears")
+        if age:
+            info["age"] = round(float(age), 1)
+        if ac.get("isFreighter"):
+            info["freighter"] = True
+        return info or "NONE"
+    except Exception as e:
+        log.warning("Aircraft info fetch failed for reg=%s: %s", reg, e)
+        return None
+
+
+def _background_fetch_aircraft_info(reg: str):
+    with _photo_semaphore:          # share the same politeness cap as photos
+        result = _fetch_aircraft_info_http(reg)
+    with _ac_info_lock:
+        _ac_info_pending.discard(reg)
+        if result is not None:      # None = transient; leave uncached to retry
+            _ac_info_cache[reg] = result
+
+
+def get_aircraft_info(reg: str):
+    """NON-BLOCKING. Returns the cached info dict, or None while not yet
+    fetched (a background fetch is kicked off on first miss)."""
+    if not reg:
+        return None
+    with _ac_info_lock:
+        cached = _ac_info_cache.get(reg)
+        already = reg in _ac_info_pending
+        if cached is None and not already:
+            _ac_info_pending.add(reg)
+    if cached is not None:
+        return cached if cached != "NONE" else None
+    if not already:
+        threading.Thread(target=_background_fetch_aircraft_info, args=(reg,), daemon=True).start()
+    return None
+
+
 def get_photo_from_api(reg: str) -> str:
     """NON-BLOCKING. Returns a cached photo URL instantly if available, otherwise
     kicks off a background fetch and returns 'NOT_FOUND' for now. The photo will
@@ -708,7 +785,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.4)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.5)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1013,6 +1090,7 @@ def _live_dashboard_impl():
                      for f in deduped_flights if (f.get("aircraft") or {}).get("reg")})
     for _reg in all_regs:
         get_photo_from_api(_reg)
+        get_aircraft_info(_reg)   # non-blocking Tier-1 lookup: age / seats / freighter
 
     # ── Process flights ───────────────────────────────────────────────────────
     processed = []
@@ -1149,7 +1227,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.4 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.5 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -1186,6 +1264,7 @@ def _live_dashboard_impl():
             "iata":         origin_iata,
             "gate":         arr.get("gate") or "TBA",
             "ac_text":      f"{ac_m} ({ac_r})" if ac_m and ac_r else ac_m or ac_r,
+            "reg":          ac_r,
             "actual_time":  best_dt.strftime("%H:%M"),
             "sch_time":     s_dt.strftime("%H:%M"),
             "is_landed":    is_lan,
@@ -1498,6 +1577,23 @@ def _live_dashboard_impl():
         zoom_src = pf["photo_url"] if has_photo else pf["logo_url"]
         gate_cls = "gate-tba" if pf["gate"] == "TBA" else "gate-num"
 
+        # Aircraft extras (age / seats / freighter) from the background Tier-1 cache.
+        ac_extra = ""
+        _ai = get_aircraft_info(pf.get("reg", ""))
+        if _ai:
+            bits = []
+            if _ai.get("age"):
+                bits.append(f'{_ai["age"]}y')
+            if _ai.get("seats"):
+                bits.append(L("seats", n=_ai["seats"]))
+            if _ai.get("freighter"):
+                bits.append(L("freighter"))
+            if bits:
+                ac_extra = (
+                    f' <span style="color:{t.text_faded}; font-size:0.85em;">· '
+                    + " · ".join(bits) + "</span>"
+                )
+
         # Gate-change badge — small amber "was XX" tag if the gate changed recently
         gate_change_badge = ""
         if pf.get("prev_gate"):
@@ -1539,7 +1635,7 @@ def _live_dashboard_impl():
             {img_html}
             <div class="info-col">
                 <div style="font-size:1.1em; font-weight:700;">{flight_num_html}<span style="font-size:0.7em; color:{t.text_muted}; margin-left:8px;">{pf['origin']} [{pf['iata']}]</span></div>
-                <div class="ac-line">{pf['ac_text']}</div>
+                <div class="ac-line">{pf['ac_text']}{ac_extra}</div>
                 <div style="font-size:0.8em; color:{t.text_muted};">{time_display}</div>
             </div>
             <div class="status-col">
@@ -1607,7 +1703,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.4</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.5</div>",
         unsafe_allow_html=True,
     )
 
