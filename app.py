@@ -411,7 +411,7 @@ def get_dynamic_css(t: ThemeParams, font_size_px: int = 16) -> str:
             color: {t.text_main}; box-shadow: 0 4px 10px rgba(0,0,0,0.15); border-left: 5px solid {t.c_blue}; transition: opacity 0.3s ease;
         }}
         .info-col   {{ flex-grow: 1; min-width: 0; overflow: hidden; word-wrap: break-word; }}
-        .info-col .ac-line {{ font-size: 0.7em; color: {t.text_faded}; margin: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+        .info-col .ac-line {{ font-size: 0.78em; color: {t.text_faded}; margin: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
         .status-col {{ text-align: right; min-width: 110px; max-width: 45%; display: flex; flex-direction: column; justify-content: center; flex-shrink: 0; }}
         .gate-num   {{ font-size: 1.85em; font-weight: 700; line-height: 1; }}
         .gate-tba   {{ font-size: 1.85em; font-weight: 700; line-height: 1; opacity: 0.35; }}
@@ -819,7 +819,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.6)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.7)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1261,7 +1261,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.6 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.7 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -1624,7 +1624,7 @@ def _live_dashboard_impl():
                 bits.append(L("freighter"))
             if bits:
                 ac_extra = (
-                    f' <span style="color:{t.text_faded}; font-size:0.85em;">· '
+                    f' <span style="color:{t.text_muted}; font-weight:600;">· '
                     + " · ".join(bits) + "</span>"
                 )
 
@@ -1737,7 +1737,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.6</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.7</div>",
         unsafe_allow_html=True,
     )
 
