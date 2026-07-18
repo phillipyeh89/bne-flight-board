@@ -291,6 +291,11 @@ _photo_pending: set      = set()   # regs currently being fetched in the backgro
 _ac_info_cache: dict     = {}
 _ac_info_pending: set    = set()
 _ac_info_lock            = threading.Lock()
+# AeroDataBox enforces a per-second rate limit on the Pro plan — space aircraft
+# lookups to ~1 req/sec so they never trip it (nor collide with the FIDS call).
+_adb_throttle_lock       = threading.Lock()
+_adb_last_request        = [0.0]
+ADB_MIN_INTERVAL_SEC     = 1.1
 _photo_lock              = threading.Lock()
 # Throttle: enforce a minimum gap between outbound Planespotters requests across
 # all threads so we don't burst past the free API's rate limit (was getting 429s).
@@ -609,6 +614,13 @@ def _fetch_aircraft_info_http(reg: str):
     """Fetch aircraft details from AeroDataBox (Tier 1 = 1 unit). Returns a
     small dict of the fields we display, or "NONE" if nothing useful, or None
     on transient failure (retry naturally on a later cache miss)."""
+    # Global 1 req/sec gate across all aircraft-lookup threads
+    with _adb_throttle_lock:
+        import time as _time
+        _el = _time.time() - _adb_last_request[0]
+        if _el < ADB_MIN_INTERVAL_SEC:
+            _time.sleep(ADB_MIN_INTERVAL_SEC - _el)
+        _adb_last_request[0] = _time.time()
     try:
         r = requests.get(
             f"https://aerodatabox.p.rapidapi.com/aircrafts/reg/{reg}/all",
@@ -618,8 +630,6 @@ def _fetch_aircraft_info_http(reg: str):
             },
             timeout=8,
         )
-        # TEMP AC DEBUG — remove once aircraft info confirmed working
-        log.warning("AC DEBUG reg=%s status=%s body=%.300s", reg, r.status_code, r.text)
         if r.status_code != 200:
             return None if (r.status_code == 429 or r.status_code >= 500) else "NONE"
         data = r.json()
@@ -633,7 +643,19 @@ def _fetch_aircraft_info_http(reg: str):
         # Defensive extraction — only keep fields that are actually present.
         if ac.get("numSeats"):
             info["seats"] = int(ac["numSeats"])
+        # Age: real payloads carry build dates rather than a ready-made ageYears —
+        # derive it from the first available date field.
         age = ac.get("ageYears")
+        if not age:
+            for _dk in ("firstFlightDate", "rolloutDate", "deliveryDate", "registrationDate"):
+                _dv = ac.get(_dk)
+                if _dv:
+                    try:
+                        _born = datetime.strptime(str(_dv)[:10], "%Y-%m-%d")
+                        age = (datetime.now() - _born).days / 365.25
+                        break
+                    except ValueError:
+                        continue
         if age:
             info["age"] = round(float(age), 1)
         if ac.get("isFreighter"):
@@ -717,6 +739,16 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
             last_err = e
             log.warning("AeroDataBox attempt %d failed (%s) — retrying", attempt, type(e).__name__)
             continue
+        except requests.HTTPError as e:
+            last_err = e
+            # 429 = transient per-second rate collision (e.g. with aircraft
+            # lookups) — brief pause then one retry. Other HTTP errors are final.
+            if e.response is not None and e.response.status_code == 429:
+                log.warning("AeroDataBox FIDS 429 — pausing 2s and retrying")
+                import time as _time
+                _time.sleep(2)
+                continue
+            break
         except Exception as e:
             last_err = e
             break
@@ -787,7 +819,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.6-debug)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.6)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1229,7 +1261,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.6-debug fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.6 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -1705,7 +1737,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.6-debug</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.6</div>",
         unsafe_allow_html=True,
     )
 
