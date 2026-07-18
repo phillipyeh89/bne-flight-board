@@ -82,6 +82,8 @@ TRANSLATIONS = {
         "surge_fmt":     "SURGE {a}–{b} ({n} flights)",
         "was_gate":      "⚠ was {x}",
         "seats":         "{n} seats",
+        "age_years":     "{n} yrs old",
+        "age_months":    "{n} months old",
         "freighter":     "📦 Freighter",
         "updated_ago":   "Updated {x} ago",
         "just_now":      "Updated just now",
@@ -125,6 +127,8 @@ TRANSLATIONS = {
         "surge_fmt":     "高峰 {a}–{b}（{n} 班）",
         "was_gate":      "⚠ 原 {x}",
         "seats":         "{n} 座",
+        "age_years":     "機齡 {n} 年",
+        "age_months":    "機齡 {n} 個月",
         "freighter":     "📦 貨機",
         "updated_ago":   "更新於 {x}前",
         "just_now":      "剛剛更新",
@@ -168,6 +172,8 @@ TRANSLATIONS = {
         "surge_fmt":     "혼잡 {a}–{b} ({n}편)",
         "was_gate":      "⚠ 이전 {x}",
         "seats":         "{n}석",
+        "age_years":     "기령 {n}년",
+        "age_months":    "기령 {n}개월",
         "freighter":     "📦 화물기",
         "updated_ago":   "{x} 전 업데이트",
         "just_now":      "방금 업데이트",
@@ -211,6 +217,8 @@ TRANSLATIONS = {
         "surge_fmt":     "ピーク {a}–{b}（{n}便）",
         "was_gate":      "⚠ 旧 {x}",
         "seats":         "{n}席",
+        "age_years":     "機齢{n}年",
+        "age_months":    "機齢{n}ヶ月",
         "freighter":     "📦 貨物機",
         "updated_ago":   "{x}前に更新",
         "just_now":      "たった今更新",
@@ -412,6 +420,7 @@ def get_dynamic_css(t: ThemeParams, font_size_px: int = 16) -> str:
         }}
         .info-col   {{ flex-grow: 1; min-width: 0; overflow: hidden; word-wrap: break-word; }}
         .info-col .ac-line {{ font-size: 0.78em; color: {t.text_faded}; margin: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+        .info-col .ac-extra-line {{ font-size: 0.75em; color: {t.text_main}; font-weight: 600; margin: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
         .status-col {{ text-align: right; min-width: 110px; max-width: 45%; display: flex; flex-direction: column; justify-content: center; flex-shrink: 0; }}
         .gate-num   {{ font-size: 1.85em; font-weight: 700; line-height: 1; }}
         .gate-tba   {{ font-size: 1.85em; font-weight: 700; line-height: 1; opacity: 0.35; }}
@@ -819,7 +828,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.7)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.9)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1261,7 +1270,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.7 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.9 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -1617,16 +1626,18 @@ def _live_dashboard_impl():
         if _ai:
             bits = []
             if _ai.get("age"):
-                bits.append(f'{_ai["age"]}y')
+                _age_val = _ai["age"]
+                if _age_val < 1:
+                    _months = max(1, int(round(_age_val * 12)))
+                    bits.append(L("age_months", n=_months))
+                else:
+                    bits.append(L("age_years", n=int(round(_age_val))))
             if _ai.get("seats"):
                 bits.append(L("seats", n=_ai["seats"]))
             if _ai.get("freighter"):
                 bits.append(L("freighter"))
             if bits:
-                ac_extra = (
-                    f' <span style="color:{t.text_muted}; font-weight:600;">· '
-                    + " · ".join(bits) + "</span>"
-                )
+                ac_extra = f'<div class="ac-extra-line">{" · ".join(bits)}</div>'
 
         # Gate-change badge — small amber "was XX" tag if the gate changed recently
         gate_change_badge = ""
@@ -1669,7 +1680,7 @@ def _live_dashboard_impl():
             {img_html}
             <div class="info-col">
                 <div style="font-size:1.1em; font-weight:700;">{flight_num_html}<span style="font-size:0.7em; color:{t.text_muted}; margin-left:8px;">{pf['origin']} [{pf['iata']}]</span></div>
-                <div class="ac-line">{pf['ac_text']}{ac_extra}</div>
+                <div class="ac-line">{pf['ac_text']}</div>{ac_extra}
                 <div style="font-size:0.8em; color:{t.text_muted};">{time_display}</div>
             </div>
             <div class="status-col">
@@ -1737,7 +1748,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.7</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.9</div>",
         unsafe_allow_html=True,
     )
 
