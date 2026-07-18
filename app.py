@@ -828,15 +828,27 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.11)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.12)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
 if "api_error"    not in st.session_state: st.session_state.api_error    = None
-if "theme_light"  not in st.session_state: st.session_state.theme_light  = False
-if "font_size"    not in st.session_state: st.session_state.font_size    = 16  # base px — 14 small / 16 normal / 19 large / 22 xl
+# Settings persist across page refreshes via URL query params
+# (?theme=light&font=19&lang=zh). Each new browser session seeds its
+# session_state from the URL, and every settings change writes back to it —
+# so F5, browser restarts, and PWA relaunches all keep the user's choices.
+_qp = st.query_params
+if "theme_light" not in st.session_state:
+    st.session_state.theme_light = (_qp.get("theme") == "light")
+if "font_size" not in st.session_state:
+    try:
+        _f = int(_qp.get("font") or 16)
+    except (TypeError, ValueError):
+        _f = 16
+    st.session_state.font_size = min(24, max(13, _f))
 if "gate_history" not in st.session_state: st.session_state.gate_history = {}  # flight_num -> last seen gate, for change detection
-if "lang"         not in st.session_state: st.session_state.lang         = "en"  # en / zh / ko / ja
+if "lang" not in st.session_state:
+    st.session_state.lang = _qp.get("lang") if _qp.get("lang") in LANG_OPTIONS else "en"
 
 
 # FIX 5 — use UI_REFRESH_SEC constant instead of hardcoded "60s"
@@ -861,15 +873,18 @@ def _live_dashboard_impl():
             with cA:
                 if st.button("A−", help="Smaller", use_container_width=True, key="font_smaller"):
                     st.session_state.font_size = max(13, st.session_state.font_size - 3)
+                    st.query_params["font"] = str(st.session_state.font_size)
                     st.rerun()
             with cB:
                 if st.button("A+", help="Larger", use_container_width=True, key="font_larger"):
                     st.session_state.font_size = min(24, st.session_state.font_size + 3)
+                    st.query_params["font"] = str(st.session_state.font_size)
                     st.rerun()
             st.markdown(f"**{L('theme')}**")
             toggle_icon = L("dark") if st.session_state.theme_light else L("light")
             if st.button(toggle_icon, use_container_width=True, key="theme_toggle"):
                 st.session_state.theme_light = not st.session_state.theme_light
+                st.query_params["theme"] = "light" if st.session_state.theme_light else "dark"
                 st.rerun()
             st.markdown(f"**{L('language')}**")
             _lang_keys = list(LANG_OPTIONS.keys())
@@ -881,6 +896,7 @@ def _live_dashboard_impl():
             )
             if _sel != st.session_state.lang:
                 st.session_state.lang = _sel
+                st.query_params["lang"] = _sel
                 st.rerun()
     with c3:
         st.markdown(
@@ -1265,7 +1281,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.11 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.12 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -1743,7 +1759,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.11</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.12</div>",
         unsafe_allow_html=True,
     )
 
