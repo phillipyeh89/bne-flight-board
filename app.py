@@ -618,6 +618,8 @@ def _fetch_aircraft_info_http(reg: str):
             },
             timeout=8,
         )
+        # TEMP AC DEBUG — remove once aircraft info confirmed working
+        log.warning("AC DEBUG reg=%s status=%s body=%.300s", reg, r.status_code, r.text)
         if r.status_code != 200:
             return None if (r.status_code == 429 or r.status_code >= 500) else "NONE"
         data = r.json()
@@ -785,7 +787,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.5)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.6-debug)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1227,7 +1229,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.5 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.6-debug fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -1703,7 +1705,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.5</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.6-debug</div>",
         unsafe_allow_html=True,
     )
 
