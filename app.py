@@ -30,7 +30,7 @@ IMAGE_WORKERS            = 3    # Planespotters free API rate-limits aggressivel
 PHOTO_FAIL_TTL_SEC       = 180  # retry failed photo lookups after 3 min (was 10 — too long for transient failures)
 SURGE_WINDOW_MINS        = 15   # cluster detection window
 SURGE_MIN_FLIGHTS        = 3    # minimum flights in cluster to consider
-SURGE_MIN_WEIGHT         = 4    # min total pax-weight to trigger (2 widebodies = 6 triggers; 3 narrowbodies = 3 doesn't... see logic)
+SURGE_MIN_WEIGHT         = 4    # weight-based trigger: fires on 3+ flights OR weight>=4 (so 2 widebodies=6 also triggers)
 DOMESTIC_TERMINALS       = ('D', 'DOM', 'D-ANC', 'GAT')
 SMALL_AIRCRAFT_FILTER    = ('BEECH', 'FAIRCHILD', 'CESSNA', 'PIPER', 'PILATUS', 'KING AIR', 'METROLINER', 'SAAB')
 
@@ -82,8 +82,8 @@ TRANSLATIONS = {
         "surge_fmt":     "SURGE {a}–{b} ({n} flights)",
         "was_gate":      "⚠ was {x}",
         "seats":         "{n} seats",
-        "age_years":     "{n} yrs old",
-        "age_months":    "{n} months old",
+        "age_years":     "{n} years",
+        "age_months":    "{n} months",
         "freighter":     "📦 Freighter",
         "updated_ago":   "Updated {x} ago",
         "just_now":      "Updated just now",
@@ -828,7 +828,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.9)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.11)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1143,11 +1143,6 @@ def _live_dashboard_impl():
             continue
 
         status_raw  = f.get("status", "").lower()
-        # TEMP DEBUG — log full raw object for any flight whose status looks unusual
-        # (diverted/redirected) so we can see what AeroDataBox gives us for a
-        # diverted-in flight. Remove once we've captured one.
-        if "divert" in status_raw or "redirect" in status_raw:
-            log.warning("DIVERT DEBUG [%s]: %s", f.get("number"), f)
         dep_node    = f.get("departure") or {}
         dep_ap      = dep_node.get("airport") or (f.get("movement") or {}).get("airport") or {}
         arr         = f.get("arrival") or f.get("movement") or {}
@@ -1270,7 +1265,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.9 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.11 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -1651,7 +1646,7 @@ def _live_dashboard_impl():
         # Replace the misleading "In Xh Ym" countdown with "Check Board" when
         # we don't have radar data — keep the gate visible but don't fake an ETA.
         if suppress_countdown:
-            status_col_text  = "⚠️ Check Board"
+            status_col_text  = L("check_board")
             status_col_color = t.c_amber
         else:
             status_col_text  = pf["status_text"]
@@ -1748,7 +1743,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.9</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.11</div>",
         unsafe_allow_html=True,
     )
 
