@@ -977,7 +977,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.21)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.22)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1033,7 +1033,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.21 — a broken
+    # never prevent the flight list below from rendering (V12.22 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1529,7 +1529,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.21 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.22 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -1835,30 +1835,35 @@ def _live_dashboard_impl():
     if _wx and _wx.get("temp") is not None:
         _wx_emoji, _wx_key = _wmo_condition(_wx.get("code"))
         _wx_is_fog  = _wx.get("code") in (45, 48)
+        # Conditions — amber + bold when fog (the operationally scary one)
         _cond_col   = t.c_amber if _wx_is_fog else t.text_main
-        _cond_txt   = f'{_wx_emoji} {L(_wx_key)}' if _wx_key else _wx_emoji
+        _cond_html  = (f'<span style="color:{_cond_col}; font-weight:700;">'
+                       f'{_wx_emoji} {L(_wx_key) if _wx_key else ""}</span>')
         _chg = _wx_upcoming_change(_wx, now_aest)
         if _chg:
             _c_emoji, _c_key, _c_hr, _worse = _chg
             _c_col  = t.c_amber if _worse else t.c_green
-            _c_name = L(_c_key) if _c_key else ""
-            _cond_txt += (
-                f'<br><span style="font-size:0.72em; font-weight:600; color:{_c_col};">'
-                f'→ {_c_emoji} {_c_name} ~{_c_hr}</span>'
-            )
-        _temp_txt   = f'{round(_wx["temp"])} °C'
+            _cond_html += (f' <span style="color:{_c_col}; font-weight:600;">'
+                           f'→ {_c_emoji} {L(_c_key) if _c_key else ""} ~{_c_hr}</span>')
+        _temp_txt   = f'{round(_wx["temp"])}&nbsp;°C'
         _wd, _ws    = _wx.get("wind_dir"), _wx.get("wind_kmh")
         if _wd is not None and _ws is not None:
-            _arrow  = (f'<span style="display:inline-block; '
-                       f'transform:rotate({(int(_wd) + 180) % 360}deg);">↑</span>')
-            _wind_txt = f'{_arrow} {int(_wd)}° {round(_ws)} km/h'
+            _arrow    = (f'<span style="display:inline-block; margin-right:3px; '
+                         f'transform:rotate({(int(_wd) + 180) % 360}deg);">↑</span>')
+            _wind_html = f'{_arrow}{int(_wd)}° · {round(_ws)}&nbsp;km/h'
         else:
-            _wind_txt = "—"
+            _wind_html = "—"
+        # Single-line ambient strip — deliberately lighter than the summary strip
+        # below so the two don't read as twins; weather is context, not core.
         st.markdown(f"""
-        <div class="summary-strip">
-            <div class="s-item"><span class="s-val" style="color:{_cond_col};">{_cond_txt}</span>{L("wx_cond")}</div>
-            <div class="s-item"><span class="s-val" style="color:{t.text_main};">{_temp_txt}</span>{L("wx_temp")}</div>
-            <div class="s-item"><span class="s-val" style="color:{t.text_main};">{_wind_txt}</span>{L("wx_wind")}</div>
+        <div style="text-align:center; font-size:0.78em; color:{t.text_muted};
+                    background:{t.bg_card}; border:1px solid {t.border_muted};
+                    border-radius:8px; padding:6px 12px; margin-bottom:8px;">
+            {_cond_html}
+            <span style="opacity:0.45; margin:0 8px;">|</span>
+            <span style="color:{t.text_main}; font-weight:700;">{_temp_txt}</span>
+            <span style="opacity:0.45; margin:0 8px;">|</span>
+            <span style="color:{t.text_main};">{_wind_html}</span>
         </div>
         """, unsafe_allow_html=True)
 
@@ -2080,7 +2085,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.21</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.22</div>",
         unsafe_allow_html=True,
     )
 
