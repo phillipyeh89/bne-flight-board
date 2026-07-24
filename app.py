@@ -90,6 +90,19 @@ TRANSLATIONS = {
         "age_years":     "{n} years",
         "age_months":    "{n} months",
         "freighter":     "📦 Freighter",
+        "disruption":    "⚠️ Airport disruption — multiple diversions detected. Times below are unreliable; verify on the FIDS board.",
+        "wx_cond":       "Conditions",
+        "wx_temp":       "Temperature",
+        "wx_wind":       "Wind",
+        "wx_clear":      "Clear",
+        "wx_pcloudy":    "Partly cloudy",
+        "wx_cloudy":     "Cloudy",
+        "wx_fog":        "Fog",
+        "wx_drizzle":    "Drizzle",
+        "wx_rain":       "Rain",
+        "wx_showers":    "Showers",
+        "wx_snow":       "Snow",
+        "wx_storm":      "Thunderstorm",
         "updated_ago":   "Updated {x} ago",
         "just_now":      "Updated just now",
         "min_ago":       "{n} min",
@@ -135,6 +148,19 @@ TRANSLATIONS = {
         "age_years":     "機齡 {n} 年",
         "age_months":    "機齡 {n} 個月",
         "freighter":     "📦 貨機",
+        "disruption":    "⚠️ 機場營運異常 — 偵測到多班轉降。以下時間可能不準，請以機場看板為準。",
+        "wx_cond":       "天氣",
+        "wx_temp":       "氣溫",
+        "wx_wind":       "風向風速",
+        "wx_clear":      "晴",
+        "wx_pcloudy":    "多雲時晴",
+        "wx_cloudy":     "陰",
+        "wx_fog":        "霧",
+        "wx_drizzle":    "毛毛雨",
+        "wx_rain":       "雨",
+        "wx_showers":    "陣雨",
+        "wx_snow":       "雪",
+        "wx_storm":      "雷雨",
         "updated_ago":   "更新於 {x}前",
         "just_now":      "剛剛更新",
         "min_ago":       "{n} 分鐘",
@@ -180,6 +206,19 @@ TRANSLATIONS = {
         "age_years":     "기령 {n}년",
         "age_months":    "기령 {n}개월",
         "freighter":     "📦 화물기",
+        "disruption":    "⚠️ 공항 운영 차질 — 다수의 회항 감지. 아래 시간은 부정확할 수 있으니 안내판을 확인하세요.",
+        "wx_cond":       "날씨",
+        "wx_temp":       "기온",
+        "wx_wind":       "바람",
+        "wx_clear":      "맑음",
+        "wx_pcloudy":    "구름 조금",
+        "wx_cloudy":     "흐림",
+        "wx_fog":        "안개",
+        "wx_drizzle":    "이슬비",
+        "wx_rain":       "비",
+        "wx_showers":    "소나기",
+        "wx_snow":       "눈",
+        "wx_storm":      "뇌우",
         "updated_ago":   "{x} 전 업데이트",
         "just_now":      "방금 업데이트",
         "min_ago":       "{n}분",
@@ -225,6 +264,19 @@ TRANSLATIONS = {
         "age_years":     "機齢{n}年",
         "age_months":    "機齢{n}ヶ月",
         "freighter":     "📦 貨物機",
+        "disruption":    "⚠️ 空港運用の乱れ — 複数のダイバートを検出。以下の時刻は不正確な場合があります。案内板をご確認ください。",
+        "wx_cond":       "天気",
+        "wx_temp":       "気温",
+        "wx_wind":       "風",
+        "wx_clear":      "晴れ",
+        "wx_pcloudy":    "晴れ時々曇り",
+        "wx_cloudy":     "曇り",
+        "wx_fog":        "霧",
+        "wx_drizzle":    "霧雨",
+        "wx_rain":       "雨",
+        "wx_showers":    "にわか雨",
+        "wx_snow":       "雪",
+        "wx_storm":      "雷雨",
         "updated_ago":   "{x}前に更新",
         "just_now":      "たった今更新",
         "min_ago":       "{n}分",
@@ -733,6 +785,49 @@ def get_photo_from_api(reg: str) -> str:
     return "NOT_FOUND"   # not ready yet — will show on next refresh
 
 
+@st.cache_data(ttl=1200, show_spinner=False)
+def fetch_weather(anchor: str):
+    """Current conditions at BNE airport from Open-Meteo (free, no key, no
+    AeroDataBox units). Fails silently — the strip simply doesn't render."""
+    try:
+        r = requests.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": -27.3842, "longitude": 153.1175,
+                "current": "temperature_2m,wind_speed_10m,wind_direction_10m,weather_code",
+                "timezone": "Australia/Brisbane",
+            },
+            timeout=6,
+        )
+        r.raise_for_status()
+        cur = (r.json() or {}).get("current") or {}
+        return {
+            "temp":     cur.get("temperature_2m"),
+            "wind_kmh": cur.get("wind_speed_10m"),
+            "wind_dir": cur.get("wind_direction_10m"),
+            "code":     cur.get("weather_code"),
+        }
+    except Exception as e:
+        log.warning("Weather fetch failed: %s", e)
+        return None
+
+
+def _wmo_condition(code):
+    """Map WMO weather code → (emoji, i18n key). Fog gets special handling."""
+    if code is None:               return ("", None)
+    c = int(code)
+    if c == 0:                     return ("☀️", "wx_clear")
+    if c in (1, 2):                return ("⛅", "wx_pcloudy")
+    if c == 3:                     return ("☁️", "wx_cloudy")
+    if c in (45, 48):              return ("🌫️", "wx_fog")
+    if c in (51, 53, 55):          return ("🌦️", "wx_drizzle")
+    if c in (61, 63, 65, 66, 67):  return ("🌧️", "wx_rain")
+    if c in (71, 73, 75, 77, 85, 86): return ("🌨️", "wx_snow")
+    if c in (80, 81, 82):          return ("🌧️", "wx_showers")
+    if c in (95, 96, 99):          return ("⛈️", "wx_storm")
+    return ("🌡️", None)
+
+
 @st.cache_data(ttl=API_DATA_TTL_SEC, show_spinner=False)
 def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
     url = f"https://aerodatabox.p.rapidapi.com/flights/airports/icao/{AIRPORT_ICAO}/{from_time}/{to_time}"
@@ -830,7 +925,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.17)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.19)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -887,7 +982,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.17 — a broken
+    # never prevent the flight list below from rendering (V12.19 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1202,6 +1297,16 @@ def _live_dashboard_impl():
 
     # ── Process flights ───────────────────────────────────────────────────────
     processed = []
+    # Disruption mode: when multiple flights in the window carry a diverted/
+    # redirected status (fog, storms, runway closure), the "past ETA = must have
+    # landed" inference becomes unreliable — aircraft are holding or diverting,
+    # not landing. Detect it and switch the board to honest-uncertainty mode.
+    disruption_mode = sum(
+        1 for _f in deduped_flights
+        if "divert" in str(_f.get("status", "")).lower()
+        or "redirect" in str(_f.get("status", "")).lower()
+    ) >= 2
+
     for f in deduped_flights:
         flight_num = f.get("number", "N/A")
         if flight_num in GHOST_FLIGHTS:
@@ -1235,16 +1340,28 @@ def _live_dashboard_impl():
             continue
         # Secondary check for arrival-schema records: confirm destination is BNE.
         arrival_node = f.get("arrival")
+        _mismatch_diverted = False
         if arrival_node:
             arr_ap   = arrival_node.get("airport") or {}
             arr_icao = str(arr_ap.get("icao", "")).upper()
             arr_iata = str(arr_ap.get("iata", "")).upper()
-            if arr_icao and arr_icao != AIRPORT_ICAO:
-                log.info("Skipping %s — destination is %s, not %s", flight_num, arr_icao, AIRPORT_ICAO)
-                continue
-            if arr_iata and arr_iata not in ("BNE", ""):
-                log.info("Skipping %s — destination IATA is %s, not BNE", flight_num, arr_iata)
-                continue
+            _apt_mismatch = ((arr_icao and arr_icao != AIRPORT_ICAO)
+                             or (arr_iata and arr_iata not in ("BNE", "")))
+            if _apt_mismatch:
+                # AeroDataBox may rewrite the arrival airport to the diversion
+                # field. Dropping such records made diverted flights vanish from
+                # the board on fog days. If the status says diverted — or we're
+                # in disruption mode — keep the flight and mark it diverted.
+                # Otherwise treat it as a wrong-schema outbound record and skip.
+                if ("divert" in status_raw or "redirect" in status_raw
+                        or disruption_mode):
+                    _mismatch_diverted = True
+                    log.info("Keeping %s as DIVERTED — arrival airport is %s",
+                             flight_num, arr_icao or arr_iata)
+                else:
+                    log.info("Skipping %s — destination is %s, not %s",
+                             flight_num, arr_icao or arr_iata, AIRPORT_ICAO)
+                    continue
 
         if not is_strictly_international(str(arr.get("terminal", "")),
                                          str(dep_ap.get("countryCode", "")),
@@ -1316,7 +1433,8 @@ def _live_dashboard_impl():
 
         t_diff = int((best_dt - now_aest).total_seconds() / 60)
         is_can = status_raw in ("canceled", "cancelled")
-        is_div = status_raw == "diverted"
+        is_div = ("divert" in status_raw or "redirect" in status_raw
+                  or _mismatch_diverted)
 
         # FIX 1 — only trust t_diff <= 0 for "landed" when we have a confirmed
         # actual time; "revised" (incl. OpenSky estimates) expiring past zero
@@ -1330,7 +1448,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.17 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.19 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -1340,6 +1458,7 @@ def _live_dashboard_impl():
         #   Sch 08:05 but actually departing 09:00) → require departure
         #   confirmation before assuming it landed.
         if (not is_lan
+                and not disruption_mode
                 and t_diff < -API_LAG_MINS
                 and status_raw not in AIRBORNE_STATUSES
                 and (t_type == "revised"
@@ -1596,6 +1715,41 @@ def _live_dashboard_impl():
             </div>
             """, unsafe_allow_html=True)
 
+    if disruption_mode:
+        st.markdown(f"""
+        <div style="background:{t.surge_bg_start}; border-left:5px solid {t.c_amber};
+                    color:{t.surge_text}; padding:10px 14px; border-radius:8px;
+                    margin-bottom:10px; font-weight:700; font-size:0.85em;">
+            {L("disruption")}
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ── Weather strip (BNE current conditions) ────────────────────────────────
+    try:
+        _wx = fetch_weather(anchor)
+    except Exception:
+        _wx = None
+    if _wx and _wx.get("temp") is not None:
+        _wx_emoji, _wx_key = _wmo_condition(_wx.get("code"))
+        _wx_is_fog  = _wx.get("code") in (45, 48)
+        _cond_col   = t.c_amber if _wx_is_fog else t.text_main
+        _cond_txt   = f'{_wx_emoji} {L(_wx_key)}' if _wx_key else _wx_emoji
+        _temp_txt   = f'{round(_wx["temp"])} °C'
+        _wd, _ws    = _wx.get("wind_dir"), _wx.get("wind_kmh")
+        if _wd is not None and _ws is not None:
+            _arrow  = (f'<span style="display:inline-block; '
+                       f'transform:rotate({(int(_wd) + 180) % 360}deg);">↑</span>')
+            _wind_txt = f'{_arrow} {int(_wd)}° {round(_ws)} km/h'
+        else:
+            _wind_txt = "—"
+        st.markdown(f"""
+        <div class="summary-strip">
+            <div class="s-item"><span class="s-val" style="color:{_cond_col};">{_cond_txt}</span>{L("wx_cond")}</div>
+            <div class="s-item"><span class="s-val" style="color:{t.text_main};">{_temp_txt}</span>{L("wx_temp")}</div>
+            <div class="s-item"><span class="s-val" style="color:{t.text_main};">{_wind_txt}</span>{L("wx_wind")}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
     st.markdown(f"""
     <div class="summary-strip">
         <div class="s-item"><span class="s-val" style="color:{t.c_blue};">{len(incoming)}</span>{L("incoming")}</div>
@@ -1666,6 +1820,12 @@ def _live_dashboard_impl():
         # so showing a precise countdown gives false confidence.
         suppress_countdown = (tag == "Sch" and not pf["is_landed"]
                               and not pf["is_canceled"] and not pf["is_diverted"])
+
+        # Disruption mode: a flight past its ETA without confirmed landing may be
+        # holding or diverting — "On Ground" would be a guess. Show Check Board.
+        if (disruption_mode and not pf["is_landed"] and not pf["is_canceled"]
+                and not pf["is_diverted"] and pf["dt"] <= now_aest):
+            suppress_countdown = True
 
         if tag == "Sch":
             time_display = (
@@ -1808,7 +1968,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.17</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.19</div>",
         unsafe_allow_html=True,
     )
 
