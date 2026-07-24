@@ -356,10 +356,20 @@ _photo_pending: set      = set()   # regs currently being fetched in the backgro
 _ac_info_cache: dict     = {}
 _ac_info_pending: set    = set()
 _ac_info_lock            = threading.Lock()
+# Gate history — module-level so ALL users see the same change badges (was
+# session-scoped: each browser had its own memory). Changes expire after 60 min.
+_gate_state: dict        = {}   # flight_num -> last seen gate
+_gate_changed: dict      = {}   # flight_num -> (old_gate, detected_at)
+_gate_lock               = threading.Lock()
+GATE_BADGE_TTL_SEC       = 3600
 # AeroDataBox enforces a per-second rate limit on the Pro plan — space aircraft
 # lookups to ~1 req/sec so they never trip it (nor collide with the FIDS call).
 _adb_throttle_lock       = threading.Lock()
 _adb_last_request        = [0.0]
+# FIDS failure backoff — after a failed fetch, don't hammer the API on every
+# 60s fragment rerun; wait this long before the next attempt.
+_fids_fail_until         = [0.0]
+FIDS_FAIL_BACKOFF_SEC    = 180
 ADB_MIN_INTERVAL_SEC     = 1.1
 _photo_lock              = threading.Lock()
 # Throttle: enforce a minimum gap between outbound Planespotters requests across
@@ -795,17 +805,23 @@ def fetch_weather(anchor: str):
             params={
                 "latitude": -27.3842, "longitude": 153.1175,
                 "current": "temperature_2m,wind_speed_10m,wind_direction_10m,weather_code",
+                "hourly": "weather_code",
+                "forecast_hours": 3,
                 "timezone": "Australia/Brisbane",
             },
             timeout=6,
         )
         r.raise_for_status()
-        cur = (r.json() or {}).get("current") or {}
+        body   = r.json() or {}
+        cur    = body.get("current") or {}
+        hourly = body.get("hourly") or {}
         return {
             "temp":     cur.get("temperature_2m"),
             "wind_kmh": cur.get("wind_speed_10m"),
             "wind_dir": cur.get("wind_direction_10m"),
             "code":     cur.get("weather_code"),
+            "h_codes":  hourly.get("weather_code") or [],
+            "h_times":  hourly.get("time") or [],
         }
     except Exception as e:
         log.warning("Weather fetch failed: %s", e)
@@ -826,6 +842,39 @@ def _wmo_condition(code):
     if c in (80, 81, 82):          return ("🌧️", "wx_showers")
     if c in (95, 96, 99):          return ("⛈️", "wx_storm")
     return ("🌡️", None)
+
+
+def _wx_severity(code) -> int:
+    """Operational-impact rank of a WMO code. Higher = worse for arrivals.
+    Used only to decide whether the next couple of hours are getting BETTER
+    or WORSE than now — not a meteorological science."""
+    if code is None:                  return 0
+    c = int(code)
+    if c in (95, 96, 99):             return 5   # thunderstorm
+    if c in (45, 48):                 return 4   # fog — the big one for BNE ops
+    if c in (61, 63, 65, 66, 67, 80, 81, 82): return 3   # rain / showers
+    if c in (51, 53, 55):             return 2   # drizzle
+    if c == 3:                        return 1   # overcast
+    return 0                                     # clear-ish
+
+
+def _wx_upcoming_change(wx, now_aest):
+    """Scan the next ~3 hourly forecast codes. If conditions will materially
+    change (different severity class), return (emoji, key, hour_str, worsening).
+    Returns None when conditions stay in the same class — the common case."""
+    try:
+        cur_sev = _wx_severity(wx.get("code"))
+        for t_str, code in zip(wx.get("h_times") or [], wx.get("h_codes") or []):
+            _hr = datetime.strptime(t_str, "%Y-%m-%dT%H:%M")
+            if _hr <= now_aest.replace(tzinfo=None):
+                continue
+            sev = _wx_severity(code)
+            if sev != cur_sev:
+                emoji, key = _wmo_condition(code)
+                return (emoji, key, _hr.strftime("%H:%M"), sev > cur_sev)
+    except Exception as e:
+        log.warning("Weather change scan failed: %s", e)
+    return None
 
 
 @st.cache_data(ttl=API_DATA_TTL_SEC, show_spinner=False)
@@ -859,8 +908,11 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
             last_err = e
             break
     log.error("AeroDataBox API error: %s", last_err)
-    st.session_state.api_error = str(last_err)
-    return []
+    # Raise instead of returning [] — st.cache_data does NOT cache exceptions,
+    # so a transient failure no longer blanks the board for a whole 16-min cache
+    # window. The call site catches this, shows the error, and the next 60s
+    # fragment rerun retries (subject to the backoff below).
+    raise RuntimeError(str(last_err))
 
 
 def _iata_to_callsign(flight_number: str) -> str:
@@ -925,7 +977,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.19)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.21)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -963,7 +1015,6 @@ if "font_size" not in st.session_state:
     except (TypeError, ValueError):
         _f = 16
     st.session_state.font_size = min(24, max(13, _f))
-if "gate_history" not in st.session_state: st.session_state.gate_history = {}  # flight_num -> last seen gate, for change detection
 if "lang" not in st.session_state:
     _l = _qp_get("lang")
     st.session_state.lang = _l if _l in LANG_OPTIONS else "en"
@@ -982,7 +1033,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.19 — a broken
+    # never prevent the flight list below from rendering (V12.21 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1181,7 +1232,17 @@ def _live_dashboard_impl():
         st.info(L("quiet", h=f"{QUIET_HOURS_END_H:02d}"))
         return
 
-    raw_flights = fetch_flight_data(anchor, from_time, to_time)
+    import time as _t
+    if _t.time() < _fids_fail_until[0]:
+        # Recent failure — in backoff. Render the error state without a new call.
+        raw_flights = []
+    else:
+        try:
+            raw_flights = fetch_flight_data(anchor, from_time, to_time)
+        except Exception as e:
+            st.session_state.api_error = str(e)
+            _fids_fail_until[0] = _t.time() + FIDS_FAIL_BACKOFF_SEC
+            raw_flights = []
     opensky_data = fetch_opensky_states(anchor)
 
     # An empty result means the API call failed or returned nothing. Surface it
@@ -1272,7 +1333,7 @@ def _live_dashboard_impl():
         # + scheduled minute don't collapse into one card when aircraft model isn't
         # known yet (~3h pre-arrival window).
         flight_num_dd  = f.get("number") or ""
-        airline_prefix = "".join(c for c in flight_num_dd if c.isalpha())[:3].upper()
+        airline_prefix = flight_num_dd.replace(" ", "").upper()[:2]
         phy_key = f"{airline_prefix}|{str(dep_ap.get('iata', ''))}|{sch_str}|{ac_dict_dd.get('model') or ''}"
 
         if phy_key and phy_key != "||" and phy_key in physical_seen:
@@ -1301,11 +1362,27 @@ def _live_dashboard_impl():
     # redirected status (fog, storms, runway closure), the "past ETA = must have
     # landed" inference becomes unreliable — aircraft are holding or diverting,
     # not landing. Detect it and switch the board to honest-uncertainty mode.
-    disruption_mode = sum(
+    _divert_count = sum(
         1 for _f in deduped_flights
         if "divert" in str(_f.get("status", "")).lower()
         or "redirect" in str(_f.get("status", "")).lower()
-    ) >= 2
+    )
+    # Second trigger — "confirmation drought": several radar-tracked flights are
+    # well past their Est with no landing confirmations at all. This catches the
+    # EARLY phase of a fog event (aircraft holding, nothing diverted yet) and
+    # disruption types that never produce a diverted status (ground stops,
+    # runway closures).
+    _stuck_count = 0
+    for _f in deduped_flights:
+        _bd, _tt = extract_best_time(_f.get("arrival") or {}, aest)
+        if _bd is None:
+            continue
+        if _tt == "actual" and (now_aest - _bd).total_seconds() < 3600:
+            _stuck_count = 0
+            break          # a recent confirmed landing = no drought
+        if _tt == "revised" and (now_aest - _bd).total_seconds() > 15 * 60:
+            _stuck_count += 1
+    disruption_mode = (_divert_count >= 2) or (_stuck_count >= 3)
 
     for f in deduped_flights:
         flight_num = f.get("number", "N/A")
@@ -1363,9 +1440,15 @@ def _live_dashboard_impl():
                              flight_num, arr_icao or arr_iata, AIRPORT_ICAO)
                     continue
 
-        if not is_strictly_international(str(arr.get("terminal", "")),
-                                         str(dep_ap.get("countryCode", "")),
-                                         ac_m, origin_iata, ac_r):
+        # Diverted records often come back with wiped terminal/country fields,
+        # which this heuristic filter would silently drop — exempt them so a
+        # diverted flight can never vanish from the board.
+        _div_candidate = ("divert" in status_raw or "redirect" in status_raw
+                          or _mismatch_diverted)
+        if not _div_candidate and not is_strictly_international(
+                str(arr.get("terminal", "")),
+                str(dep_ap.get("countryCode", "")),
+                ac_m, origin_iata, ac_r):
             continue
 
         best_dt, t_type = extract_best_time(arr, aest)
@@ -1396,14 +1479,12 @@ def _live_dashboard_impl():
         # landings — VA58, JQ104, QF52). Shift Est times earlier so the board
         # predicts real arrival more closely.
         #
-        # Apply to ALL revised times (not just has_departed) — a flight with a
-        # genuine revised ETA is being radar-tracked regardless of whether
-        # AeroDataBox has updated its status field to "enroute". The earlier
-        # has_departed gate meant flights whose status hadn't flipped to airborne
-        # never got compensated, which is why some still showed ~10 min late.
-        # (Pre-departure schedule-tweaks were already converted to "scheduled"
-        # above, so anything still "revised" here is a real in-flight estimate.)
-        if t_type == "revised":
+        # Compensation was calibrated on flights CLOSE to landing (VA58/JQ104/
+        # QF52 observations) — applying it to a flight 6h out extrapolates far
+        # beyond the evidence. Only compensate inside the final-approach window
+        # (≤90 min to arrival); further-out flights show the raw Est.
+        if (t_type == "revised"
+                and (best_dt - now_aest) <= timedelta(minutes=90)):
             best_dt = best_dt - timedelta(minutes=EST_COMPENSATION_MINS)
 
         # Not-operating-today filter: scheduled, no reg, no departure, < 3h out
@@ -1448,7 +1529,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.19 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.21 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -1509,22 +1590,28 @@ def _live_dashboard_impl():
     # ── Gate Change Detection ─────────────────────────────────────────────────
     # Compare each flight's current gate against what we last saw. If it changed
     # (and both old/new are real gates, not TBA), flag it so the card can show
-    # "was XX". History persists in session_state across the 60s fragment reruns.
+    # "was XX". History is module-level: shared by all users, survives page
+    # refreshes, and badges expire after GATE_BADGE_TTL_SEC.
     # Wrapped in try/except so a detection issue can never blank the whole board.
     try:
-        gate_hist = st.session_state.get("gate_history", {})
-        for p in processed:
-            if p.get("is_gap") or p.get("is_surge"):
-                continue
-            fn   = p.get("num")
-            cur  = p.get("gate")
-            if not fn or cur in (None, "TBA"):
-                continue
-            prev = gate_hist.get(fn)
-            if prev and prev != "TBA" and prev != cur:
-                p["prev_gate"] = prev          # genuine change — flag for display
-            gate_hist[fn] = cur                # update history to current
-        st.session_state.gate_history = gate_hist
+        _now_ts = datetime.now().timestamp()
+        with _gate_lock:
+            for p in processed:
+                if p.get("is_gap") or p.get("is_surge"):
+                    continue
+                fnum = p.get("num")
+                cur  = p.get("gate")
+                if not fnum or cur in (None, "TBA"):
+                    continue
+                prev = _gate_state.get(fnum)
+                if prev and prev != "TBA" and prev != cur:
+                    _gate_changed[fnum] = (prev, _now_ts)
+                _gate_state[fnum] = cur
+                chg = _gate_changed.get(fnum)
+                if chg and (_now_ts - chg[1]) < GATE_BADGE_TTL_SEC:
+                    p["prev_gate"] = chg[0]
+                elif chg:
+                    del _gate_changed[fnum]    # expired — clean up
     except Exception as e:
         log.warning("Gate change detection failed: %s", e)
 
@@ -1650,11 +1737,27 @@ def _live_dashboard_impl():
         # Trigger on either raw flight count OR pax-weight: 3+ flights of any
         # size is operationally busy, and 2 widebodies (weight 6) also qualify
         # even though it's only 2 flights.
-        cluster_weight = sum(get_aircraft_pax_weight(f.get("ac_text", "")) for f in cluster)
+        def _pax_weight(_p):
+            # Freighters bring zero pax — exclude them from surge weight when we
+            # know (aircraft-info cache). String-based weight otherwise.
+            _r = _p.get("reg", "")
+            if _r:
+                with _ac_info_lock:
+                    _info = _ac_info_cache.get(_r)
+                if isinstance(_info, dict) and _info.get("freighter"):
+                    return 0
+            return get_aircraft_pax_weight(_p.get("ac_text", ""))
+
+        cluster_weight = sum(_pax_weight(f) for f in cluster)
+        w_start = cluster[0]["dt"]
+        w_end   = cluster[-1]["dt"]
+        # A surge window entirely in the past is stale noise — showing expired
+        # "all hands" alerts trains people to ignore the banner.
+        if w_end < now_aest:
+            surge_used.update(cluster_idx)
+            continue
         if len(cluster) >= SURGE_MIN_FLIGHTS or cluster_weight >= SURGE_MIN_WEIGHT:
             surge_used.update(cluster_idx)
-            w_start = cluster[0]["dt"]
-            w_end   = cluster[-1]["dt"]
             processed.append({
                 "is_surge": True,
                 "time_key": w_start.timestamp() - 1,
@@ -1734,6 +1837,15 @@ def _live_dashboard_impl():
         _wx_is_fog  = _wx.get("code") in (45, 48)
         _cond_col   = t.c_amber if _wx_is_fog else t.text_main
         _cond_txt   = f'{_wx_emoji} {L(_wx_key)}' if _wx_key else _wx_emoji
+        _chg = _wx_upcoming_change(_wx, now_aest)
+        if _chg:
+            _c_emoji, _c_key, _c_hr, _worse = _chg
+            _c_col  = t.c_amber if _worse else t.c_green
+            _c_name = L(_c_key) if _c_key else ""
+            _cond_txt += (
+                f'<br><span style="font-size:0.72em; font-weight:600; color:{_c_col};">'
+                f'→ {_c_emoji} {_c_name} ~{_c_hr}</span>'
+            )
         _temp_txt   = f'{round(_wx["temp"])} °C'
         _wd, _ws    = _wx.get("wind_dir"), _wx.get("wind_kmh")
         if _wd is not None and _ws is not None:
@@ -1968,7 +2080,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.19</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.21</div>",
         unsafe_allow_html=True,
     )
 
