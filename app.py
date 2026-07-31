@@ -35,6 +35,9 @@ AC_DAILY_BUDGET          = 150
 # HARD-CAPPED: at most DEP_DAILY_BUDGET HTTP calls per calendar day, counted at
 # the request site — redeploys, cache wipes, and retries all spend from the same
 # daily pot. Ultra plan: worst case 120 × 2 × 31 = 7,440 units/month.
+# Per-flight leg lookup. Kept ON because it powers registration cross-validation
+# (today's airframe vs the stale previous-rotation reg that FIDS often carries).
+# The departure TIME it also returns is intentionally not displayed — see render.
 DEP_INFO_ENABLED         = True
 DEP_DAILY_BUDGET         = 120
 DEP_FAIL_TTL_SEC         = 180
@@ -1183,7 +1186,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.35)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.37)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1239,7 +1242,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.35 — a broken
+    # never prevent the flight list below from rendering (V12.37 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1687,7 +1690,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.35 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.37 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2142,21 +2145,6 @@ def _live_dashboard_impl():
                 and not pf["is_diverted"] and pf["dt"] <= now_aest):
             suppress_countdown = True
 
-        # Arrival info = primary line. Departure info = its own dim line below,
-        # defined here for ALL paths (landed flights skip the population below,
-        # but the variable must still exist for the card template).
-        dep_line_html = ""
-        if not pf["is_landed"]:
-            _dep, _dep_is_actual = get_dep_time(pf.get("num", ""), pf.get("s_dt_iso") or "")
-            if _dep:
-                _dep_lbl = L("dep_label", x=_dep) if _dep_is_actual else L("dep_est_label", x=_dep)
-                _org = pf.get("iata") or ""
-                _org_txt = f' <span style="opacity:0.7;">{_org}</span>' if _org else ""
-                dep_line_html = (
-                    f'<div class="mono" style="color:{t.text_faded}; font-size:0.8em; margin-top:1px;">'
-                    f'{_dep_lbl}{_org_txt}</div>'
-                )
-
         if tag == "Sch":
             time_display = (
                 f'<span class="mono" style="color:{t.text_muted};">Sch {pf["sch_time"]}</span>'
@@ -2244,7 +2232,6 @@ def _live_dashboard_impl():
                 <div style="font-size:1.1em; font-weight:700;">{flight_num_html}<span style="font-size:0.7em; color:{t.text_muted}; margin-left:8px;">{pf['origin']} [{pf['iata']}]</span></div>
                 <div class="ac-line">{_ac_text_show}</div>
                 <div style="font-size:0.8em; color:{t.text_muted};">{time_display}</div>
-                {dep_line_html}
             </div>
             <div class="status-col">
                 <div style="font-size:0.6em; color:{t.text_muted}; font-weight:700; letter-spacing:1px;">{L("gate")}</div>
@@ -2312,7 +2299,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.35</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.37</div>",
         unsafe_allow_html=True,
     )
 
