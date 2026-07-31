@@ -98,6 +98,7 @@ TRANSLATIONS = {
         "was_gate":      "⚠ was {x}",
         "seats":         "{n} seats",
         "dep_label":     "Dep {x}",
+        "dep_est_label": "Dep~{x}",
         "more_photos":   "More photos",
         "age_years":     "{n} years",
         "age_months":    "{n} months",
@@ -158,6 +159,7 @@ TRANSLATIONS = {
         "was_gate":      "⚠ 原 {x}",
         "seats":         "{n} 座",
         "dep_label":     "起飛 {x}",
+        "dep_est_label": "預計起飛 {x}",
         "more_photos":   "更多照片",
         "age_years":     "機齡 {n} 年",
         "age_months":    "機齡 {n} 個月",
@@ -218,6 +220,7 @@ TRANSLATIONS = {
         "was_gate":      "⚠ 이전 {x}",
         "seats":         "{n}석",
         "dep_label":     "출발 {x}",
+        "dep_est_label": "출발 예정 {x}",
         "more_photos":   "사진 더 보기",
         "age_years":     "기령 {n}년",
         "age_months":    "기령 {n}개월",
@@ -278,6 +281,7 @@ TRANSLATIONS = {
         "was_gate":      "⚠ 旧 {x}",
         "seats":         "{n}席",
         "dep_label":     "出発 {x}",
+        "dep_est_label": "出発予定 {x}",
         "more_photos":   "他の写真",
         "age_years":     "機齢{n}年",
         "age_months":    "機齢{n}ヶ月",
@@ -845,7 +849,6 @@ def _fetch_dep_time_http(flight_num: str, s_dt_iso: str, key: str):
             timeout=8,
         )
         if r.status_code != 200:
-            log.warning("DEP3 DEBUG %s status=%s body=%.200s", flight_num, r.status_code, r.text)
             if r.status_code == 429 or r.status_code >= 500:
                 with _dep_lock:
                     _dep_fails[key] = datetime.now().timestamp()
@@ -888,7 +891,7 @@ def _fetch_dep_time_http(flight_num: str, s_dt_iso: str, key: str):
                 diff = 0
             if best is None or diff < best_diff:
                 best, best_diff = leg, diff
-        result = {"found": False, "dep": None, "reg": None}
+        result = {"found": False, "dep": None, "dep_actual": False, "reg": None}
         if best:
             result["found"] = True
             # Today's-leg airframe — used to cross-validate the FIDS reg, which
@@ -898,26 +901,36 @@ def _fetch_dep_time_http(flight_num: str, s_dt_iso: str, key: str):
             if _leg_reg:
                 result["reg"] = str(_leg_reg).strip().upper()
             dep = best.get("departure") or {}
-            for k in ("runwayTime", "actualTime"):
+            def _extract(k):
                 node = dep.get(k)
                 raw = None
-                if isinstance(node, dict):          # nested {utc, local}
+                if isinstance(node, dict):
                     raw = node.get("utc")
-                elif isinstance(node, str):         # bare string
+                elif isinstance(node, str):
                     raw = node
                 if not raw:
-                    raw = dep.get(k + "Utc")        # flat "...Utc" schema variant
+                    raw = dep.get(k + "Utc")
                 if raw:
                     try:
-                        result["dep"] = (pd.to_datetime(raw, utc=True)
-                                         .tz_convert(TIMEZONE).strftime("%H:%M"))
-                        break
+                        return (pd.to_datetime(raw, utc=True)
+                                .tz_convert(TIMEZONE).strftime("%H:%M"))
                     except Exception:
-                        continue
-        # TEMP DEP3 DEBUG — full departure node of the chosen leg + verdict
-        log.warning("DEP3 DEBUG %s chosen=%s dep_node=%s result=%s",
-                    flight_num, bool(best),
-                    (best or {}).get("departure"), result)
+                        return None
+                return None
+            # runwayTime / actualTime only exist AFTER wheels-up → "actual".
+            # Otherwise fall back to revisedTime (radar estimate) → "estimated",
+            # so a flight still on the ground shows its expected off-block time.
+            for k in ("runwayTime", "actualTime"):
+                _v = _extract(k)
+                if _v:
+                    result["dep"] = _v
+                    result["dep_actual"] = True
+                    break
+            if not result["dep"]:
+                _rev = _extract("revisedTime")
+                if _rev:
+                    result["dep"] = _rev
+                    result["dep_actual"] = False
         with _dep_lock:
             _dep_cache[key] = result
     except Exception as e:
@@ -956,7 +969,9 @@ def get_flight_leg_info(flight_num: str, s_dt_iso: str):
 
 def get_dep_time(flight_num: str, s_dt_iso: str):
     info = get_flight_leg_info(flight_num, s_dt_iso)
-    return info.get("dep") if info else None
+    if info and info.get("dep"):
+        return (info["dep"], info.get("dep_actual", False))
+    return (None, False)
 
 
 def get_photo_from_api(reg: str) -> str:
@@ -1168,7 +1183,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.33-debug)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.33)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1224,7 +1239,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.33-debug — a broken
+    # never prevent the flight list below from rendering (V12.33 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1759,7 +1774,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.33-debug fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.33 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2216,11 +2231,12 @@ def _live_dashboard_impl():
 
         dep_html = ""
         if not pf["is_landed"]:
-            _dep = get_dep_time(pf.get("num", ""), pf.get("s_dt_iso") or "")
+            _dep, _dep_is_actual = get_dep_time(pf.get("num", ""), pf.get("s_dt_iso") or "")
             if _dep:
+                _dep_lbl = L("dep_label", x=_dep) if _dep_is_actual else L("dep_est_label", x=_dep)
                 dep_html = (
                     f'<span class="mono" style="color:{t.text_faded}; font-size:0.85em;">'
-                    f'{L("dep_label", x=_dep)}</span> • '
+                    f'{_dep_lbl}</span> • '
                 )
 
         if tag == "Sch":
@@ -2379,7 +2395,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.33-debug</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.33</div>",
         unsafe_allow_html=True,
     )
 
