@@ -844,6 +844,8 @@ def _fetch_dep_time_http(flight_num: str, s_dt_iso: str, key: str):
             params={"withAircraftImage": "false", "withLocation": "false"},
             timeout=8,
         )
+        # TEMP DEP2 DEBUG — remove once departure times confirmed working
+        log.warning("DEP2 DEBUG %s status=%s body=%.400s", flight_num, r.status_code, r.text)
         if r.status_code != 200:
             if r.status_code == 429 or r.status_code >= 500:
                 with _dep_lock:
@@ -1144,7 +1146,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.29)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.31-debug)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1200,7 +1202,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.29 — a broken
+    # never prevent the flight list below from rendering (V12.31-debug — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1256,6 +1258,7 @@ def _live_dashboard_impl():
             * <span class="mono" style="color:{t.c_blue};font-weight:bold;">Act</span>：**實際**降落時間已確認，旅客即將抵達櫃檯。
             * <span class="mono" style="color:{t.text_faded};font-weight:bold;">Est</span>：雷達**預估**抵達時間，已提前約 10 分鐘校正以貼近實際降落。
             * <span class="mono" style="color:{t.text_muted};font-weight:bold;">Sch</span>：僅有**表定**時間，尚無雷達資料。
+            * **起飛**：實際起飛時間（布里斯本時間），飛行中且有資料時顯示。
 
             **狀態指標：**
             * <span style="color:{t.c_amber};">⚠️ **請看機場看板**</span>：無雷達資料，請以機場 FIDS 看板為準。
@@ -1264,6 +1267,7 @@ def _live_dashboard_impl():
             * 🟠 **重度誤點**（3小時+）/ 🔴 **嚴重誤點**（12小時+）。
             * <span style="color:{t.c_red};">⚡ **高峰**</span>：15 分鐘內 3 班以上、或 2 架以上廣體機（A350/A380/777/787）接連抵達。
             * <span style="color:{t.c_purple};">✈️ **轉降他場**</span>：不會抵達 BNE。
+            * 門號下方的「⚠ 原 XX」：登機門剛變更過（全員共見，60 分鐘後消失）。
 
             **空檔條（航班之間）：** 🟢 進行中 = 現在就是休息空檔，倒數顯示剩餘時間；🔄 = 未來的空檔；「約」表示下一班僅有表定時間，結束時間可能變動。
 
@@ -1271,7 +1275,13 @@ def _live_dashboard_impl():
 
             **航班號可點擊：** 點擊可開啟 Flightradar24（已安裝 App 會直接開啟）。
 
+            **照片可點擊：** 點飛機照片可放大，下方顯示機型、機齡與座位數，並附該機身在 Planespotters 的更多照片連結。
+
             **頂部資訊：** 更新時間（資料抓取時間）、（+約10分延遲）= AeroDataBox 本身的延遲、下次更新倒數（每 5 分鐘）。
+
+            **天氣列：** 機場即時天況（氣溫、風向風速），起霧時轉為琥珀色。「→ 🌫️ 霧 ~06:00」表示約 3 小時內天況將轉變 —— 琥珀色=轉壞、綠色=轉好。
+
+            **營運異常模式：** 偵測到多班轉降（或多班逾時未確認落地）時，會顯示警告橫幅、暫停自動判定落地，相關航班改顯示「請看機場看板」，請以 FIDS 為準。
 
             **休眠時段（01:00–03:00 AEST）：** 看板夜間休眠以節省 API 額度，04:00 早班開始前自動喚醒。
 
@@ -1285,6 +1295,7 @@ def _live_dashboard_impl():
             * <span class="mono" style="color:{t.c_blue};font-weight:bold;">Act</span>: **실제** 착륙 시간 확정 — 승객이 곧 도착합니다.
             * <span class="mono" style="color:{t.text_faded};font-weight:bold;">Est</span>: 레이더 기반 **예상** 도착 시간 (실제 착륙에 맞춰 약 10분 앞당겨 보정됨).
             * <span class="mono" style="color:{t.text_muted};font-weight:bold;">Sch</span>: **예정** 시간만 있음 — 레이더 데이터 없음.
+            * **출발**: 실제 이륙 시간(브리즈번 시간), 비행 중이며 데이터가 있을 때 표시.
 
             **상태 표시:**
             * <span style="color:{t.c_amber};">⚠️ **안내판 확인**</span>: 레이더 데이터 없음 — 공항 FIDS 안내판을 확인하세요.
@@ -1293,6 +1304,7 @@ def _live_dashboard_impl():
             * 🟠 **심한 지연** (3시간+) / 🔴 **매우 심한 지연** (12시간+).
             * <span style="color:{t.c_red};">⚡ **혼잡 경보**</span>: 15분 내 3편 이상 또는 대형기 (A350/A380/777/787) 2편 이상 연속 도착.
             * <span style="color:{t.c_purple};">✈️ **회항**</span>: BNE에 도착하지 않음.
+            * 게이트 번호 아래 「⚠ 이전 XX」: 게이트가 최근 변경됨 (모두에게 표시, 60분 후 사라짐).
 
             **공백 바 (항공편 사이):** 🟢 진행 중 = 지금이 휴식 시간, 카운트다운은 남은 시간; 🔄 = 예정된 공백; "약"은 다음 편이 예정 시간만 있어 변동 가능함을 의미.
 
@@ -1300,7 +1312,13 @@ def _live_dashboard_impl():
 
             **항공편 번호 클릭 가능:** Flightradar24가 열립니다 (앱 설치 시 앱으로).
 
+            **사진 클릭 가능:** 항공기 사진을 누르면 확대되며, 아래에 기종·기령·좌석 수와 Planespotters의 추가 사진 링크가 표시됩니다.
+
             **상단 정보:** 업데이트 시간, (+약 10분 지연) = AeroDataBox 자체 지연, 다음 새로고침 카운트다운 (5분마다).
+
+            **날씨 표시줄:** 공항 실시간 날씨(기온·바람). 안개 시 황색으로 표시. 「→ 🌫️ 안개 ~06:00」는 약 3시간 내 날씨 변화 예고 — 황색=악화, 녹색=호전.
+
+            **운영 차질 모드:** 다수의 회항(또는 착륙 확인 없이 지연되는 다수 항공편)이 감지되면 경고 배너가 표시되고 자동 착륙 판정이 중단되며, 해당 항공편은 「안내판 확인」으로 표시됩니다. FIDS를 확인하세요.
 
             **대기 시간 (01:00–03:00 AEST):** API 절약을 위해 야간 대기 모드, 04:00 근무 시작 전 자동 재개.
 
@@ -1314,6 +1332,7 @@ def _live_dashboard_impl():
             * <span class="mono" style="color:{t.c_blue};font-weight:bold;">Act</span>: **実際**の着陸時刻が確定 — 乗客がまもなく到着します。
             * <span class="mono" style="color:{t.text_faded};font-weight:bold;">Est</span>: レーダーによる**推定**到着時刻（実際の着陸に合わせ約10分早めに補正済み）。
             * <span class="mono" style="color:{t.text_muted};font-weight:bold;">Sch</span>: **定刻**のみ — レーダーデータなし。
+            * **出発**: 実際の離陸時刻（ブリスベン時間）。飛行中かつデータがある場合に表示。
 
             **ステータス表示:**
             * <span style="color:{t.c_amber};">⚠️ **案内板確認**</span>: レーダーデータなし — 空港のFIDS案内板をご確認ください。
@@ -1322,6 +1341,7 @@ def _live_dashboard_impl():
             * 🟠 **大幅遅延**（3時間+）/ 🔴 **深刻な遅延**（12時間+）。
             * <span style="color:{t.c_red};">⚡ **ピーク**</span>: 15分以内に3便以上、またはワイドボディ機（A350/A380/777/787）2機以上が連続到着。
             * <span style="color:{t.c_purple};">✈️ **ダイバート**</span>: BNEには到着しません。
+            * ゲート番号の下の「⚠ 旧 XX」: ゲートが最近変更されました（全員に表示、60分後に消えます）。
 
             **空きバー（便と便の間）:** 🟢 進行中 = 今が休憩時間、カウントダウンは残り時間; 🔄 = 今後の空き; 「約」は次便が定刻のみのため終了時刻が変動する可能性を示します。
 
@@ -1329,7 +1349,13 @@ def _live_dashboard_impl():
 
             **便名はクリック可能:** Flightradar24が開きます（アプリがあればアプリで）。
 
+            **写真はクリック可能:** 機体写真をタップすると拡大され、下に機種・機齢・座席数と、その機体のPlanespottersの追加写真へのリンクが表示されます。
+
             **ヘッダー情報:** 更新時刻、（+約10分遅延）= AeroDataBox自体の遅延、次の更新カウントダウン（5分ごと）。
+
+            **天気バー:** 空港のリアルタイム天候（気温・風）。霧の場合は琥珀色で表示。「→ 🌫️ 霧 ~06:00」は約3時間以内の天候変化の予告 — 琥珀色=悪化、緑=好転。
+
+            **運用乱れモード:** 複数のダイバート（または着陸確認のない大幅遅延便）を検出すると警告バナーが表示され、自動着陸判定が停止し、該当便は「案内板確認」と表示されます。FIDSをご確認ください。
 
             **スリープ時間（01:00–03:00 AEST）:** API節約のため夜間スリープ、04:00のシフト開始前に自動再開。
 
@@ -1346,6 +1372,7 @@ def _live_dashboard_impl():
             * <span class="mono" style="color:{t.c_blue};font-weight:bold;">Act</span>: **Actual** landing time confirmed. Pax are heading to the floor.
             * <span class="mono" style="color:{t.text_faded};font-weight:bold;">Est</span>: **Estimated** arrival from live radar, adjusted ~10 min earlier to match observed real arrivals.
             * <span class="mono" style="color:{t.text_muted};font-weight:bold;">Sch</span>: **Scheduled** only — no radar data yet.
+            * **Dep**: actual take-off time (shown in Brisbane time) for airborne flights, when available.
 
             **Status Indicators:**
             * <span style="color:{t.c_amber};">⚠️ **Check Board**</span>: No live radar — refer to the airport FIDS boards.
@@ -1354,6 +1381,7 @@ def _live_dashboard_impl():
             * <span style="color:{t.c_amber};">🟠 **Heavy delay**</span> (3h+) / <span style="color:{t.c_red};">🔴 **Severe delay**</span> (12h+).
             * <span style="color:{t.c_red};">⚡ **Surge**</span>: 3+ flights within 15 min, or 2+ widebodies (A350/A380/777/787) close together — all hands on deck.
             * <span style="color:{t.c_purple};">✈️ **Diverted**</span>: Not arriving at BNE.
+            * **⚠ was XX** under a gate number: the gate changed recently (visible to everyone, clears after 60 min).
 
             **Gap Bars (between flights):**
             * <span style="color:{t.c_green};">🟢 ACTIVE</span>: A break window is happening right now — countdown shows time left.
@@ -1366,10 +1394,19 @@ def _live_dashboard_impl():
             **Flight Numbers are Clickable:**
             Tap any flight number to open it in Flightradar24 (opens the FR24 app if installed; live-map view for airborne flights).
 
+            **Photos are Clickable:**
+            Tap an aircraft photo to enlarge it — aircraft type, age and seat count appear underneath, with a link to more photos of that airframe on Planespotters.
+
             **Header Info:**
             * **Updated X min ago**: When data was last fetched from AeroDataBox.
             * **(+~10m lag)**: AeroDataBox data typically runs ~10 minutes behind real-time.
             * **Next refresh**: Live countdown to the next data fetch (every 5 min).
+
+            **Weather Strip:**
+            Live conditions at BNE airport (temp, wind). Fog shows in amber. An arrow such as "→ 🌫️ Fog ~06:00" warns of a change within ~3 hours — amber means worsening, green means improving.
+
+            **Disruption Mode:**
+            When multiple diversions are detected — or several flights run well past their ETA with no landings confirmed — a warning banner appears, automatic "landed" inference is suspended, and affected flights show Check Board. Trust the FIDS until the banner clears.
 
             **Quiet Hours (01:00–03:00 AEST):**
             The board sleeps overnight to save API quota — wakes up automatically before 04:00 shift start.
@@ -1700,7 +1737,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.29 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.31-debug fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2293,7 +2330,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.29</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.31-debug</div>",
         unsafe_allow_html=True,
     )
 
