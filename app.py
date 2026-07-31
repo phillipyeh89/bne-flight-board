@@ -98,6 +98,7 @@ TRANSLATIONS = {
         "was_gate":      "⚠ was {x}",
         "seats":         "{n} seats",
         "dep_label":     "Dep {x}",
+        "more_photos":   "More photos",
         "age_years":     "{n} years",
         "age_months":    "{n} months",
         "freighter":     "📦 Freighter",
@@ -157,6 +158,7 @@ TRANSLATIONS = {
         "was_gate":      "⚠ 原 {x}",
         "seats":         "{n} 座",
         "dep_label":     "起飛 {x}",
+        "more_photos":   "更多照片",
         "age_years":     "機齡 {n} 年",
         "age_months":    "機齡 {n} 個月",
         "freighter":     "📦 貨機",
@@ -216,6 +218,7 @@ TRANSLATIONS = {
         "was_gate":      "⚠ 이전 {x}",
         "seats":         "{n}석",
         "dep_label":     "출발 {x}",
+        "more_photos":   "사진 더 보기",
         "age_years":     "기령 {n}년",
         "age_months":    "기령 {n}개월",
         "freighter":     "📦 화물기",
@@ -275,6 +278,7 @@ TRANSLATIONS = {
         "was_gate":      "⚠ 旧 {x}",
         "seats":         "{n}席",
         "dep_label":     "出発 {x}",
+        "more_photos":   "他の写真",
         "age_years":     "機齢{n}年",
         "age_months":    "機齢{n}ヶ月",
         "freighter":     "📦 貨物機",
@@ -539,7 +543,8 @@ def get_dynamic_css(t: ThemeParams, font_size_px: int = 16) -> str:
 
         .img-zoom-modal {{
             display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-            background: {t.modal_bg}; z-index: 10000; align-items: center; justify-content: center; backdrop-filter: blur(10px);
+            background: {t.modal_bg}; z-index: 10000; flex-direction: column;
+            align-items: center; justify-content: center; backdrop-filter: blur(10px);
         }}
         .img-zoom-chk:checked + .img-zoom-modal {{ display: flex !important; }}
         .img-zoom-modal img {{ max-width: 90%; max-height: 80%; border-radius: 12px; border: 2px solid {t.border_muted}; object-fit: contain; z-index: 10001; }}
@@ -1139,7 +1144,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.28)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.29)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1195,7 +1200,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.28 — a broken
+    # never prevent the flight list below from rendering (V12.29 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1695,7 +1700,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.28 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.29 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2170,6 +2175,13 @@ def _live_dashboard_impl():
         if _ai:
             zoom_caption_bits += bits if _ai else []
         zoom_caption = " · ".join(b for b in zoom_caption_bits if b)
+        if pf.get("reg"):
+            _ps_url = f"https://www.planespotters.net/search?q={pf['reg']}"
+            zoom_caption += (
+                f' <a href="{_ps_url}" target="_blank" rel="noopener" '
+                f'style="color:{t.c_blue}; text-decoration:none; margin-left:6px; '
+                f'font-weight:700;">📷 {L("more_photos")} ↗</a>'
+            )
 
         # Gate-change badge — small amber "was XX" tag if the gate changed recently
         gate_change_badge = ""
@@ -2281,7 +2293,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.28</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.29</div>",
         unsafe_allow_html=True,
     )
 
