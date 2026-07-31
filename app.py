@@ -889,16 +889,29 @@ def _fetch_dep_time_http(flight_num: str, s_dt_iso: str, key: str):
                 diff = 0
             if best is None or diff < best_diff:
                 best, best_diff = leg, diff
-        result = "NONE"
+        result = {"found": False, "dep": None, "reg": None}
         if best:
+            result["found"] = True
+            # Today's-leg airframe — used to cross-validate the FIDS reg, which
+            # often carries the PREVIOUS day's aircraft until assignment.
+            _lac = best.get("aircraft") or {}
+            _leg_reg = _lac.get("reg") or _lac.get("registration")
+            if _leg_reg:
+                result["reg"] = str(_leg_reg).strip().upper()
             dep = best.get("departure") or {}
             for k in ("runwayTime", "actualTime"):
                 node = dep.get(k)
-                raw = (node or {}).get("utc") if isinstance(node, dict) else None
+                raw = None
+                if isinstance(node, dict):          # nested {utc, local}
+                    raw = node.get("utc")
+                elif isinstance(node, str):         # bare string
+                    raw = node
+                if not raw:
+                    raw = dep.get(k + "Utc")        # flat "...Utc" schema variant
                 if raw:
                     try:
-                        result = (pd.to_datetime(raw, utc=True)
-                                  .tz_convert(TIMEZONE).strftime("%H:%M"))
+                        result["dep"] = (pd.to_datetime(raw, utc=True)
+                                         .tz_convert(TIMEZONE).strftime("%H:%M"))
                         break
                     except Exception:
                         continue
@@ -913,9 +926,10 @@ def _fetch_dep_time_http(flight_num: str, s_dt_iso: str, key: str):
             _dep_pending.discard(key)
 
 
-def get_dep_time(flight_num: str, s_dt_iso: str) -> str | None:
-    """NON-BLOCKING. Cached actual departure 'HH:MM' (AEST), or None while
-    unknown. Kicks off one budgeted background lookup on first miss."""
+def get_flight_leg_info(flight_num: str, s_dt_iso: str):
+    """NON-BLOCKING. Cached per-flight leg info dict
+    {found, dep (HH:MM AEST), reg} or None while unknown. Kicks off one
+    budgeted background lookup on first miss."""
     if not DEP_INFO_ENABLED or not flight_num or not s_dt_iso:
         return None
     key = f"{flight_num}|{s_dt_iso[:10]}"
@@ -926,7 +940,7 @@ def get_dep_time(flight_num: str, s_dt_iso: str) -> str | None:
         if cached is None and not already:
             _dep_pending.add(key)
     if cached is not None:
-        return cached if cached != "NONE" else None
+        return cached if isinstance(cached, dict) else None
     if fail_ts and (datetime.now().timestamp() - fail_ts) < DEP_FAIL_TTL_SEC:
         with _dep_lock:
             _dep_pending.discard(key)
@@ -935,6 +949,11 @@ def get_dep_time(flight_num: str, s_dt_iso: str) -> str | None:
         threading.Thread(target=_fetch_dep_time_http,
                          args=(flight_num, s_dt_iso, key), daemon=True).start()
     return None
+
+
+def get_dep_time(flight_num: str, s_dt_iso: str):
+    info = get_flight_leg_info(flight_num, s_dt_iso)
+    return info.get("dep") if info else None
 
 
 def get_photo_from_api(reg: str) -> str:
@@ -1146,7 +1165,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.31-debug)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.32-debug)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1202,7 +1221,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.31-debug — a broken
+    # never prevent the flight list below from rendering (V12.32-debug — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1737,7 +1756,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.31-debug fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.32-debug fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2130,7 +2149,34 @@ def _live_dashboard_impl():
             landed_divider_shown = True
 
         mid       = f"z_{i}"
-        has_photo = pf["photo_url"] != "NOT_FOUND"
+        # ── Registration cross-validation ────────────────────────────────────
+        # FIDS regs frequently carry the previous rotation's airframe until
+        # today's is assigned (verified: QR898 showing prior-day A7-BEG while
+        # FR24 showed today's reg still unassigned). The per-flight leg lookup
+        # (already fetched for departure times — zero extra cost) is
+        # authoritative for TODAY: prefer its reg; if the leg exists but has no
+        # airframe yet, hide the FIDS reg rather than show the wrong aircraft.
+        display_reg   = pf.get("reg") or ""
+        _ac_text_show = pf.get("ac_text") or ""
+        photo_url     = pf["photo_url"]
+        _leg = get_flight_leg_info(pf.get("num", ""), pf.get("s_dt_iso") or "")
+        if _leg and _leg.get("found"):
+            if _leg.get("reg"):
+                if display_reg and _leg["reg"] != display_reg:
+                    _ac_text_show = _ac_text_show.replace(display_reg, _leg["reg"])
+                    display_reg   = _leg["reg"]
+                elif not display_reg:
+                    display_reg   = _leg["reg"]
+                    _ac_text_show = (f"{_ac_text_show} ({display_reg})"
+                                     if _ac_text_show else display_reg)
+            else:
+                if display_reg:
+                    _ac_text_show = _ac_text_show.replace(f" ({display_reg})", "")
+                display_reg = ""
+        if display_reg != (pf.get("reg") or ""):
+            photo_url = get_photo_from_api(display_reg) if display_reg else "NOT_FOUND"
+
+        has_photo = photo_url != "NOT_FOUND"
         al_code   = "".join(c for c in pf["num"] if c.isalpha())[:2].upper()
 
         img_html = (
@@ -2186,12 +2232,12 @@ def _live_dashboard_impl():
                 f' • <span class="mono" style="color:{time_color}; font-weight:700; font-size:1.05em;">{tag} {pf["actual_time"]}</span>'
             )
 
-        zoom_src = pf["photo_url"] if has_photo else pf["logo_url"]
+        zoom_src = photo_url if has_photo else pf["logo_url"]
         gate_cls = "gate-tba" if pf["gate"] == "TBA" else "gate-num"
 
         # Aircraft extras (age / seats / freighter) from the background Tier-1 cache.
         bits = []
-        _ai = get_aircraft_info(pf.get("reg", ""))
+        _ai = get_aircraft_info(display_reg)
         if _ai:
             if _ai.get("age"):
                 _age_val = _ai["age"]
@@ -2208,12 +2254,12 @@ def _live_dashboard_impl():
         # the photo zoom modal (user preference: keep cards compact).
 
         # Caption for the photo zoom modal: aircraft type/reg + the same extras
-        zoom_caption_bits = [pf["ac_text"]] if pf.get("ac_text") else []
+        zoom_caption_bits = [_ac_text_show] if _ac_text_show else []
         if _ai:
             zoom_caption_bits += bits if _ai else []
         zoom_caption = " · ".join(b for b in zoom_caption_bits if b)
-        if pf.get("reg"):
-            _ps_url = f"https://www.planespotters.net/search?q={pf['reg']}"
+        if display_reg:
+            _ps_url = f"https://www.planespotters.net/search?q={display_reg}"
             zoom_caption += (
                 f' <a href="{_ps_url}" target="_blank" rel="noopener" '
                 f'style="color:{t.c_blue}; text-decoration:none; margin-left:6px; '
@@ -2261,7 +2307,7 @@ def _live_dashboard_impl():
             {img_html}
             <div class="info-col">
                 <div style="font-size:1.1em; font-weight:700;">{flight_num_html}<span style="font-size:0.7em; color:{t.text_muted}; margin-left:8px;">{pf['origin']} [{pf['iata']}]</span></div>
-                <div class="ac-line">{pf['ac_text']}</div>
+                <div class="ac-line">{_ac_text_show}</div>
                 <div style="font-size:0.8em; color:{t.text_muted};">{time_display}</div>
             </div>
             <div class="status-col">
@@ -2330,7 +2376,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.31-debug</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.32-debug</div>",
         unsafe_allow_html=True,
     )
 
