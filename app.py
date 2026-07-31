@@ -87,6 +87,7 @@ TRANSLATIONS = {
         "surge_fmt":     "SURGE {a}–{b} ({n} flights)",
         "was_gate":      "⚠ was {x}",
         "seats":         "{n} seats",
+        "dep_label":     "Dep {x}",
         "age_years":     "{n} years",
         "age_months":    "{n} months",
         "freighter":     "📦 Freighter",
@@ -145,6 +146,7 @@ TRANSLATIONS = {
         "surge_fmt":     "高峰 {a}–{b}（{n} 班）",
         "was_gate":      "⚠ 原 {x}",
         "seats":         "{n} 座",
+        "dep_label":     "起飛 {x}",
         "age_years":     "機齡 {n} 年",
         "age_months":    "機齡 {n} 個月",
         "freighter":     "📦 貨機",
@@ -203,6 +205,7 @@ TRANSLATIONS = {
         "surge_fmt":     "혼잡 {a}–{b} ({n}편)",
         "was_gate":      "⚠ 이전 {x}",
         "seats":         "{n}석",
+        "dep_label":     "출발 {x}",
         "age_years":     "기령 {n}년",
         "age_months":    "기령 {n}개월",
         "freighter":     "📦 화물기",
@@ -261,6 +264,7 @@ TRANSLATIONS = {
         "surge_fmt":     "ピーク {a}–{b}（{n}便）",
         "was_gate":      "⚠ 旧 {x}",
         "seats":         "{n}席",
+        "dep_label":     "出発 {x}",
         "age_years":     "機齢{n}年",
         "age_months":    "機齢{n}ヶ月",
         "freighter":     "📦 貨物機",
@@ -977,7 +981,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.22)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.23)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1033,7 +1037,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.22 — a broken
+    # never prevent the flight list below from rendering (V12.23 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1467,6 +1471,19 @@ def _live_dashboard_impl():
             s_dt = best_dt
 
         has_departed = (dep_node.get("actualTime") is not None) or (status_raw in AIRBORNE_STATUSES)
+
+        # Actual departure time, shown in BRISBANE time so every timestamp on
+        # the board shares one timezone (origin-local would force mental
+        # conversion). Only the UTC variant converts reliably — if AeroDataBox
+        # supplies only an origin-local string we skip rather than mislabel.
+        dep_time_str = None
+        _dep_act = dep_node.get("actualTime")
+        if isinstance(_dep_act, dict) and _dep_act.get("utc"):
+            try:
+                dep_time_str = (pd.to_datetime(_dep_act["utc"], utc=True)
+                                .tz_convert(TIMEZONE).strftime("%H:%M"))
+            except Exception:
+                dep_time_str = None
         # If the flight hasn't departed and revisedTime is identical to scheduled
         # (within 60s), it's not real updated info — treat as scheduled. But if
         # there's a meaningful difference, the airline has updated the ETA based
@@ -1529,7 +1546,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.22 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.23 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -1568,6 +1585,7 @@ def _live_dashboard_impl():
             "gate":         arr.get("gate") or "TBA",
             "ac_text":      f"{ac_m} ({ac_r})" if ac_m and ac_r else ac_m or ac_r,
             "reg":          ac_r,
+            "dep_time":     dep_time_str,
             "actual_time":  best_dt.strftime("%H:%M"),
             "sch_time":     s_dt.strftime("%H:%M"),
             "is_landed":    is_lan,
@@ -1944,12 +1962,23 @@ def _live_dashboard_impl():
                 and not pf["is_diverted"] and pf["dt"] <= now_aest):
             suppress_countdown = True
 
+        # Actual departure prefix (Brisbane time) — like FR24's "Departed" but
+        # in board-local time. Absent whenever AeroDataBox didn't supply it.
+        dep_html = ""
+        if pf.get("dep_time"):
+            dep_html = (
+                f'<span class="mono" style="color:{t.text_faded}; font-size:0.85em;">'
+                f'{L("dep_label", x=pf["dep_time"])}</span> • '
+            )
+
         if tag == "Sch":
             time_display = (
+                f'{dep_html}'
                 f'<span class="mono" style="color:{t.text_muted};">Sch {pf["sch_time"]}</span>'
             )
         else:
             time_display = (
+                f'{dep_html}'
                 f'<span class="mono" style="color:{t.text_muted}; font-size:0.85em;">Sch {pf["sch_time"]}</span>'
                 f' • <span class="mono" style="color:{time_color}; font-weight:700; font-size:1.05em;">{tag} {pf["actual_time"]}</span>'
             )
@@ -2085,7 +2114,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.22</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.23</div>",
         unsafe_allow_html=True,
     )
 
