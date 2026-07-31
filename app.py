@@ -23,11 +23,21 @@ HEAVY_DELAY_HOURS        = 3    # orange warning threshold
 SEVERE_DELAY_HOURS       = 12   # red critical threshold
 IMMINENT_MINS            = 25   # red "hot" threshold — flight arriving within 25 min
 API_LAG_MINS             = 10   # AeroDataBox lag observed in practice — typical 5-15 min range
-# Master switch for the per-aircraft detail lookup (age / seats / freighter).
-# Each unique registration costs 1 extra API unit and the cache is wiped on every
-# Streamlit redeploy or sleep/wake, so during heavy iteration this can burn
-# thousands of units a month. Turn back on once quota headroom is confirmed.
-AIRCRAFT_INFO_ENABLED    = False
+# Per-aircraft detail lookup (age / seats / freighter), Tier 1 = 1 unit each.
+# Re-enabled on the Ultra plan (60,000 units/month) — and this time protected by
+# a hard daily budget so redeploy-driven cache wipes can never repeat the July
+# quota incident: worst case AC_DAILY_BUDGET × 1 × 31 = 4,650/month... capped
+# below at 150/day = 4,650. Combined worst case across FIDS + dep + aircraft
+# stays around 33,000/month — barely half the Ultra allowance.
+AIRCRAFT_INFO_ENABLED    = True
+AC_DAILY_BUDGET          = 150
+# Actual departure-time lookups (per-flight endpoint, assumed Tier 2 = 2 units).
+# HARD-CAPPED: at most DEP_DAILY_BUDGET HTTP calls per calendar day, counted at
+# the request site — redeploys, cache wipes, and retries all spend from the same
+# daily pot. Ultra plan: worst case 120 × 2 × 31 = 7,440 units/month.
+DEP_INFO_ENABLED         = True
+DEP_DAILY_BUDGET         = 120
+DEP_FAIL_TTL_SEC         = 180
 EST_COMPENSATION_MINS    = 10   # AeroDataBox Est runs ~10 min later than actual touchdown (observed);
                                 # subtract this from live radar estimates to better predict real arrival
 OPENSKY_PREFER_UNDER_MIN = 60   # use OpenSky over AeroDataBox for flights < 60 min out
@@ -336,7 +346,7 @@ AIRLINE_ICAO = {
 
 # FIX 5 — use constant in the fragment decorator (was hardcoded "60s")
 UI_REFRESH_SEC           = 60
-API_DATA_TTL_SEC         = 960  # 16 min cache — Tier 2 endpoint: 90×2×30=5,400 units/month vs 6,000 limit
+API_DATA_TTL_SEC         = 300  # 5 min cache — Ultra plan: ~264 calls/day × 2 units × 31 ≈ 16,400/month vs 60,000 limit
 OPENSKY_TTL_SEC          = 60   # free source — refresh every fragment cycle for freshest radar positions
 
 # Quiet hours — skip API calls between these times to save units. BNE international
@@ -359,7 +369,15 @@ _photo_pending: set      = set()   # regs currently being fetched in the backgro
 # cached for the life of the process — age/seats/freighter status never change.
 _ac_info_cache: dict     = {}
 _ac_info_pending: set    = set()
+_ac_budget               = {"date": "", "n": 0}
 _ac_info_lock            = threading.Lock()
+# Departure-time lookups: key = "FLIGHT|YYYY-MM-DD" (arrival sched date, AEST)
+_dep_cache: dict         = {}   # key -> "HH:MM" (AEST) or "NONE"
+_dep_pending: set        = set()
+_dep_fails: dict         = {}   # key -> fail timestamp (retry after DEP_FAIL_TTL_SEC)
+_dep_budget              = {"date": "", "n": 0}
+_dep_lock                = threading.Lock()
+
 # Gate history — module-level so ALL users see the same change badges (was
 # session-scoped: each browser had its own memory). Changes expire after 60 min.
 _gate_state: dict        = {}   # flight_num -> last seen gate
@@ -491,7 +509,6 @@ def get_dynamic_css(t: ThemeParams, font_size_px: int = 16) -> str:
         }}
         .info-col   {{ flex-grow: 1; min-width: 0; overflow: hidden; word-wrap: break-word; }}
         .info-col .ac-line {{ font-size: 0.78em; color: {t.text_faded}; margin: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-        .info-col .ac-extra-line {{ font-size: 0.75em; color: {t.text_main}; font-weight: 600; margin: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
         .status-col {{ text-align: right; min-width: 110px; max-width: 45%; display: flex; flex-direction: column; justify-content: center; flex-shrink: 0; }}
         .gate-num   {{ font-size: 1.85em; font-weight: 700; line-height: 1; }}
         .gate-tba   {{ font-size: 1.85em; font-weight: 700; line-height: 1; opacity: 0.35; }}
@@ -528,6 +545,9 @@ def get_dynamic_css(t: ThemeParams, font_size_px: int = 16) -> str:
         .img-zoom-modal img {{ max-width: 90%; max-height: 80%; border-radius: 12px; border: 2px solid {t.border_muted}; object-fit: contain; z-index: 10001; }}
         .img-zoom-close-bg {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: pointer; z-index: 10000; }}
         .close-btn {{ position: absolute; top: 20px; right: 30px; color: {t.text_main}; font-size: 3.5em; font-weight: bold; cursor: pointer; z-index: 10002; line-height: 1; }}
+        .zoom-caption {{ margin-top: 12px; color: {t.text_main}; font-size: 0.95em; font-weight: 600;
+                         background: {t.bg_card}; border: 1px solid {t.border_muted}; border-radius: 8px;
+                         padding: 8px 16px; z-index: 10001; max-width: 90%; text-align: center; }}
         /* Hide the popover chevron arrow next to the gear icon */
         [data-testid="stPopover"] button [data-testid="stIconMaterial"]:last-of-type,
         [data-testid="stPopover"] button svg:last-of-type {{ display: none !important; }}
@@ -747,6 +767,16 @@ def _fetch_aircraft_info_http(reg: str):
 
 
 def _background_fetch_aircraft_info(reg: str):
+    # Daily budget gate — the July lesson: without this, redeploy cache wipes
+    # turn "one lookup per aircraft" into thousands of calls a month.
+    _today = datetime.now(pytz.timezone(TIMEZONE)).strftime("%Y-%m-%d")
+    with _ac_info_lock:
+        if _ac_budget["date"] != _today:
+            _ac_budget["date"], _ac_budget["n"] = _today, 0
+        if _ac_budget["n"] >= AC_DAILY_BUDGET:
+            _ac_info_pending.discard(reg)
+            return
+        _ac_budget["n"] += 1
     with _photo_semaphore:          # share the same politeness cap as photos
         result = _fetch_aircraft_info_http(reg)
     with _ac_info_lock:
@@ -769,6 +799,134 @@ def get_aircraft_info(reg: str):
         return cached if cached != "NONE" else None
     if not already:
         threading.Thread(target=_background_fetch_aircraft_info, args=(reg,), daemon=True).start()
+    return None
+
+
+def _dep_budget_take() -> bool:
+    """Consume one unit of today's departure-lookup budget. False = exhausted."""
+    today = datetime.now(pytz.timezone(TIMEZONE)).strftime("%Y-%m-%d")
+    with _dep_lock:
+        if _dep_budget["date"] != today:
+            _dep_budget["date"] = today
+            _dep_budget["n"] = 0
+        if _dep_budget["n"] >= DEP_DAILY_BUDGET:
+            return False
+        _dep_budget["n"] += 1
+        return True
+
+
+def _fetch_dep_time_http(flight_num: str, s_dt_iso: str, key: str):
+    """Look up the actual departure (wheels-up) time for one flight via the
+    per-flight endpoint. Runs in a background thread. Writes result to cache."""
+    try:
+        if not _dep_budget_take():
+            return   # budget spent — leave uncached; tomorrow's budget may retry
+        # Same politeness gate as other AeroDataBox calls
+        with _adb_throttle_lock:
+            import time as _time
+            _el = _time.time() - _adb_last_request[0]
+            if _el < ADB_MIN_INTERVAL_SEC:
+                _time.sleep(ADB_MIN_INTERVAL_SEC - _el)
+            _adb_last_request[0] = _time.time()
+
+        compact = flight_num.replace(" ", "")
+        r = requests.get(
+            f"https://aerodatabox.p.rapidapi.com/flights/number/{compact}",
+            headers={
+                "X-RapidAPI-Key":  st.secrets["X_RAPIDAPI_KEY"],
+                "X-RapidAPI-Host": "aerodatabox.p.rapidapi.com",
+            },
+            params={"withAircraftImage": "false", "withLocation": "false"},
+            timeout=8,
+        )
+        if r.status_code != 200:
+            if r.status_code == 429 or r.status_code >= 500:
+                with _dep_lock:
+                    _dep_fails[key] = datetime.now().timestamp()
+            else:
+                with _dep_lock:
+                    _dep_cache[key] = "NONE"
+            return
+        legs = r.json()
+        if isinstance(legs, dict):
+            legs = [legs]
+        if not isinstance(legs, list):
+            with _dep_lock:
+                _dep_cache[key] = "NONE"
+            return
+        # Choose the leg arriving at BNE whose scheduled arrival is closest to ours
+        try:
+            our_sch = pd.to_datetime(s_dt_iso)
+        except Exception:
+            our_sch = None
+        best, best_diff = None, None
+        for leg in legs:
+            arr = (leg or {}).get("arrival") or {}
+            ap  = arr.get("airport") or {}
+            if str(ap.get("icao", "")).upper() != AIRPORT_ICAO:
+                continue
+            if our_sch is not None:
+                sch = arr.get("scheduledTime") or {}
+                raw = sch.get("utc") or sch.get("local")
+                try:
+                    diff = abs((pd.to_datetime(raw, utc=True)
+                                .tz_convert(TIMEZONE).tz_localize(None)
+                                - our_sch.tz_localize(None)
+                                if our_sch.tzinfo else
+                                pd.to_datetime(raw, utc=True)
+                                .tz_convert(TIMEZONE).tz_localize(None) - our_sch
+                                ).total_seconds())
+                except Exception:
+                    diff = 1e12
+            else:
+                diff = 0
+            if best is None or diff < best_diff:
+                best, best_diff = leg, diff
+        result = "NONE"
+        if best:
+            dep = best.get("departure") or {}
+            for k in ("runwayTime", "actualTime"):
+                node = dep.get(k)
+                raw = (node or {}).get("utc") if isinstance(node, dict) else None
+                if raw:
+                    try:
+                        result = (pd.to_datetime(raw, utc=True)
+                                  .tz_convert(TIMEZONE).strftime("%H:%M"))
+                        break
+                    except Exception:
+                        continue
+        with _dep_lock:
+            _dep_cache[key] = result
+    except Exception as e:
+        log.warning("Dep time fetch failed for %s: %s", flight_num, e)
+        with _dep_lock:
+            _dep_fails[key] = datetime.now().timestamp()
+    finally:
+        with _dep_lock:
+            _dep_pending.discard(key)
+
+
+def get_dep_time(flight_num: str, s_dt_iso: str) -> str | None:
+    """NON-BLOCKING. Cached actual departure 'HH:MM' (AEST), or None while
+    unknown. Kicks off one budgeted background lookup on first miss."""
+    if not DEP_INFO_ENABLED or not flight_num or not s_dt_iso:
+        return None
+    key = f"{flight_num}|{s_dt_iso[:10]}"
+    with _dep_lock:
+        cached = _dep_cache.get(key)
+        fail_ts = _dep_fails.get(key)
+        already = key in _dep_pending
+        if cached is None and not already:
+            _dep_pending.add(key)
+    if cached is not None:
+        return cached if cached != "NONE" else None
+    if fail_ts and (datetime.now().timestamp() - fail_ts) < DEP_FAIL_TTL_SEC:
+        with _dep_lock:
+            _dep_pending.discard(key)
+        return None
+    if not already:
+        threading.Thread(target=_fetch_dep_time_http,
+                         args=(flight_num, s_dt_iso, key), daemon=True).start()
     return None
 
 
@@ -981,7 +1139,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.24-debug)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.28)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1037,7 +1195,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.24-debug — a broken
+    # never prevent the flight list below from rendering (V12.28 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1108,7 +1266,7 @@ def _live_dashboard_impl():
 
             **航班號可點擊：** 點擊可開啟 Flightradar24（已安裝 App 會直接開啟）。
 
-            **頂部資訊：** 更新時間（資料抓取時間）、（+約10分延遲）= AeroDataBox 本身的延遲、下次更新倒數（每 16 分鐘）。
+            **頂部資訊：** 更新時間（資料抓取時間）、（+約10分延遲）= AeroDataBox 本身的延遲、下次更新倒數（每 5 分鐘）。
 
             **休眠時段（01:00–03:00 AEST）：** 看板夜間休眠以節省 API 額度，04:00 早班開始前自動喚醒。
 
@@ -1137,7 +1295,7 @@ def _live_dashboard_impl():
 
             **항공편 번호 클릭 가능:** Flightradar24가 열립니다 (앱 설치 시 앱으로).
 
-            **상단 정보:** 업데이트 시간, (+약 10분 지연) = AeroDataBox 자체 지연, 다음 새로고침 카운트다운 (16분마다).
+            **상단 정보:** 업데이트 시간, (+약 10분 지연) = AeroDataBox 자체 지연, 다음 새로고침 카운트다운 (5분마다).
 
             **대기 시간 (01:00–03:00 AEST):** API 절약을 위해 야간 대기 모드, 04:00 근무 시작 전 자동 재개.
 
@@ -1166,7 +1324,7 @@ def _live_dashboard_impl():
 
             **便名はクリック可能:** Flightradar24が開きます（アプリがあればアプリで）。
 
-            **ヘッダー情報:** 更新時刻、（+約10分遅延）= AeroDataBox自体の遅延、次の更新カウントダウン（16分ごと）。
+            **ヘッダー情報:** 更新時刻、（+約10分遅延）= AeroDataBox自体の遅延、次の更新カウントダウン（5分ごと）。
 
             **スリープ時間（01:00–03:00 AEST）:** API節約のため夜間スリープ、04:00のシフト開始前に自動再開。
 
@@ -1206,7 +1364,7 @@ def _live_dashboard_impl():
             **Header Info:**
             * **Updated X min ago**: When data was last fetched from AeroDataBox.
             * **(+~10m lag)**: AeroDataBox data typically runs ~10 minutes behind real-time.
-            * **Next refresh**: Live countdown to the next data fetch (every 16 min).
+            * **Next refresh**: Live countdown to the next data fetch (every 5 min).
 
             **Quiet Hours (01:00–03:00 AEST):**
             The board sleeps overnight to save API quota — wakes up automatically before 04:00 shift start.
@@ -1470,22 +1628,11 @@ def _live_dashboard_impl():
         else:
             s_dt = best_dt
 
+        # NOTE: this FIDS endpoint ships an EMPTY departure object ({}) for every
+        # flight (verified 2026-07-31 via DEP DEBUG) — so has_departed can only
+        # ever come true via the status field. Departure times would need the
+        # per-flight endpoint at ~2 units/flight, which the quota can't afford.
         has_departed = (dep_node.get("actualTime") is not None) or (status_raw in AIRBORNE_STATUSES)
-
-        # Actual departure time, shown in BRISBANE time so every timestamp on
-        # the board shares one timezone (origin-local would force mental
-        # conversion). Only the UTC variant converts reliably — if AeroDataBox
-        # supplies only an origin-local string we skip rather than mislabel.
-        dep_time_str = None
-        _dep_act = dep_node.get("actualTime")
-        # TEMP DEP DEBUG — remove once departure-time coverage is confirmed
-        log.warning("DEP DEBUG [%s]: %s", flight_num, dep_node)
-        if isinstance(_dep_act, dict) and _dep_act.get("utc"):
-            try:
-                dep_time_str = (pd.to_datetime(_dep_act["utc"], utc=True)
-                                .tz_convert(TIMEZONE).strftime("%H:%M"))
-            except Exception:
-                dep_time_str = None
         # If the flight hasn't departed and revisedTime is identical to scheduled
         # (within 60s), it's not real updated info — treat as scheduled. But if
         # there's a meaningful difference, the airline has updated the ETA based
@@ -1548,7 +1695,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.24-debug fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.28 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -1587,7 +1734,7 @@ def _live_dashboard_impl():
             "gate":         arr.get("gate") or "TBA",
             "ac_text":      f"{ac_m} ({ac_r})" if ac_m and ac_r else ac_m or ac_r,
             "reg":          ac_r,
-            "dep_time":     dep_time_str,
+            "s_dt_iso":     s_dt.isoformat() if s_dt is not None else None,
             "actual_time":  best_dt.strftime("%H:%M"),
             "sch_time":     s_dt.strftime("%H:%M"),
             "is_landed":    is_lan,
@@ -1634,6 +1781,18 @@ def _live_dashboard_impl():
                     del _gate_changed[fnum]    # expired — clean up
     except Exception as e:
         log.warning("Gate change detection failed: %s", e)
+
+    # ── Departure-time prefetch (budgeted, background, non-blocking) ─────────
+    # Only radar-tracked inbound flights: they have genuinely departed, the data
+    # exists, and they're the ones staff are actively tracking. Sch-only flights
+    # haven't left (nothing to fetch); landed flights no longer need it.
+    if DEP_INFO_ENABLED:
+        for p in processed:
+            if (not p.get("is_gap") and not p.get("is_surge")
+                    and p.get("time_type") == "revised"
+                    and not p.get("is_landed")
+                    and not p.get("is_canceled") and not p.get("is_diverted")):
+                get_dep_time(p.get("num", ""), p.get("s_dt_iso") or "")
 
     # ── Gap Detection ─────────────────────────────────────────────────────────
     gap_candidates = sorted(
@@ -1964,14 +2123,14 @@ def _live_dashboard_impl():
                 and not pf["is_diverted"] and pf["dt"] <= now_aest):
             suppress_countdown = True
 
-        # Actual departure prefix (Brisbane time) — like FR24's "Departed" but
-        # in board-local time. Absent whenever AeroDataBox didn't supply it.
         dep_html = ""
-        if pf.get("dep_time"):
-            dep_html = (
-                f'<span class="mono" style="color:{t.text_faded}; font-size:0.85em;">'
-                f'{L("dep_label", x=pf["dep_time"])}</span> • '
-            )
+        if not pf["is_landed"]:
+            _dep = get_dep_time(pf.get("num", ""), pf.get("s_dt_iso") or "")
+            if _dep:
+                dep_html = (
+                    f'<span class="mono" style="color:{t.text_faded}; font-size:0.85em;">'
+                    f'{L("dep_label", x=_dep)}</span> • '
+                )
 
         if tag == "Sch":
             time_display = (
@@ -1989,10 +2148,9 @@ def _live_dashboard_impl():
         gate_cls = "gate-tba" if pf["gate"] == "TBA" else "gate-num"
 
         # Aircraft extras (age / seats / freighter) from the background Tier-1 cache.
-        ac_extra = ""
+        bits = []
         _ai = get_aircraft_info(pf.get("reg", ""))
         if _ai:
-            bits = []
             if _ai.get("age"):
                 _age_val = _ai["age"]
                 if _age_val < 1:
@@ -2004,8 +2162,14 @@ def _live_dashboard_impl():
                 bits.append(L("seats", n=_ai["seats"]))
             if _ai.get("freighter"):
                 bits.append(L("freighter"))
-            if bits:
-                ac_extra = f'<div class="ac-extra-line">{" · ".join(bits)}</div>'
+        # Card line intentionally not rendered — aircraft details show ONLY in
+        # the photo zoom modal (user preference: keep cards compact).
+
+        # Caption for the photo zoom modal: aircraft type/reg + the same extras
+        zoom_caption_bits = [pf["ac_text"]] if pf.get("ac_text") else []
+        if _ai:
+            zoom_caption_bits += bits if _ai else []
+        zoom_caption = " · ".join(b for b in zoom_caption_bits if b)
 
         # Gate-change badge — small amber "was XX" tag if the gate changed recently
         gate_change_badge = ""
@@ -2048,7 +2212,7 @@ def _live_dashboard_impl():
             {img_html}
             <div class="info-col">
                 <div style="font-size:1.1em; font-weight:700;">{flight_num_html}<span style="font-size:0.7em; color:{t.text_muted}; margin-left:8px;">{pf['origin']} [{pf['iata']}]</span></div>
-                <div class="ac-line">{pf['ac_text']}</div>{ac_extra}
+                <div class="ac-line">{pf['ac_text']}</div>
                 <div style="font-size:0.8em; color:{t.text_muted};">{time_display}</div>
             </div>
             <div class="status-col">
@@ -2062,6 +2226,7 @@ def _live_dashboard_impl():
             <label for="{mid}" class="img-zoom-close-bg"></label>
             <label for="{mid}" class="close-btn">&times;</label>
             <img src="{zoom_src}"/>
+            <div class="zoom-caption">{zoom_caption}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -2116,7 +2281,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.24-debug</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.28</div>",
         unsafe_allow_html=True,
     )
 
