@@ -981,7 +981,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.23)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.24-debug)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1037,7 +1037,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.23 — a broken
+    # never prevent the flight list below from rendering (V12.24-debug — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1478,6 +1478,8 @@ def _live_dashboard_impl():
         # supplies only an origin-local string we skip rather than mislabel.
         dep_time_str = None
         _dep_act = dep_node.get("actualTime")
+        # TEMP DEP DEBUG — remove once departure-time coverage is confirmed
+        log.warning("DEP DEBUG [%s]: %s", flight_num, dep_node)
         if isinstance(_dep_act, dict) and _dep_act.get("utc"):
             try:
                 dep_time_str = (pd.to_datetime(_dep_act["utc"], utc=True)
@@ -1546,7 +1548,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.23 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.24-debug fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2114,7 +2116,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.23</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.24-debug</div>",
         unsafe_allow_html=True,
     )
 
