@@ -894,11 +894,6 @@ def _fetch_dep_time_http(flight_num: str, s_dt_iso: str, key: str):
                 diff = 0
             if best is None or diff < best_diff:
                 best, best_diff = leg, diff
-        # TEMP LEG DEBUG — arrival airport of each leg (to fix QF60-style records)
-        for _lg in (legs if isinstance(legs, list) else []):
-            _la = ((_lg or {}).get("arrival") or {}).get("airport") or {}
-            log.warning("LEG DEBUG [%s] arr_icao=%s arr_iata=%s",
-                        flight_num, _la.get("icao"), _la.get("iata"))
         result = {"found": False, "dep": None, "dep_actual": False, "reg": None}
         if best:
             result["found"] = True
@@ -1098,7 +1093,7 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
         "X-RapidAPI-Key":  st.secrets["X_RAPIDAPI_KEY"],
         "X-RapidAPI-Host": "aerodatabox.p.rapidapi.com",
     }
-    params = {"direction": "Arrival", "withCancelled": "true", "withCodeshared": "true"}
+    params = {"direction": "Arrival", "withCancelled": "true", "withCodeshared": "false"}
     # Try once with 15s timeout, retry once on timeout/connection error before giving up.
     last_err = None
     for attempt in (1, 2):
@@ -1191,7 +1186,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.39-debug)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.39)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1247,7 +1242,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.39-debug — a broken
+    # never prevent the flight list below from rendering (V12.39 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1546,11 +1541,15 @@ def _live_dashboard_impl():
             _stuck_count += 1
     disruption_mode = (_divert_count >= 2) or (_stuck_count >= 3)
 
-    # TEMP CS DEBUG — inspect codeshare fields now that withCodeshared=true
-    for _cf in deduped_flights[:6]:
-        log.warning("CS DEBUG [%s] codeshareStatus=%s isCodeshared=%s codeshares=%s",
-                    _cf.get("number"), _cf.get("codeshareStatus"),
-                    _cf.get("isCodeshared"), _cf.get("codeshareFlightNumbers") or _cf.get("codeshares"))
+    # Drop codeshare marketing duplicates — keep only the operating carrier's
+    # record. AeroDataBox tags each with codeshareStatus: "IsOperator" (the real
+    # flight) vs "IsCodeshared" (a marketing alias of another flight's aircraft).
+    # Filtering these removes the swarm of duplicate cards AND many of the
+    # malformed foreign-destination records (QF60-style) that ride in as aliases.
+    deduped_flights = [
+        _f for _f in deduped_flights
+        if str(_f.get("codeshareStatus", "")).lower() != "iscodeshared"
+    ]
 
     for f in deduped_flights:
         flight_num = f.get("number", "N/A")
@@ -1701,7 +1700,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.39-debug fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.39 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2310,7 +2309,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.39-debug</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.39</div>",
         unsafe_allow_html=True,
     )
 
