@@ -1015,23 +1015,31 @@ def get_photo_from_api(reg: str) -> str:
 _wx_last_good = {"data": None}   # survives transient Open-Meteo failures
 
 
-@st.cache_data(ttl=1200, show_spinner=False)
-def fetch_weather(anchor: str):
+@st.cache_data(ttl=1800, show_spinner=False)   # 30 min — Open-Meteo shares
+def fetch_weather(anchor: str):                #   a rate-limited IP on Streamlit Cloud
     """Current conditions at BNE airport from Open-Meteo (free, no key, no
     AeroDataBox units). On failure, returns the last good reading so the strip
     doesn't vanish on a single hiccup (weather doesn't change in 5 minutes)."""
+    import time as _time
+    _params = {
+        "latitude": -27.3842, "longitude": 153.1175,
+        "current": "temperature_2m,wind_speed_10m,wind_direction_10m,weather_code",
+        "hourly": "weather_code",
+        "forecast_hours": 3,
+        "timezone": "Australia/Brisbane",
+    }
+    _headers = {"User-Agent": "BNE-Arrivals-Board/1.0 (+https://github.com/phillipyeh89/bne-flight-board)"}
     try:
-        r = requests.get(
-            "https://api.open-meteo.com/v1/forecast",
-            params={
-                "latitude": -27.3842, "longitude": 153.1175,
-                "current": "temperature_2m,wind_speed_10m,wind_direction_10m,weather_code",
-                "hourly": "weather_code",
-                "forecast_hours": 3,
-                "timezone": "Australia/Brisbane",
-            },
-            timeout=6,
-        )
+        r = None
+        for _attempt in (1, 2, 3):
+            r = requests.get("https://api.open-meteo.com/v1/forecast",
+                             params=_params, headers=_headers, timeout=6)
+            if r.status_code == 429:
+                # Shared-IP rate limit — brief back-off then retry
+                log.warning("Weather 429 (attempt %d) — backing off", _attempt)
+                _time.sleep(1.5 * _attempt)
+                continue
+            break
         r.raise_for_status()
         body   = r.json() or {}
         cur    = body.get("current") or {}
@@ -1232,7 +1240,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.40)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.41)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1288,7 +1296,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.40 — a broken
+    # never prevent the flight list below from rendering (V12.41 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1746,7 +1754,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.40 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.41 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2365,7 +2373,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.40</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.41</div>",
         unsafe_allow_html=True,
     )
 
