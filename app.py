@@ -121,6 +121,7 @@ TRANSLATIONS = {
         "wx_storm":      "Thunderstorm",
         "wx_next3h":     "Next 3h:",
         "wx_loading":    "Loading weather…",
+        "wx_vis":        "Vis",
         "updated_ago":   "Updated {x} ago",
         "just_now":      "Updated just now",
         "min_ago":       "{n} min",
@@ -184,6 +185,7 @@ TRANSLATIONS = {
         "wx_storm":      "雷雨",
         "wx_next3h":     "未來3小時：",
         "wx_loading":    "天氣載入中…",
+        "wx_vis":        "能見度",
         "updated_ago":   "更新於 {x}前",
         "just_now":      "剛剛更新",
         "min_ago":       "{n} 分鐘",
@@ -247,6 +249,7 @@ TRANSLATIONS = {
         "wx_storm":      "뇌우",
         "wx_next3h":     "향후 3시간:",
         "wx_loading":    "날씨 로딩 중…",
+        "wx_vis":        "시정",
         "updated_ago":   "{x} 전 업데이트",
         "just_now":      "방금 업데이트",
         "min_ago":       "{n}분",
@@ -310,6 +313,7 @@ TRANSLATIONS = {
         "wx_storm":      "雷雨",
         "wx_next3h":     "今後3時間：",
         "wx_loading":    "天気を読み込み中…",
+        "wx_vis":        "視程",
         "updated_ago":   "{x}前に更新",
         "just_now":      "たった今更新",
         "min_ago":       "{n}分",
@@ -1062,6 +1066,71 @@ def fetch_weather(anchor: str):                #   a rate-limited IP on Streamli
         return _wx_last_good["data"]
 
 
+# WMO codes we use for METAR-derived conditions, so the existing _wmo_condition
+# and _wx_severity mappings apply unchanged.
+def _metar_to_wmo(raw: str):
+    """Approximate a WMO weather code from a raw METAR string, prioritising the
+    operationally important states (fog, thunderstorm, rain). Returns None if
+    nothing notable — caller then infers from cloud cover."""
+    if not raw:
+        return None
+    s = raw.upper()
+    # Present-weather groups (most severe first)
+    if any(x in s for x in (" TS", "+TS", "TSRA")):        return 95   # thunderstorm
+    if " FG" in s or " FZFG" in s or "MIFG" in s:           return 45   # fog
+    if "BR" in s.split():                                    return 45   # mist → treat as fog-class for ops
+    if any(x in s for x in ("+RA", "SHRA", " RA")):        return 63   # rain
+    if any(x in s for x in ("DZ",)):                        return 53   # drizzle
+    if any(x in s for x in ("SN",)):                        return 73   # snow
+    # No present-weather → derive from sky condition
+    if "OVC" in s or "BKN" in s:                            return 3    # cloudy
+    if "SCT" in s or "FEW" in s:                            return 2    # partly cloudy
+    if "CLR" in s or "SKC" in s or "CAVOK" in s or "NCD" in s: return 0 # clear
+    return None
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def fetch_metar(anchor: str):
+    """Current conditions at YBBN from NOAA Aviation Weather (free, no key, no
+    rate-limit issues). Returns dict with temp/wind/code/visibility/flight_cat,
+    or None on failure. This is REAL airport observation data — visibility and
+    flight category are exactly what matters on fog days."""
+    try:
+        r = requests.get(
+            "https://aviationweather.gov/api/data/metar",
+            params={"ids": AIRPORT_ICAO, "format": "json"},
+            headers={"User-Agent": "BNE-Arrivals-Board/1.0 (+https://github.com/phillipyeh89/bne-flight-board)"},
+            timeout=6,
+        )
+        r.raise_for_status()
+        arr = r.json()
+        if not isinstance(arr, list) or not arr:
+            log.warning("METAR: empty/unexpected response for %s", AIRPORT_ICAO)
+            return None
+        m = arr[0]
+        raw = m.get("rawOb") or m.get("raw_text") or ""
+        code = _metar_to_wmo(raw)
+        # Visibility: METAR gives statute miles (float) in "visib"
+        vis = m.get("visib")
+        try:
+            vis_km = round(float(str(vis).replace("+", "")) * 1.60934, 1) if vis is not None else None
+        except (ValueError, TypeError):
+            vis_km = None
+        data = {
+            "temp":     m.get("temp"),
+            "wind_kmh": (round(m.get("wspd") * 1.852, 1) if m.get("wspd") is not None else None),  # kt→km/h
+            "wind_dir": m.get("wdir") if isinstance(m.get("wdir"), (int, float)) else None,
+            "code":     code if code is not None else 0,
+            "vis_km":   vis_km,
+            "source":   "metar",
+        }
+        log.warning("METAR OK %s: raw=%.60s vis_km=%s code=%s", AIRPORT_ICAO, raw, vis_km, code)
+        return data if data["temp"] is not None else None
+    except Exception as e:
+        log.warning("METAR fetch failed (%s) — falling back to Open-Meteo", e)
+        return None
+
+
 def _wmo_condition(code):
     """Map WMO weather code → (emoji, i18n key). Fog gets special handling."""
     if code is None:               return ("", None)
@@ -1240,7 +1309,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.41)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.42-debug)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1296,7 +1365,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.41 — a broken
+    # never prevent the flight list below from rendering (V12.42-debug — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1754,7 +1823,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.41 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.42-debug fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2067,9 +2136,22 @@ def _live_dashboard_impl():
 
     # ── Weather strip (BNE current conditions) ────────────────────────────────
     try:
-        _wx = fetch_weather(anchor)
+        _om = fetch_weather(anchor)          # Open-Meteo: current + 3h forecast
     except Exception:
-        _wx = None
+        _om = None
+    try:
+        _metar = fetch_metar(anchor)         # NOAA METAR: real airport observation
+    except Exception:
+        _metar = None
+    # Prefer METAR for CURRENT conditions (real observation, has visibility);
+    # borrow the hourly forecast arrays from Open-Meteo when available.
+    if _metar:
+        _wx = dict(_metar)
+        if _om:
+            _wx["h_codes"] = _om.get("h_codes", [])
+            _wx["h_times"] = _om.get("h_times", [])
+    else:
+        _wx = _om
     if _wx and _wx.get("temp") is not None:
         _wx_emoji, _wx_key = _wmo_condition(_wx.get("code"))
         _wx_is_fog  = _wx.get("code") in (45, 48)
@@ -2084,6 +2166,14 @@ def _live_dashboard_impl():
             _wind_html = f'{_arrow}{int(_wd)}° · {round(_ws)}&nbsp;km/h'
         else:
             _wind_html = "—"
+        # Visibility (METAR only) — the single most useful fog-day number.
+        _vis_html = ""
+        _vis = _wx.get("vis_km")
+        if _vis is not None:
+            _vis_col = t.c_amber if _vis < 5 else t.text_main   # <5km = reduced
+            _vis_html = (f'<span style="opacity:0.45; margin:0 8px;">|</span>'
+                         f'<span style="color:{_vis_col};">{L("wx_vis")} {_vis}&nbsp;km</span>')
+
         # Always-on 3-hour outlook row (amber = worsening hour)
         _fc_html = _wx_forecast_3h(_wx, now_aest, t)
         _fc_row = ""
@@ -2101,6 +2191,7 @@ def _live_dashboard_impl():
             <span style="color:{t.text_main}; font-weight:700;">{_temp_txt}</span>
             <span style="opacity:0.45; margin:0 8px;">|</span>
             <span style="color:{t.text_main};">{_wind_html}</span>
+            {_vis_html}
             {_fc_row}
         </div>
         """, unsafe_allow_html=True)
@@ -2373,7 +2464,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.41</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.42-debug</div>",
         unsafe_allow_html=True,
     )
 
