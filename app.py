@@ -119,6 +119,8 @@ TRANSLATIONS = {
         "wx_showers":    "Showers",
         "wx_snow":       "Snow",
         "wx_storm":      "Thunderstorm",
+        "wx_next3h":     "Next 3h:",
+        "wx_loading":    "Loading weather…",
         "updated_ago":   "Updated {x} ago",
         "just_now":      "Updated just now",
         "min_ago":       "{n} min",
@@ -180,6 +182,8 @@ TRANSLATIONS = {
         "wx_showers":    "陣雨",
         "wx_snow":       "雪",
         "wx_storm":      "雷雨",
+        "wx_next3h":     "未來3小時：",
+        "wx_loading":    "天氣載入中…",
         "updated_ago":   "更新於 {x}前",
         "just_now":      "剛剛更新",
         "min_ago":       "{n} 分鐘",
@@ -241,6 +245,8 @@ TRANSLATIONS = {
         "wx_showers":    "소나기",
         "wx_snow":       "눈",
         "wx_storm":      "뇌우",
+        "wx_next3h":     "향후 3시간:",
+        "wx_loading":    "날씨 로딩 중…",
         "updated_ago":   "{x} 전 업데이트",
         "just_now":      "방금 업데이트",
         "min_ago":       "{n}분",
@@ -302,6 +308,8 @@ TRANSLATIONS = {
         "wx_showers":    "にわか雨",
         "wx_snow":       "雪",
         "wx_storm":      "雷雨",
+        "wx_next3h":     "今後3時間：",
+        "wx_loading":    "天気を読み込み中…",
         "updated_ago":   "{x}前に更新",
         "just_now":      "たった今更新",
         "min_ago":       "{n}分",
@@ -1004,10 +1012,14 @@ def get_photo_from_api(reg: str) -> str:
     return "NOT_FOUND"   # not ready yet — will show on next refresh
 
 
+_wx_last_good = {"data": None}   # survives transient Open-Meteo failures
+
+
 @st.cache_data(ttl=1200, show_spinner=False)
 def fetch_weather(anchor: str):
     """Current conditions at BNE airport from Open-Meteo (free, no key, no
-    AeroDataBox units). Fails silently — the strip simply doesn't render."""
+    AeroDataBox units). On failure, returns the last good reading so the strip
+    doesn't vanish on a single hiccup (weather doesn't change in 5 minutes)."""
     try:
         r = requests.get(
             "https://api.open-meteo.com/v1/forecast",
@@ -1024,7 +1036,10 @@ def fetch_weather(anchor: str):
         body   = r.json() or {}
         cur    = body.get("current") or {}
         hourly = body.get("hourly") or {}
-        return {
+        if cur.get("temperature_2m") is None:
+            log.warning("Weather: response had no temperature; body keys=%s", list(body.keys()))
+            return _wx_last_good["data"]
+        data = {
             "temp":     cur.get("temperature_2m"),
             "wind_kmh": cur.get("wind_speed_10m"),
             "wind_dir": cur.get("wind_direction_10m"),
@@ -1032,9 +1047,11 @@ def fetch_weather(anchor: str):
             "h_codes":  hourly.get("weather_code") or [],
             "h_times":  hourly.get("time") or [],
         }
+        _wx_last_good["data"] = data
+        return data
     except Exception as e:
-        log.warning("Weather fetch failed: %s", e)
-        return None
+        log.warning("Weather fetch failed (%s) — using last good reading", e)
+        return _wx_last_good["data"]
 
 
 def _wmo_condition(code):
@@ -1084,6 +1101,35 @@ def _wx_upcoming_change(wx, now_aest):
     except Exception as e:
         log.warning("Weather change scan failed: %s", e)
     return None
+
+
+def _wx_forecast_3h(wx, now_aest, t):
+    """Build a compact always-on 3-hour outlook: 'HH ☀️ · HH ⛅ · HH 🌫️'.
+    Hours whose severity is worse than now are tinted amber. Returns "" if no
+    hourly data is available."""
+    try:
+        cur_sev = _wx_severity(wx.get("code"))
+        cutoff  = now_aest.replace(tzinfo=None)
+        parts = []
+        for t_str, code in zip(wx.get("h_times") or [], wx.get("h_codes") or []):
+            _hr = datetime.strptime(t_str, "%Y-%m-%dT%H:%M")
+            if _hr <= cutoff:
+                continue
+            emoji, _ = _wmo_condition(code)
+            worse = _wx_severity(code) > cur_sev
+            col   = t.c_amber if worse else t.text_muted
+            parts.append(
+                f'<span style="color:{col};">{_hr.strftime("%H")}{emoji}</span>'
+            )
+            if len(parts) >= 3:
+                break
+        if not parts:
+            return ""
+        sep = '<span style="opacity:0.4; margin:0 5px;">·</span>'
+        return sep.join(parts)
+    except Exception as e:
+        log.warning("Weather forecast build failed: %s", e)
+        return ""
 
 
 @st.cache_data(ttl=API_DATA_TTL_SEC, show_spinner=False)
@@ -1186,7 +1232,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.39)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.40)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1242,7 +1288,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.39 — a broken
+    # never prevent the flight list below from rendering (V12.40 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1700,7 +1746,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.39 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.40 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2019,16 +2065,9 @@ def _live_dashboard_impl():
     if _wx and _wx.get("temp") is not None:
         _wx_emoji, _wx_key = _wmo_condition(_wx.get("code"))
         _wx_is_fog  = _wx.get("code") in (45, 48)
-        # Conditions — amber + bold when fog (the operationally scary one)
         _cond_col   = t.c_amber if _wx_is_fog else t.text_main
         _cond_html  = (f'<span style="color:{_cond_col}; font-weight:700;">'
                        f'{_wx_emoji} {L(_wx_key) if _wx_key else ""}</span>')
-        _chg = _wx_upcoming_change(_wx, now_aest)
-        if _chg:
-            _c_emoji, _c_key, _c_hr, _worse = _chg
-            _c_col  = t.c_amber if _worse else t.c_green
-            _cond_html += (f' <span style="color:{_c_col}; font-weight:600;">'
-                           f'→ {_c_emoji} {L(_c_key) if _c_key else ""} ~{_c_hr}</span>')
         _temp_txt   = f'{round(_wx["temp"])}&nbsp;°C'
         _wd, _ws    = _wx.get("wind_dir"), _wx.get("wind_kmh")
         if _wd is not None and _ws is not None:
@@ -2037,8 +2076,14 @@ def _live_dashboard_impl():
             _wind_html = f'{_arrow}{int(_wd)}° · {round(_ws)}&nbsp;km/h'
         else:
             _wind_html = "—"
-        # Single-line ambient strip — deliberately lighter than the summary strip
-        # below so the two don't read as twins; weather is context, not core.
+        # Always-on 3-hour outlook row (amber = worsening hour)
+        _fc_html = _wx_forecast_3h(_wx, now_aest, t)
+        _fc_row = ""
+        if _fc_html:
+            _fc_row = (
+                f'<div style="margin-top:4px; font-size:0.72em; opacity:0.9;">'
+                f'<span style="opacity:0.6;">{L("wx_next3h")}</span> &nbsp;{_fc_html}</div>'
+            )
         st.markdown(f"""
         <div style="text-align:center; font-size:0.78em; color:{t.text_muted};
                     background:{t.bg_card}; border:1px solid {t.border_muted};
@@ -2048,6 +2093,17 @@ def _live_dashboard_impl():
             <span style="color:{t.text_main}; font-weight:700;">{_temp_txt}</span>
             <span style="opacity:0.45; margin:0 8px;">|</span>
             <span style="color:{t.text_main};">{_wind_html}</span>
+            {_fc_row}
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        # Cold-start / fetch miss — show a quiet placeholder instead of vanishing,
+        # so the strip's absence is never mistaken for "no weather data ever".
+        st.markdown(f"""
+        <div style="text-align:center; font-size:0.75em; color:{t.text_muted};
+                    background:{t.bg_card}; border:1px solid {t.border_muted};
+                    border-radius:8px; padding:6px 12px; margin-bottom:8px; opacity:0.7;">
+            {L("wx_loading")}
         </div>
         """, unsafe_allow_html=True)
 
@@ -2309,7 +2365,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.39</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.40</div>",
         unsafe_allow_html=True,
     )
 
