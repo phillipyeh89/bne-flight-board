@@ -5,6 +5,7 @@ import requests
 import logging
 import math
 import threading
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import pytz
@@ -883,25 +884,30 @@ def _fetch_dep_time_http(flight_num: str, s_dt_iso: str, key: str):
             our_sch = pd.to_datetime(s_dt_iso)
         except Exception:
             our_sch = None
+        our_date = our_sch.date() if our_sch is not None else None
         best, best_diff = None, None
         for leg in legs:
             arr = (leg or {}).get("arrival") or {}
             ap  = arr.get("airport") or {}
             if str(ap.get("icao", "")).upper() != AIRPORT_ICAO:
                 continue
-            if our_sch is not None:
-                sch = arr.get("scheduledTime") or {}
-                raw = sch.get("utc") or sch.get("local")
-                try:
-                    diff = abs((pd.to_datetime(raw, utc=True)
-                                .tz_convert(TIMEZONE).tz_localize(None)
-                                - our_sch.tz_localize(None)
-                                if our_sch.tzinfo else
-                                pd.to_datetime(raw, utc=True)
-                                .tz_convert(TIMEZONE).tz_localize(None) - our_sch
-                                ).total_seconds())
-                except Exception:
-                    diff = 1e12
+            sch = arr.get("scheduledTime") or {}
+            raw = sch.get("utc") or sch.get("local")
+            leg_local = None
+            try:
+                leg_local = (pd.to_datetime(raw, utc=True)
+                             .tz_convert(TIMEZONE).tz_localize(None))
+            except Exception:
+                leg_local = None
+            # Date gate: only consider legs arriving at BNE on our flight's date.
+            # This is what stops a twice-daily route from matching yesterday's or
+            # tomorrow's same-time leg (the CI53 wrong-reg bug).
+            if our_date is not None and leg_local is not None:
+                if leg_local.date() != our_date:
+                    continue
+            if our_sch is not None and leg_local is not None:
+                base = our_sch.tz_localize(None) if our_sch.tzinfo else our_sch
+                diff = abs((leg_local - base).total_seconds())
             else:
                 diff = 0
             if best is None or diff < best_diff:
@@ -1248,10 +1254,14 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
 
 def _iata_to_callsign(flight_number: str) -> str:
     # IATA airline codes are the first 2 chars and may contain digits (3K, 5J),
-    # so take a positional prefix rather than filtering alpha chars only.
+    # so take a positional prefix. Then take ONLY the leading run of digits —
+    # stopping at the first non-digit — so any suffix that got appended to the
+    # number (leg/segment digits from codeshare or malformed data, e.g.
+    # "CI 5312" instead of "CI 53") can't leak into the callsign.
     compact = flight_number.replace(" ", "").upper()
     prefix, rest = compact[:2], compact[2:]
-    digits = "".join(c for c in rest if c.isdigit())
+    m = re.match(r"\d+", rest)
+    digits = m.group(0) if m else ""
     return f"{AIRLINE_ICAO.get(prefix, prefix)}{digits}"
 
 
@@ -1308,7 +1318,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.43)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.44-debug)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1364,7 +1374,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.43 — a broken
+    # never prevent the flight list below from rendering (V12.44-debug — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1822,7 +1832,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.43 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.44-debug fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2379,6 +2389,8 @@ def _live_dashboard_impl():
                         and not pf["is_landed"]
                         and pf["dt"] > now_aest)
         if _is_airborne:
+            # TEMP CALLSIGN DEBUG
+            log.warning("CALLSIGN DEBUG num=%r -> %s", pf['num'], _iata_to_callsign(pf['num']))
             fr24_url = f"https://www.flightradar24.com/{_iata_to_callsign(pf['num'])}"
         else:
             fr24_flight_id = pf['num'].replace(" ", "").lower()
@@ -2463,7 +2475,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.43</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.44-debug</div>",
         unsafe_allow_html=True,
     )
 
