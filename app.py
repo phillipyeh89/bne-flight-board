@@ -1226,7 +1226,7 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
         "X-RapidAPI-Key":  st.secrets["X_RAPIDAPI_KEY"],
         "X-RapidAPI-Host": "aerodatabox.p.rapidapi.com",
     }
-    params = {"direction": "Arrival", "withCancelled": "true", "withCodeshared": "false"}
+    params = {"direction": "Arrival", "withCancelled": "true", "withCodeshared": "true"}
     # Try once with 15s timeout, retry once on timeout/connection error before giving up.
     last_err = None
     for attempt in (1, 2):
@@ -1323,7 +1323,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.45)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.46-debug)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1379,7 +1379,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.45 — a broken
+    # never prevent the flight list below from rendering (V12.46-debug — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1678,15 +1678,24 @@ def _live_dashboard_impl():
             _stuck_count += 1
     disruption_mode = (_divert_count >= 2) or (_stuck_count >= 3)
 
+    # TEMP CS3 DEBUG — full codeshare picture from the FIDS feed
+    for _cf in raw_flights[:25]:
+        log.warning("CS3 DEBUG num=%s status=%s codeshareStatus=%s codeshareOf=%s codeshares=%s airline=%s",
+                    _cf.get("number"), _cf.get("status"), _cf.get("codeshareStatus"),
+                    _cf.get("codeshareOf") or _cf.get("operatingFlight") or _cf.get("operatedBy"),
+                    _cf.get("codeshares") or _cf.get("codeshareNumbers"),
+                    (_cf.get("airline") or {}).get("name") if isinstance(_cf.get("airline"), dict) else _cf.get("airline"))
+
     # Drop codeshare marketing duplicates — keep only the operating carrier's
     # record. AeroDataBox tags each with codeshareStatus: "IsOperator" (the real
     # flight) vs "IsCodeshared" (a marketing alias of another flight's aircraft).
     # Filtering these removes the swarm of duplicate cards AND many of the
     # malformed foreign-destination records (QF60-style) that ride in as aliases.
-    deduped_flights = [
-        _f for _f in deduped_flights
-        if str(_f.get("codeshareStatus", "")).lower() != "iscodeshared"
-    ]
+    # (codeshare filter temporarily disabled for CS3 DEBUG inspection)
+    # deduped_flights = [
+    #     _f for _f in deduped_flights
+    #     if str(_f.get("codeshareStatus", "")).lower() != "iscodeshared"
+    # ]
 
     for f in deduped_flights:
         flight_num = f.get("number", "N/A")
@@ -1837,7 +1846,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.45 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.46-debug fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2478,7 +2487,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.45</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.46-debug</div>",
         unsafe_allow_html=True,
     )
 
