@@ -915,11 +915,11 @@ def _fetch_dep_time_http(flight_num: str, s_dt_iso: str, key: str):
         result = {"found": False, "dep": None, "dep_actual": False, "reg": None}
         if best:
             result["found"] = True
-            # TEMP CS2 DEBUG — inspect codeshare structure in the per-flight leg
-            log.warning("CS2 DEBUG [%s] keys=%s codeshare=%s codeshares=%s codeshareStatus=%s",
-                        flight_num, list(best.keys())[:20],
-                        best.get("codeshare"), best.get("codeshares"),
-                        best.get("codeshareStatus"))
+            # NOTE: this endpoint's leg object has NO codeshare detail — the only
+            # codeshare field is codeshareStatus ("IsOperator"/"IsCodeshared"),
+            # a flag, not the list of marketing carriers (verified 2026-08-09).
+            # A full codeshare list like FR24's would need the FIDS codeshare
+            # expansion, which floods the board with duplicate phantom flights.
             # Today's-leg airframe — used to cross-validate the FIDS reg, which
             # often carries the PREVIOUS day's aircraft until assignment.
             _lac = best.get("aircraft") or {}
@@ -1323,7 +1323,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.45-debug)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.45)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1379,7 +1379,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.45-debug — a broken
+    # never prevent the flight list below from rendering (V12.45 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1837,7 +1837,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.45-debug fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.45 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2478,7 +2478,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.45-debug</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.45</div>",
         unsafe_allow_html=True,
     )
 
