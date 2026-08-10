@@ -58,26 +58,6 @@ GHOST_FLIGHTS = set()
 
 AIRBORNE_STATUSES = {"enroute", "departed", "approaching"}
 
-# ── Codeshare lookup ──────────────────────────────────────────────────────────
-# Passengers at click & collect often hold a CODESHARE flight number (the
-# marketing carrier's), not the operating flight shown on the board. This maps
-# each operating flight → the codeshare numbers sold on it, so the photo-zoom
-# modal can list "Also: AY4855, EK5725" and staff can match a passenger's ticket.
-#
-# Key   = operating flight number exactly as displayed ("QF 52", spaces kept).
-# Value = list of codeshare numbers marketed on that flight.
-#
-# ⚠️  MAINTAINED BY HAND. AeroDataBox does not supply codeshare detail on the
-# endpoints this app can afford, so this table is the source of truth. Add or
-# correct entries as you encounter them — new pairs are one line each.
-CODESHARE_MAP = {
-    # --- examples / starting points — VERIFY against the real board and edit ---
-    # "QF 52":  ["AY4855", "EK5725"],   # SIN — Finnair / Emirates codeshares
-    # "QF 98":  ["EK5019"],             # MNL
-    # "CI 53":  ["QF5312"],             # TPE — Qantas codeshare on China Airlines
-    # "EK 434": ["QF8434"],             # DXB — Qantas codeshare on Emirates
-}
-
 CITY_MAP = {
     "Lapu-Lapu City": "Cebu", "Denpasar-Bali Island": "Bali",
     "Ho Chi Minh City": "Saigon", "Yaren District": "Nauru",
@@ -124,7 +104,6 @@ TRANSLATIONS = {
         "dep_label":     "Dep {x}",
         "dep_est_label": "Dep~{x}",
         "more_photos":   "More photos",
-        "codeshare_label": "Also sold as:",
         "age_years":     "{n} years",
         "age_months":    "{n} months",
         "freighter":     "📦 Freighter",
@@ -189,7 +168,6 @@ TRANSLATIONS = {
         "dep_label":     "起飛 {x}",
         "dep_est_label": "預計起飛 {x}",
         "more_photos":   "更多照片",
-        "codeshare_label": "亦為班號：",
         "age_years":     "機齡 {n} 年",
         "age_months":    "機齡 {n} 個月",
         "freighter":     "📦 貨機",
@@ -254,7 +232,6 @@ TRANSLATIONS = {
         "dep_label":     "출발 {x}",
         "dep_est_label": "출발 예정 {x}",
         "more_photos":   "사진 더 보기",
-        "codeshare_label": "공동운항 편명:",
         "age_years":     "기령 {n}년",
         "age_months":    "기령 {n}개월",
         "freighter":     "📦 화물기",
@@ -319,7 +296,6 @@ TRANSLATIONS = {
         "dep_label":     "出発 {x}",
         "dep_est_label": "出発予定 {x}",
         "more_photos":   "他の写真",
-        "codeshare_label": "共同運航便名：",
         "age_years":     "機齢{n}年",
         "age_months":    "機齢{n}ヶ月",
         "freighter":     "📦 貨物機",
@@ -1347,7 +1323,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.47)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.53)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1403,7 +1379,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.47 — a broken
+    # never prevent the flight list below from rendering (V12.53 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1861,7 +1837,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.47 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.53 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2384,15 +2360,6 @@ def _live_dashboard_impl():
         if _ai:
             zoom_caption_bits += bits if _ai else []
         zoom_caption = " · ".join(b for b in zoom_caption_bits if b)
-        # Codeshare numbers marketed on this flight (from the hand-maintained map)
-        _cs_list = CODESHARE_MAP.get(pf.get("num", ""))
-        if _cs_list:
-            zoom_caption += (
-                f'<div style="margin-top:6px; font-size:0.85em; color:{t.text_faded};">'
-                f'<span style="opacity:0.7;">{L("codeshare_label")}</span> '
-                f'<span style="color:{t.text_main}; font-weight:600;">'
-                f'{", ".join(_cs_list)}</span></div>'
-            )
         if display_reg:
             _ps_url = f"https://www.planespotters.net/search?q={display_reg}"
             zoom_caption += (
@@ -2511,7 +2478,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.47</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.53</div>",
         unsafe_allow_html=True,
     )
 
