@@ -136,6 +136,7 @@ TRANSLATIONS = {
         "dark":          "🌙 Dark",
         "light":         "☀️ Light",
         "quiet":         "🌙 Board is sleeping to save API quota. Wakes up at {h}:00 AEST.",
+        "stale_board":   "⚠️ Showing last known board from {m} min ago — the live feed is temporarily unavailable (API refusing requests). Retrying automatically.",
         "stale_title":   "STALE DATA — last update was {n} min ago",
         "stale_body":    "API refresh is failing. Treat all times below with caution and check the airport FIDS board.",
         "diverted_hdr":  "✈️ Diverted — not arriving at BNE",
@@ -200,6 +201,7 @@ TRANSLATIONS = {
         "dark":          "🌙 深色",
         "light":         "☀️ 淺色",
         "quiet":         "🌙 看板休眠中以節省 API 額度，將於 AEST {h}:00 喚醒。",
+        "stale_board":   "⚠️ 顯示 {m} 分鐘前的最後資料 — 即時航班暫時無法取得（API 拒絕請求）。系統會自動重試。",
         "stale_title":   "資料過期 — 最後更新為 {n} 分鐘前",
         "stale_body":    "API 更新失敗中。以下時間僅供參考，請以機場看板為準。",
         "diverted_hdr":  "✈️ 轉降 — 不會抵達 BNE",
@@ -264,6 +266,7 @@ TRANSLATIONS = {
         "dark":          "🌙 다크",
         "light":         "☀️ 라이트",
         "quiet":         "🌙 API 절약을 위해 대기 모드입니다. AEST {h}:00에 다시 시작됩니다.",
+        "stale_board":   "⚠️ {m}분 전 마지막 정보를 표시 중 — 실시간 항공편을 일시적으로 가져올 수 없습니다(API 요청 거부). 자동으로 재시도합니다.",
         "stale_title":   "오래된 데이터 — 마지막 업데이트 {n}분 전",
         "stale_body":    "API 갱신이 실패하고 있습니다. 아래 시간은 참고용이며 공항 안내판을 확인하세요.",
         "diverted_hdr":  "✈️ 회항 — BNE에 도착하지 않음",
@@ -328,6 +331,7 @@ TRANSLATIONS = {
         "dark":          "🌙 ダーク",
         "light":         "☀️ ライト",
         "quiet":         "🌙 API節約のためスリープ中。AEST {h}:00に再開します。",
+        "stale_board":   "⚠️ {m}分前の最新データを表示中 — リアルタイム便情報を一時的に取得できません（APIが要求を拒否）。自動的に再試行します。",
         "stale_title":   "古いデータ — 最終更新は{n}分前",
         "stale_body":    "API更新が失敗しています。以下の時刻は参考程度とし、空港の案内板をご確認ください。",
         "diverted_hdr":  "✈️ ダイバート — BNEには到着しません",
@@ -416,6 +420,11 @@ _adb_last_request        = [0.0]
 # 60s fragment rerun; wait this long before the next attempt.
 _fids_fail_until         = [0.0]
 FIDS_FAIL_BACKOFF_SEC    = 180
+# Last-good flight data — when the API refuses (429/quota), show the most recent
+# successful board with a staleness banner rather than blanking entirely. Shared
+# across sessions (module-level). Holds (epoch_seconds, raw_flights_list).
+_fids_last_good          = [0.0, None]
+FIDS_STALE_MAX_SEC       = 1800   # show stale data up to 30 min old, then give up
 ADB_MIN_INTERVAL_SEC     = 1.1
 _photo_lock              = threading.Lock()
 # Throttle: enforce a minimum gap between outbound Planespotters requests across
@@ -1234,7 +1243,11 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
             r = requests.get(url, headers=headers, params=params, timeout=15)
             r.raise_for_status()
             st.session_state.api_last_hit = datetime.now(pytz.timezone(TIMEZONE))
-            return r.json().get("arrivals", [])
+            _arrivals = r.json().get("arrivals", [])
+            import time as _t2
+            _fids_last_good[0] = _t2.time()
+            _fids_last_good[1] = _arrivals
+            return _arrivals
         except (requests.Timeout, requests.ConnectionError) as e:
             last_err = e
             log.warning("AeroDataBox attempt %d failed (%s) — retrying", attempt, type(e).__name__)
@@ -1323,7 +1336,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.54-debug)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.54-debug2)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1379,7 +1392,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.54-debug — a broken
+    # never prevent the flight list below from rendering (V12.54-debug2 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1537,6 +1550,15 @@ def _live_dashboard_impl():
             st.session_state.api_error = str(e)
             _fids_fail_until[0] = _t.time() + FIDS_FAIL_BACKOFF_SEC
             raw_flights = []
+
+    # Fallback: if this cycle produced nothing but we have a recent successful
+    # board cached, show that (flagged stale) instead of blanking the display.
+    _stale_age = None
+    if not raw_flights and _fids_last_good[1]:
+        _age = _t.time() - _fids_last_good[0]
+        if _age <= FIDS_STALE_MAX_SEC:
+            raw_flights = _fids_last_good[1]
+            _stale_age = int(_age // 60)   # minutes
     opensky_data = fetch_opensky_states(anchor)
 
     # An empty result means the API call failed or returned nothing. Surface it
@@ -1544,6 +1566,9 @@ def _live_dashboard_impl():
     # indefinite "Synchronizing radar..." with no explanation. (api_error is set
     # inside a cached function, so on cache hits it may be absent — hence the
     # generic fallback message.)
+    if _stale_age is not None:
+        st.warning(L("stale_board", m=_stale_age))
+
     if not raw_flights:
         _err = st.session_state.get("api_error")
         if _err:
@@ -1837,7 +1862,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.54-debug fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.54-debug2 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2484,7 +2509,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.54-debug</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.54-debug2</div>",
         unsafe_allow_html=True,
     )
 
