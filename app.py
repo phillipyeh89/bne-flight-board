@@ -15,6 +15,14 @@ import pytz
 # ─────────────────────────────────────────────
 AIRPORT_ICAO             = "YBBN"
 TIMEZONE                 = "Australia/Brisbane"
+
+# ─── MAINTENANCE MODE ─────────────────────────────────────────────────────────
+# Set True to show a full-screen "temporarily unavailable" notice and make ZERO
+# API calls (so no quota is spent while paused). Used 2026-08-11: the monthly
+# AeroDataBox unit quota was exhausted; billing resets on the 22nd. On/after
+# 2026-08-22, set this back to False to restore the live board.
+MAINTENANCE_MODE         = True
+MAINTENANCE_UNTIL        = "22 Aug"   # shown in the notice
 LOOKBACK_HOURS           = 4
 LOOKAHEAD_HOURS          = 8
 RECENT_LANDED_MAX        = 60   # minutes — fade out after this
@@ -136,6 +144,8 @@ TRANSLATIONS = {
         "dark":          "🌙 Dark",
         "light":         "☀️ Light",
         "quiet":         "🌙 Board is sleeping to save API quota. Wakes up at {h}:00 AEST.",
+        "maint_title":   "Temporarily unavailable",
+        "maint_body":    "The live flight feed has reached its monthly data limit and is paused until <b>{d}</b>, when the allowance resets. The board will be back automatically. Thanks for your patience — this is a quota limit, not a fault.",
         "stale_board":   "⚠️ Showing last known board from {m} min ago — the live feed is temporarily unavailable (API refusing requests). Retrying automatically.",
         "stale_title":   "STALE DATA — last update was {n} min ago",
         "stale_body":    "API refresh is failing. Treat all times below with caution and check the airport FIDS board.",
@@ -201,6 +211,8 @@ TRANSLATIONS = {
         "dark":          "🌙 深色",
         "light":         "☀️ 淺色",
         "quiet":         "🌙 看板休眠中以節省 API 額度，將於 AEST {h}:00 喚醒。",
+        "maint_title":   "暫時無法使用",
+        "maint_body":    "即時航班資料已達本月用量上限，暫停至 <b>{d}</b> 用量重置為止。屆時看板會自動恢復。造成不便敬請見諒 —— 這是用量額度限制，並非系統故障。",
         "stale_board":   "⚠️ 顯示 {m} 分鐘前的最後資料 — 即時航班暫時無法取得（API 拒絕請求）。系統會自動重試。",
         "stale_title":   "資料過期 — 最後更新為 {n} 分鐘前",
         "stale_body":    "API 更新失敗中。以下時間僅供參考，請以機場看板為準。",
@@ -266,6 +278,8 @@ TRANSLATIONS = {
         "dark":          "🌙 다크",
         "light":         "☀️ 라이트",
         "quiet":         "🌙 API 절약을 위해 대기 모드입니다. AEST {h}:00에 다시 시작됩니다.",
+        "maint_title":   "일시적으로 사용할 수 없음",
+        "maint_body":    "실시간 항공편 데이터가 이번 달 사용 한도에 도달하여 <b>{d}</b>까지 일시 중지됩니다. 한도가 초기화되면 보드가 자동으로 복구됩니다. 이용에 불편을 드려 죄송합니다 — 시스템 오류가 아니라 사용량 한도입니다.",
         "stale_board":   "⚠️ {m}분 전 마지막 정보를 표시 중 — 실시간 항공편을 일시적으로 가져올 수 없습니다(API 요청 거부). 자동으로 재시도합니다.",
         "stale_title":   "오래된 데이터 — 마지막 업데이트 {n}분 전",
         "stale_body":    "API 갱신이 실패하고 있습니다. 아래 시간은 참고용이며 공항 안내판을 확인하세요.",
@@ -331,6 +345,8 @@ TRANSLATIONS = {
         "dark":          "🌙 ダーク",
         "light":         "☀️ ライト",
         "quiet":         "🌙 API節約のためスリープ中。AEST {h}:00に再開します。",
+        "maint_title":   "一時的にご利用いただけません",
+        "maint_body":    "リアルタイム便データが今月の利用上限に達したため、<b>{d}</b>まで一時停止しています。上限リセット後、自動的に再開します。ご不便をおかけします — システム障害ではなく利用量の上限です。",
         "stale_board":   "⚠️ {m}分前の最新データを表示中 — リアルタイム便情報を一時的に取得できません（APIが要求を拒否）。自動的に再試行します。",
         "stale_title":   "古いデータ — 最終更新は{n}分前",
         "stale_body":    "API更新が失敗しています。以下の時刻は参考程度とし、空港の案内板をご確認ください。",
@@ -374,7 +390,14 @@ AIRLINE_ICAO = {
 
 # FIX 5 — use constant in the fragment decorator (was hardcoded "60s")
 UI_REFRESH_SEC           = 60
-API_DATA_TTL_SEC         = 300  # 5 min cache — Ultra plan: ~264 calls/day × 2 units × 31 ≈ 16,400/month vs 60,000 limit
+API_DATA_TTL_SEC         = 600  # 10 min cache. FIDS (airport-wide endpoint) costs
+                                # ~8-10 units/call, NOT 2 — the old 5-min setting
+                                # burned ~3,000 units/day and exhausted the 60k
+                                # Ultra quota in 20 days (billing resets on the
+                                # 22nd). 10-min cache halves FIDS load to ~1,300
+                                # units/day → ~40k/month, safely under quota.
+                                # Board shows UPCOMING arrivals, so a 10-min
+                                # refresh is fine (gate/time don't shift that fast).
 OPENSKY_TTL_SEC          = 60   # free source — refresh every fragment cycle for freshest radar positions
 
 # Quiet hours — skip API calls between these times to save units. BNE international
@@ -1346,7 +1369,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.55-debug)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.57)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1398,11 +1421,27 @@ def _live_dashboard_impl():
     # Inject dynamic CSS first so header styling is correct
     st.markdown(get_dynamic_css(t, st.session_state.font_size), unsafe_allow_html=True)
 
+    # ── Maintenance short-circuit ─────────────────────────────────────────────
+    # When paused, show a clear notice IN THE USER'S LANGUAGE and make no API
+    # calls at all (spends zero quota). Flip MAINTENANCE_MODE=False to restore.
+    if MAINTENANCE_MODE:
+        st.markdown(
+            f"<div style='text-align:center; padding:40px 20px 10px;'>"
+            f"<div style='font-size:2.2em; margin-bottom:10px;'>✈️</div>"
+            f"<div style='font-size:1.5em; font-weight:800; color:{t.text_main}; "
+            f"margin-bottom:16px;'>{L('maint_title')}</div>"
+            f"<div style='font-size:1.05em; color:{t.text_muted}; line-height:1.6; "
+            f"max-width:520px; margin:0 auto;'>{L('maint_body', d=MAINTENANCE_UNTIL)}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+        return
+
     # On narrow mobile screens, multiple text buttons stack vertically.
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.55-debug — a broken
+    # never prevent the flight list below from rendering (V12.57 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1872,7 +1911,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.55-debug fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.57 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2308,12 +2347,6 @@ def _live_dashboard_impl():
         _ac_text_show = pf.get("ac_text") or ""
         photo_url     = pf["photo_url"]
         _leg = get_flight_leg_info(pf.get("num", ""), pf.get("s_dt_iso") or "")
-        # TEMP REG3 DEBUG — capture full reg/aircraft picture for radar-tracked flts
-        if pf.get("time_type") == "revised" and not pf.get("is_landed"):
-            log.warning("REG3 [%s] fids_reg=%s fids_ac=%r s_dt=%s leg_found=%s leg_reg=%s",
-                        pf.get("num"), pf.get("reg"), pf.get("ac_text"),
-                        (pf.get("s_dt_iso") or "")[:16],
-                        (_leg or {}).get("found"), (_leg or {}).get("reg"))
         if _leg and _leg.get("found"):
             if _leg.get("reg"):
                 if display_reg and _leg["reg"] != display_reg:
@@ -2519,7 +2552,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.55-debug</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.57</div>",
         unsafe_allow_html=True,
     )
 
