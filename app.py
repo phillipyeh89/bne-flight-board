@@ -1323,7 +1323,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.53)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.54-debug)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1379,7 +1379,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.53 — a broken
+    # never prevent the flight list below from rendering (V12.54-debug — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1837,7 +1837,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.53 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.54-debug fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2273,6 +2273,12 @@ def _live_dashboard_impl():
         _ac_text_show = pf.get("ac_text") or ""
         photo_url     = pf["photo_url"]
         _leg = get_flight_leg_info(pf.get("num", ""), pf.get("s_dt_iso") or "")
+        # TEMP REG3 DEBUG — capture full reg/aircraft picture for radar-tracked flts
+        if pf.get("time_type") == "revised" and not pf.get("is_landed"):
+            log.warning("REG3 [%s] fids_reg=%s fids_ac=%r s_dt=%s leg_found=%s leg_reg=%s",
+                        pf.get("num"), pf.get("reg"), pf.get("ac_text"),
+                        (pf.get("s_dt_iso") or "")[:16],
+                        (_leg or {}).get("found"), (_leg or {}).get("reg"))
         if _leg and _leg.get("found"):
             if _leg.get("reg"):
                 if display_reg and _leg["reg"] != display_reg:
@@ -2478,7 +2484,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.53</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.54-debug</div>",
         unsafe_allow_html=True,
     )
 
