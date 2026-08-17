@@ -34,20 +34,34 @@ IMMINENT_MINS            = 25   # red "hot" threshold — flight arriving within
 API_LAG_MINS             = 10   # AeroDataBox lag observed in practice — typical 5-15 min range
 # Per-aircraft detail lookup (age / seats / freighter), Tier 1 = 1 unit each.
 # Protected by a hard daily budget so redeploy-driven cache wipes cannot run
-# away: worst case AC_DAILY_BUDGET × 1 unit × 31 days = 4,650 units/month.
-# (See API_DATA_TTL_SEC above for the real per-endpoint costs — FIDS, not these
-# per-flight lookups, is what dominates the monthly total.)
+# away. Sized to real demand: BNE sees ~45 international arrivals/day and each
+# reg is looked up once per day, so 60 covers every real flight plus a couple of
+# redeploys. The old 150 was pure redeploy-churn headroom.
+# Worst case AC_DAILY_BUDGET × 1 unit × 31 days = 1,860 units/month.
 AIRCRAFT_INFO_ENABLED    = True
-AC_DAILY_BUDGET          = 150
+AC_DAILY_BUDGET          = 60
 # Actual departure-time lookups (per-flight endpoint, assumed Tier 2 = 2 units).
 # HARD-CAPPED: at most DEP_DAILY_BUDGET HTTP calls per calendar day, counted at
 # the request site — redeploys, cache wipes, and retries all spend from the same
-# daily pot. Worst case 120 calls × 2 units × 31 days = 7,440 units/month.
+# daily pot. Sized to real demand the same way as AC_DAILY_BUDGET above:
+# worst case 60 calls × 2 units × 31 days = 3,720 units/month.
 # Per-flight leg lookup. Kept ON because it powers registration cross-validation
 # (today's airframe vs the stale previous-rotation reg that FIDS often carries).
 # The departure TIME it also returns is intentionally not displayed — see render.
 DEP_INFO_ENABLED         = True
-DEP_DAILY_BUDGET         = 120
+DEP_DAILY_BUDGET         = 60
+# Only look up flights arriving within this window. Two reasons, both important:
+#  * QUOTA: the old code looked up every radar-tracked flight in the whole
+#    LOOKAHEAD_HOURS window, most of which nobody is looking at yet.
+#  * CORRECTNESS: the result is cached per "NUM|DATE" for the rest of the day, so
+#    querying a flight hours before arrival can cache an airframe the airline has
+#    not finalised yet — and that wrong reg then sticks for the whole day. Asking
+#    close to arrival gets the settled answer.
+DEP_LOOKUP_WINDOW_MINS   = 180
+# Same reasoning for the aircraft-detail lookup: prefetch only for flights still
+# inbound (their reg feeds freighter-aware surge weighting). Already-landed and
+# far-out flights are skipped; the photo-zoom modal fetches on demand if opened.
+AC_PREFETCH_WINDOW_MINS  = 240
 DEP_FAIL_TTL_SEC         = 180
 EST_COMPENSATION_MINS    = 10   # AeroDataBox Est runs ~10 min later than actual touchdown (observed);
                                 # subtract this from live radar estimates to better predict real arrival
@@ -389,26 +403,33 @@ AIRLINE_ICAO = {
 
 # FIX 5 — use constant in the fragment decorator (was hardcoded "60s")
 UI_REFRESH_SEC           = 60
-API_DATA_TTL_SEC         = 900  # 15 min cache.
+API_DATA_TTL_SEC         = 600  # 10 min cache.
 # MEASURED COST (from the 2026-08-11 quota exhaustion, not an estimate):
 # the FIDS airport-wide endpoint costs ~9.9 units per call — NOT the 2 units an
 # earlier comment here assumed. At the old 5-min TTL that was 264 calls/day ≈
 # 3,000 units/day, which burned the entire 60,000-unit Ultra quota in 20 days
 # (billing period starts on the 22nd of each month).
 #   5 min  → 264 calls/day → ~90,000/month  ✗ 150% over quota
-#  10 min  → 132 calls/day → ~51,000/month  ⚠ only 15% headroom: one redeploy
-#                                             (cache wipe) can still tip it over
-#  15 min  →  88 calls/day → ~38,000/month  ✓ 37% headroom  ← chosen
-# The board shows UPCOMING arrivals, and gate/time assignments do not shift on a
-# 15-minute scale, so the freshness cost is negligible next to quota safety.
-# Combined monthly total incl. aircraft (150/day) + dep (120/day × 2 units).
+#  10 min  → 132 calls/day → ~45,000/month  ✓ 26% headroom  ← chosen
+#  15 min  →  88 calls/day → ~38,000/month  ✓ 37% headroom
+# 10 min is affordable only because the per-flight daily budgets were tightened
+# at the same time (see AC_DAILY_BUDGET / DEP_DAILY_BUDGET below): the board
+# genuinely needs ~45 flights/day × 3 units = ~135, so the old 120/150 budgets
+# (390 units) were headroom that only ever got spent on redeploy cache-wipe
+# churn, never on real flights.
+# The board shows UPCOMING arrivals and gate/time assignments do not shift on a
+# 10-minute scale, so the freshness cost is negligible next to quota safety.
 OPENSKY_TTL_SEC          = 60   # free source — refresh every fragment cycle for freshest radar positions
 
 # Quiet hours — skip API calls between these times to save units. BNE international
 # arrivals are minimal between ~01:00 and ~03:00 AEST, and Phillip's shift starts at
 # 04:00 — nobody actually needs live data at 02:00.
-QUIET_HOURS_START_H      = 1    # 01:00 AEST
+QUIET_HOURS_START_H      = 0    # 00:00 AEST (midnight)
 QUIET_HOURS_END_H        = 3    # 03:00 AEST
+# NOTE on the comparison used at the call site (START <= hour < END): it assumes
+# the window does NOT cross midnight. That holds while START is 0. If the window
+# is ever moved to something like 23:00-03:00, the check must become
+# (hour >= START or hour < END) instead, or it will silently never trigger.
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("bne-board")
@@ -1362,7 +1383,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.60)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.63)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1421,7 +1442,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.60 — a broken
+    # never prevent the flight list below from rendering (V12.63 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1577,8 +1598,10 @@ def _live_dashboard_impl():
     anchor     = anchor_dt.strftime("%Y-%m-%dT%H:%M")
     from_time  = (anchor_dt - timedelta(hours=LOOKBACK_HOURS)).strftime("%Y-%m-%dT%H:%M")
     to_time    = (anchor_dt + timedelta(hours=LOOKAHEAD_HOURS)).strftime("%Y-%m-%dT%H:%M")
-    # Quiet hours: bail out before hitting the API at all. Saves ~120 units/month
-    # by not refreshing during dead hours when nobody is using the board anyway.
+    # Quiet hours: bail out before hitting the API at all — no FIDS call, no
+    # per-flight lookups. At a 10-min TTL each quiet hour saves 6 FIDS calls/day
+    # ≈ 1,800 units/month, so the current 00:00-03:00 window saves ~5,300/month
+    # versus running around the clock.
     in_quiet_hours = QUIET_HOURS_START_H <= now_aest.hour < QUIET_HOURS_END_H
     if in_quiet_hours:
         st.info(L("quiet", h=f"{QUIET_HOURS_END_H:02d}"))
@@ -1717,8 +1740,9 @@ def _live_dashboard_impl():
     all_regs = list({(f.get("aircraft") or {}).get("reg") or ""
                      for f in deduped_flights if (f.get("aircraft") or {}).get("reg")})
     for _reg in all_regs:
+        # Photos are free (Planespotters), so pre-warm them for every flight in
+        # the window, landed ones included — they still show on the board.
         get_photo_from_api(_reg)
-        get_aircraft_info(_reg)   # non-blocking Tier-1 lookup: age / seats / freighter
 
     # ── Process flights ───────────────────────────────────────────────────────
     processed = []
@@ -1907,7 +1931,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.60 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.63 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -1998,12 +2022,36 @@ def _live_dashboard_impl():
     # Only radar-tracked inbound flights: they have genuinely departed, the data
     # exists, and they're the ones staff are actively tracking. Sch-only flights
     # haven't left (nothing to fetch); landed flights no longer need it.
+    # Aircraft details (age / seats / freighter) cost 1 unit each, so prefetch
+    # only for flights still inbound and reasonably near — that is what the
+    # freighter-aware surge weighting needs. The modal fetches on demand.
+    if AIRCRAFT_INFO_ENABLED:
+        for p in processed:
+            if p.get("is_gap") or p.get("is_surge") or p.get("is_landed"):
+                continue
+            _r = p.get("reg", "")
+            if not _r:
+                continue
+            _dt = p.get("dt")
+            if _dt is not None:
+                if (_dt - now_aest).total_seconds() / 60 > AC_PREFETCH_WINDOW_MINS:
+                    continue
+            get_aircraft_info(_r)
+
     if DEP_INFO_ENABLED:
         for p in processed:
             if (not p.get("is_gap") and not p.get("is_surge")
                     and p.get("time_type") == "revised"
                     and not p.get("is_landed")
                     and not p.get("is_canceled") and not p.get("is_diverted")):
+                # Imminence gate — see DEP_LOOKUP_WINDOW_MINS. Skip flights that
+                # are still hours out: it wastes quota, and a reg fetched before
+                # the airline finalises the airframe gets cached wrong all day.
+                _dt = p.get("dt")
+                if _dt is not None:
+                    _mins_out = (_dt - now_aest).total_seconds() / 60
+                    if _mins_out > DEP_LOOKUP_WINDOW_MINS:
+                        continue
                 get_dep_time(p.get("num", ""), p.get("s_dt_iso") or "")
 
     # ── Gap Detection ─────────────────────────────────────────────────────────
@@ -2548,7 +2596,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.60</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.63</div>",
         unsafe_allow_html=True,
     )
 
