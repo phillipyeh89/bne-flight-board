@@ -33,17 +33,16 @@ SEVERE_DELAY_HOURS       = 12   # red critical threshold
 IMMINENT_MINS            = 25   # red "hot" threshold — flight arriving within 25 min
 API_LAG_MINS             = 10   # AeroDataBox lag observed in practice — typical 5-15 min range
 # Per-aircraft detail lookup (age / seats / freighter), Tier 1 = 1 unit each.
-# Re-enabled on the Ultra plan (60,000 units/month) — and this time protected by
-# a hard daily budget so redeploy-driven cache wipes can never repeat the July
-# quota incident: worst case AC_DAILY_BUDGET × 1 × 31 = 4,650/month... capped
-# below at 150/day = 4,650. Combined worst case across FIDS + dep + aircraft
-# stays around 33,000/month — barely half the Ultra allowance.
+# Protected by a hard daily budget so redeploy-driven cache wipes cannot run
+# away: worst case AC_DAILY_BUDGET × 1 unit × 31 days = 4,650 units/month.
+# (See API_DATA_TTL_SEC above for the real per-endpoint costs — FIDS, not these
+# per-flight lookups, is what dominates the monthly total.)
 AIRCRAFT_INFO_ENABLED    = True
 AC_DAILY_BUDGET          = 150
 # Actual departure-time lookups (per-flight endpoint, assumed Tier 2 = 2 units).
 # HARD-CAPPED: at most DEP_DAILY_BUDGET HTTP calls per calendar day, counted at
 # the request site — redeploys, cache wipes, and retries all spend from the same
-# daily pot. Ultra plan: worst case 120 × 2 × 31 = 7,440 units/month.
+# daily pot. Worst case 120 calls × 2 units × 31 days = 7,440 units/month.
 # Per-flight leg lookup. Kept ON because it powers registration cross-validation
 # (today's airframe vs the stale previous-rotation reg that FIDS often carries).
 # The departure TIME it also returns is intentionally not displayed — see render.
@@ -390,14 +389,19 @@ AIRLINE_ICAO = {
 
 # FIX 5 — use constant in the fragment decorator (was hardcoded "60s")
 UI_REFRESH_SEC           = 60
-API_DATA_TTL_SEC         = 600  # 10 min cache. FIDS (airport-wide endpoint) costs
-                                # ~8-10 units/call, NOT 2 — the old 5-min setting
-                                # burned ~3,000 units/day and exhausted the 60k
-                                # Ultra quota in 20 days (billing resets on the
-                                # 22nd). 10-min cache halves FIDS load to ~1,300
-                                # units/day → ~40k/month, safely under quota.
-                                # Board shows UPCOMING arrivals, so a 10-min
-                                # refresh is fine (gate/time don't shift that fast).
+API_DATA_TTL_SEC         = 900  # 15 min cache.
+# MEASURED COST (from the 2026-08-11 quota exhaustion, not an estimate):
+# the FIDS airport-wide endpoint costs ~9.9 units per call — NOT the 2 units an
+# earlier comment here assumed. At the old 5-min TTL that was 264 calls/day ≈
+# 3,000 units/day, which burned the entire 60,000-unit Ultra quota in 20 days
+# (billing period starts on the 22nd of each month).
+#   5 min  → 264 calls/day → ~90,000/month  ✗ 150% over quota
+#  10 min  → 132 calls/day → ~51,000/month  ⚠ only 15% headroom: one redeploy
+#                                             (cache wipe) can still tip it over
+#  15 min  →  88 calls/day → ~38,000/month  ✓ 37% headroom  ← chosen
+# The board shows UPCOMING arrivals, and gate/time assignments do not shift on a
+# 15-minute scale, so the freshness cost is negligible next to quota safety.
+# Combined monthly total incl. aircraft (150/day) + dep (120/day × 2 units).
 OPENSKY_TTL_SEC          = 60   # free source — refresh every fragment cycle for freshest radar positions
 
 # Quiet hours — skip API calls between these times to save units. BNE international
@@ -447,7 +451,10 @@ FIDS_FAIL_BACKOFF_SEC    = 180
 # successful board with a staleness banner rather than blanking entirely. Shared
 # across sessions (module-level). Holds (epoch_seconds, raw_flights_list).
 _fids_last_good          = [0.0, None]
-FIDS_STALE_MAX_SEC       = 1800   # show stale data up to 30 min old, then give up
+# Derived from the cache TTL so the two can never collide: the red "data is
+# stale" banner fires at TTL × 2, so last-good is served only up to TTL × 2,
+# and anything older is dropped rather than shown behind a contradictory banner.
+FIDS_STALE_MAX_SEC       = API_DATA_TTL_SEC * 2
 ADB_MIN_INTERVAL_SEC     = 1.1
 _photo_lock              = threading.Lock()
 # Throttle: enforce a minimum gap between outbound Planespotters requests across
@@ -934,8 +941,13 @@ def _fetch_dep_time_http(flight_num: str, s_dt_iso: str, key: str):
             # Date gate: only consider legs arriving at BNE on our flight's date.
             # This is what stops a twice-daily route from matching yesterday's or
             # tomorrow's same-time leg (the CI53 wrong-reg bug).
-            if our_date is not None and leg_local is not None:
-                if leg_local.date() != our_date:
+            #
+            # A leg whose arrival time we cannot parse is REJECTED whenever we
+            # have a date to match against. Previously such a leg fell through
+            # to diff = 0 — scoring as a perfect match and beating a genuinely
+            # correct leg, which could surface the wrong registration.
+            if our_date is not None:
+                if leg_local is None or leg_local.date() != our_date:
                     continue
             if our_sch is not None and leg_local is not None:
                 base = our_sch.tz_localize(None) if our_sch.tzinfo else our_sch
@@ -1203,25 +1215,6 @@ def _wx_severity(code) -> int:
     return 0                                     # clear-ish
 
 
-def _wx_upcoming_change(wx, now_aest):
-    """Scan the next ~3 hourly forecast codes. If conditions will materially
-    change (different severity class), return (emoji, key, hour_str, worsening).
-    Returns None when conditions stay in the same class — the common case."""
-    try:
-        cur_sev = _wx_severity(wx.get("code"))
-        for t_str, code in zip(wx.get("h_times") or [], wx.get("h_codes") or []):
-            _hr = datetime.strptime(t_str, "%Y-%m-%dT%H:%M")
-            if _hr <= now_aest.replace(tzinfo=None):
-                continue
-            sev = _wx_severity(code)
-            if sev != cur_sev:
-                emoji, key = _wmo_condition(code)
-                return (emoji, key, _hr.strftime("%H:%M"), sev > cur_sev)
-    except Exception as e:
-        log.warning("Weather change scan failed: %s", e)
-    return None
-
-
 def _wx_forecast_3h(wx, now_aest, t):
     """Build a compact always-on 3-hour outlook: 'HH ☀️ · HH ⛅ · HH 🌫️'.
     Hours whose severity is worse than now are tinted amber. Returns "" if no
@@ -1369,7 +1362,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.57)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.60)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1424,24 +1417,11 @@ def _live_dashboard_impl():
     # ── Maintenance short-circuit ─────────────────────────────────────────────
     # When paused, show a clear notice IN THE USER'S LANGUAGE and make no API
     # calls at all (spends zero quota). Flip MAINTENANCE_MODE=False to restore.
-    if MAINTENANCE_MODE:
-        st.markdown(
-            f"<div style='text-align:center; padding:40px 20px 10px;'>"
-            f"<div style='font-size:2.2em; margin-bottom:10px;'>✈️</div>"
-            f"<div style='font-size:1.5em; font-weight:800; color:{t.text_main}; "
-            f"margin-bottom:16px;'>{L('maint_title')}</div>"
-            f"<div style='font-size:1.05em; color:{t.text_muted}; line-height:1.6; "
-            f"max-width:520px; margin:0 auto;'>{L('maint_body', d=MAINTENANCE_UNTIL)}</div>"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
-        return
-
     # On narrow mobile screens, multiple text buttons stack vertically.
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.57 — a broken
+    # never prevent the flight list below from rendering (V12.60 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1571,6 +1551,22 @@ def _live_dashboard_impl():
 
             *Built by Phillip Yeh for the BNE Lotte Team. Data: AeroDataBox + Open-Meteo.*
             """, unsafe_allow_html=True)
+
+    # ── Maintenance short-circuit ─────────────────────────────────────────────
+    # Placed AFTER the header so the ⚙️ menu (language switcher) still works for
+    # colleagues, but BEFORE any fetch — so a paused board spends zero quota.
+    if MAINTENANCE_MODE:
+        st.markdown(
+            f"<div style='text-align:center; padding:34px 20px 10px;'>"
+            f"<div style='font-size:2.2em; margin-bottom:10px;'>🛠️</div>"
+            f"<div style='font-size:1.4em; font-weight:800; color:{t.text_main}; "
+            f"margin-bottom:14px;'>{L('maint_title')}</div>"
+            f"<div style='font-size:1.02em; color:{t.text_muted}; line-height:1.65; "
+            f"max-width:520px; margin:0 auto;'>{L('maint_body', d=MAINTENANCE_UNTIL)}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+        return
 
     # ── Fetch ──────────────────────────────────────────────────────────────────
     _epoch     = datetime(2000, 1, 1, tzinfo=aest)
@@ -1911,7 +1907,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.57 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.60 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2552,7 +2548,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.57</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.60</div>",
         unsafe_allow_html=True,
     )
 
