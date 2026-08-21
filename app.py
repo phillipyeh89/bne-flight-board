@@ -17,12 +17,14 @@ AIRPORT_ICAO             = "YBBN"
 TIMEZONE                 = "Australia/Brisbane"
 
 # ─── MAINTENANCE MODE ─────────────────────────────────────────────────────────
-# Set True to show a full-screen "temporarily unavailable" notice and make ZERO
-# API calls (so no quota is spent while paused). Used 2026-08-11: the monthly
-# AeroDataBox unit quota was exhausted; billing resets on the 22nd. On/after
-# 2026-08-22, set this back to False to restore the live board.
-MAINTENANCE_MODE         = True
-MAINTENANCE_UNTIL        = "22 Aug"   # shown in the notice
+# Set True to show a "temporarily unavailable" notice and make ZERO API calls,
+# so no quota is spent while paused. The notice renders below the header, so the
+# language switcher keeps working for colleagues.
+# History: paused 2026-08-11 when the monthly unit quota was exhausted, restored
+# 2026-08-22 when billing reset. Flip to True again any time the board needs to
+# be taken down without spending quota.
+MAINTENANCE_MODE         = False
+MAINTENANCE_UNTIL        = "22 Aug"   # shown in the notice when paused
 LOOKBACK_HOURS           = 4
 LOOKAHEAD_HOURS          = 8
 RECENT_LANDED_MAX        = 60   # minutes — fade out after this
@@ -1383,7 +1385,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.63)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.64)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1442,7 +1444,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.63 — a broken
+    # never prevent the flight list below from rendering (V12.64 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1931,7 +1933,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.63 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.64 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2596,7 +2598,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.63</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.64</div>",
         unsafe_allow_html=True,
     )
 
