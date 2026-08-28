@@ -420,22 +420,27 @@ AIRLINE_ICAO = {
 
 # FIX 5 — use constant in the fragment decorator (was hardcoded "60s")
 UI_REFRESH_SEC           = 60
-API_DATA_TTL_SEC         = 600  # 10 min cache.
+API_DATA_TTL_SEC         = 1800  # 30 min cache — EMERGENCY REDUCTION, see below.
 # MEASURED COST (from the 2026-08-11 quota exhaustion, not an estimate):
 # the FIDS airport-wide endpoint costs ~9.9 units per call — NOT the 2 units an
 # earlier comment here assumed. At the old 5-min TTL that was 264 calls/day ≈
 # 3,000 units/day, which burned the entire 60,000-unit Ultra quota in 20 days
 # (billing period starts on the 22nd of each month).
-#   5 min  → 264 calls/day → ~90,000/month  ✗ 150% over quota
-#  10 min  → 132 calls/day → ~45,000/month  ✓ 26% headroom  ← chosen
-#  15 min  →  88 calls/day → ~38,000/month  ✓ 37% headroom
-# 10 min is affordable only because the per-flight daily budgets were tightened
-# at the same time (see AC_DAILY_BUDGET / DEP_DAILY_BUDGET below): the board
-# genuinely needs ~45 flights/day × 3 units = ~135, so the old 120/150 budgets
-# (390 units) were headroom that only ever got spent on redeploy cache-wipe
-# churn, never on real flights.
-# The board shows UPCOMING arrivals and gate/time assignments do not shift on a
-# 10-minute scale, so the freshness cost is negligible next to quota safety.
+# REVISED 2026-08-28 against real billing data, which invalidated the earlier
+# estimate. Six days into the 22 Aug-21 Sep period the board had consumed 46.8%
+# of the 60,000-unit quota — about 4,300 units/day, THREE TIMES the ~1,400/day
+# this file previously predicted, and on track to exhaust by ~3 Sep.
+#
+# Two candidate causes, not yet distinguished (check RapidAPI's usage chart with
+# "Select an object" switched from API Units to API Calls to settle it):
+#   a) FIDS costs far more than the 9.9 units/call assumed here. If the call
+#      count is ~126/day, the true cost is ~33 units/call.
+#   b) The fetch is NOT actually deduplicated across concurrent viewers, so cost
+#      scales with how many colleagues have the board open. Three concurrent
+#      viewers at 9.9 units/call would produce ~3,900/day, close to what we see.
+# Both point the same way: cut the number of FIDS calls. Hence 30 min, which
+# reduces calls to ~42/day (from 126) until the cause is confirmed.
+# Once diagnosed this can likely come back down — 10 min is a much better board.
 OPENSKY_TTL_SEC          = 60   # free source — refresh every fragment cycle for freshest radar positions
 
 # Quiet hours — skip API calls between these times to save units. BNE international
@@ -1400,7 +1405,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.65)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.66)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1459,7 +1464,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.65 — a broken
+    # never prevent the flight list below from rendering (V12.66 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1948,7 +1953,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.65 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.66 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2640,7 +2645,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.65</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.66</div>",
         unsafe_allow_html=True,
     )
 
