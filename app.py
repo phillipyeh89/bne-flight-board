@@ -41,7 +41,9 @@ API_LAG_MINS             = 10   # AeroDataBox lag observed in practice — typic
 # redeploys. The old 150 was pure redeploy-churn headroom.
 # Worst case AC_DAILY_BUDGET × 1 unit × 31 days = 1,860 units/month.
 AIRCRAFT_INFO_ENABLED    = True
-AC_DAILY_BUDGET          = 60
+AC_DAILY_BUDGET          = 30   # halved: per-process budget, and the process
+                                # churns, so the effective daily total is this
+                                # number times however many instances run.
 # Actual departure-time lookups (per-flight endpoint, assumed Tier 2 = 2 units).
 # HARD-CAPPED: at most DEP_DAILY_BUDGET HTTP calls per calendar day, counted at
 # the request site — redeploys, cache wipes, and retries all spend from the same
@@ -50,7 +52,15 @@ AC_DAILY_BUDGET          = 60
 # Per-flight leg lookup. Kept ON because it powers registration cross-validation
 # (today's airframe vs the stale previous-rotation reg that FIDS often carries).
 # The departure TIME it also returns is intentionally not displayed — see render.
-DEP_INFO_ENABLED         = True
+# DISABLED 2026-08-28. This lookup existed solely to cross-validate the FIDS
+# registration, and diagnostics never showed it working — the leg lookup kept
+# returning None at render time. Meanwhile it is expensive: the daily budget is
+# per-process, and logs show the process identity changing every ~17 minutes
+# (proc 07b3 -> 6c8f with no redeploy), so each new instance starts the budget
+# again. Roughly 23 dep calls accumulated in 17 minutes on a single instance.
+# Turning it off removes that cost and loses a feature that never demonstrably
+# worked. Set back to True only alongside evidence it actually corrects a reg.
+DEP_INFO_ENABLED         = False
 DEP_DAILY_BUDGET         = 60
 # Only look up flights arriving within this window. Two reasons, both important:
 #  * QUOTA: the old code looked up every radar-tracked flight in the whole
@@ -1455,7 +1465,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.68-diag)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.69-diag)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1514,7 +1524,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.68-diag — a broken
+    # never prevent the flight list below from rendering (V12.69-diag — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -2003,7 +2013,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.68-diag fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.69-diag fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2695,7 +2705,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.68-diag</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.69-diag</div>",
         unsafe_allow_html=True,
     )
 
