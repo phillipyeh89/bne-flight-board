@@ -493,6 +493,23 @@ FIDS_FAIL_BACKOFF_SEC    = 180
 # Last-good flight data — when the API refuses (429/quota), show the most recent
 # successful board with a staleness banner rather than blanking entirely. Shared
 # across sessions (module-level). Holds (epoch_seconds, raw_flights_list).
+# TEMP DIAGNOSTIC (2026-08-28): billing shows ~2,550 API calls/day when the
+# design calls for ~250. Either st.cache_data is not deduplicating, or the
+# process keeps restarting and wiping the cache. _PROC_ID is generated once per
+# process: if it CHANGES between log lines the process restarted; if it stays
+# the same while the same anchor is fetched repeatedly, the cache is not working.
+import random as _rnd
+_PROC_ID                 = f"{_rnd.randrange(16**4):04x}"
+_fids_fetch_count        = [0]
+# SINGLE-FLIGHT GUARD. Billing shows ~4,400 API calls/day where the design calls
+# for ~250 — i.e. roughly one call per 60s UI rerun per viewer, meaning
+# st.cache_data is not deduplicating in this deployment. This module-level
+# snapshot does the deduplication ourselves: exactly one HTTP fetch per anchor
+# bucket across every session in the process, whatever the framework cache does.
+# A caller arriving while a fetch is in flight gets the previous snapshot rather
+# than blocking, so no session ever waits on someone else's request.
+_fids_snap_lock          = threading.Lock()
+_fids_snap               = {"anchor": None, "data": None, "fetching": False}
 _fids_last_good          = [0.0, None]
 # Derived from the cache TTL so the two can never collide: the red "data is
 # stale" banner fires at TTL × 2, so last-good is served only up to TTL × 2,
@@ -1311,6 +1328,10 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
                 _adb_last_request[0] = _time.time()
             r = requests.get(url, headers=headers, params=params, timeout=15)
             r.raise_for_status()
+            _fids_fetch_count[0] += 1
+            log.warning("FIDSHIT proc=%s n=%d dep=%d ac=%d anchor=%s", _PROC_ID,
+                        _fids_fetch_count[0], _dep_budget["n"], _ac_budget["n"],
+                        anchor)
             st.session_state.api_last_hit = datetime.now(pytz.timezone(TIMEZONE))
             _arrivals = r.json().get("arrivals", [])
             import time as _t2
@@ -1338,6 +1359,35 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
     # fragment rerun retries (subject to the backoff below).
     raise RuntimeError(str(last_err))
 
+
+
+def _fids_fetch_once(anchor: str, from_time: str, to_time: str) -> list:
+    """Deduplicate FIDS fetches across all sessions in this process.
+
+    st.cache_data alone proved insufficient here (billing showed one call per UI
+    rerun per viewer), so this guard enforces the invariant directly: for a given
+    anchor bucket, exactly one HTTP request is made no matter how many sessions
+    ask. Callers that arrive mid-flight get the previous snapshot instead of
+    waiting, keeping every session responsive.
+    """
+    with _fids_snap_lock:
+        if _fids_snap["anchor"] == anchor and _fids_snap["data"] is not None:
+            return _fids_snap["data"]
+        if _fids_snap["fetching"]:
+            # Another session is already fetching this bucket. Serve the previous
+            # snapshot if we have one; None lets the caller's normal error and
+            # last-good handling take over.
+            return _fids_snap["data"] if _fids_snap["data"] is not None else []
+        _fids_snap["fetching"] = True
+    try:
+        data = fetch_flight_data(anchor, from_time, to_time)
+        with _fids_snap_lock:
+            _fids_snap["anchor"] = anchor
+            _fids_snap["data"]   = data
+        return data
+    finally:
+        with _fids_snap_lock:
+            _fids_snap["fetching"] = False
 
 def _iata_to_callsign(flight_number: str) -> str:
     # IATA airline codes are the first 2 chars and may contain digits (3K, 5J),
@@ -1405,7 +1455,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.66)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.68-diag)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1464,7 +1514,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.66 — a broken
+    # never prevent the flight list below from rendering (V12.68-diag — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1635,7 +1685,7 @@ def _live_dashboard_impl():
         raw_flights = []
     else:
         try:
-            raw_flights = fetch_flight_data(anchor, from_time, to_time)
+            raw_flights = _fids_fetch_once(anchor, from_time, to_time)
         except Exception as e:
             st.session_state.api_error = str(e)
             _fids_fail_until[0] = _t.time() + FIDS_FAIL_BACKOFF_SEC
@@ -1953,7 +2003,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.66 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.68-diag fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2645,7 +2695,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.66</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.68-diag</div>",
         unsafe_allow_html=True,
     )
 
