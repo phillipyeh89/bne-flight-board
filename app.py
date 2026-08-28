@@ -65,6 +65,9 @@ DEP_LOOKUP_WINDOW_MINS   = 180
 # far-out flights are skipped; the photo-zoom modal fetches on demand if opened.
 AC_PREFETCH_WINDOW_MINS  = 240
 DEP_FAIL_TTL_SEC         = 180
+# Arrivals within this many minutes of schedule read as on time rather than
+# showing a noisy "1m early" / "2m late" badge.
+PUNCTUALITY_TOLERANCE_MINS = 3
 EST_COMPENSATION_MINS    = 10   # AeroDataBox Est runs ~10 min later than actual touchdown (observed);
                                 # subtract this from live radar estimates to better predict real arrival
 OPENSKY_PREFER_UNDER_MIN = 60   # use OpenSky over AeroDataBox for flights < 60 min out
@@ -127,6 +130,9 @@ TRANSLATIONS = {
         "dep_label":     "Dep {x}",
         "dep_est_label": "Dep~{x}",
         "more_photos":   "More photos",
+        "arr_early":     "{x} early",
+        "arr_late":      "{x} late",
+        "arr_ontime":    "on time",
         "age_years":     "{n} years",
         "age_months":    "{n} months",
         "freighter":     "📦 Freighter",
@@ -194,6 +200,9 @@ TRANSLATIONS = {
         "dep_label":     "起飛 {x}",
         "dep_est_label": "預計起飛 {x}",
         "more_photos":   "更多照片",
+        "arr_early":     "提早 {x}",
+        "arr_late":      "延誤 {x}",
+        "arr_ontime":    "準點",
         "age_years":     "機齡 {n} 年",
         "age_months":    "機齡 {n} 個月",
         "freighter":     "📦 貨機",
@@ -261,6 +270,9 @@ TRANSLATIONS = {
         "dep_label":     "출발 {x}",
         "dep_est_label": "출발 예정 {x}",
         "more_photos":   "사진 더 보기",
+        "arr_early":     "{x} 일찍",
+        "arr_late":      "{x} 지연",
+        "arr_ontime":    "정시",
         "age_years":     "기령 {n}년",
         "age_months":    "기령 {n}개월",
         "freighter":     "📦 화물기",
@@ -328,6 +340,9 @@ TRANSLATIONS = {
         "dep_label":     "出発 {x}",
         "dep_est_label": "出発予定 {x}",
         "more_photos":   "他の写真",
+        "arr_early":     "{x} 早着",
+        "arr_late":      "{x} 遅延",
+        "arr_ontime":    "定刻",
         "age_years":     "機齢{n}年",
         "age_months":    "機齢{n}ヶ月",
         "freighter":     "📦 貨物機",
@@ -1385,7 +1400,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.64)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.65)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1444,7 +1459,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.64 — a broken
+    # never prevent the flight list below from rendering (V12.65 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1933,7 +1948,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.64 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.65 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2426,6 +2441,31 @@ def _live_dashboard_impl():
             f'</div>'
         )
 
+        # Punctuality vs schedule, for flights that have already arrived. The
+        # delta is computed from the SAME datetime we display (pf["dt"]), not the
+        # raw API value, so the badge always agrees with the Sch/Est numbers on
+        # the card — including the EST_COMPENSATION_MINS adjustment, which exists
+        # precisely because it tracks real touchdown more closely.
+        punctuality_html = ""
+        if pf["is_landed"] and not pf["is_canceled"] and not pf["is_diverted"]:
+            _s_dt, _a_dt = pf.get("s_dt_val"), pf.get("dt")
+            if _s_dt is not None and _a_dt is not None:
+                _delta_min = int(round((_a_dt - _s_dt).total_seconds() / 60))
+                _mag = abs(_delta_min)
+                if _mag < PUNCTUALITY_TOLERANCE_MINS:
+                    _p_txt, _p_col = L("arr_ontime"), t.text_faded
+                else:
+                    _dur = (f"{_mag // 60}h {_mag % 60:02d}m" if _mag >= 60
+                            else f"{_mag}m")
+                    if _delta_min < 0:
+                        _p_txt, _p_col = L("arr_early", x=_dur), t.c_green
+                    else:
+                        _p_txt, _p_col = L("arr_late",  x=_dur), t.c_amber
+                punctuality_html = (
+                    f' <span style="color:{_p_col}; font-size:0.8em; '
+                    f'font-weight:600; margin-left:4px;">{_p_txt}</span>'
+                )
+
         # Only show "Act" tag when we have a confirmed actual time. A flight
         # marked landed via FIX 6's time-based fallback has only scheduled or
         # estimated time — so show the original tag, not a fake "Act".
@@ -2447,11 +2487,13 @@ def _live_dashboard_impl():
         if tag == "Sch":
             time_display = (
                 f'<span class="mono" style="color:{t.text_muted};">Sch {pf["sch_time"]}</span>'
+                f'{punctuality_html}'
             )
         else:
             time_display = (
                 f'<span class="mono" style="color:{t.text_muted}; font-size:0.85em;">Sch {pf["sch_time"]}</span>'
                 f' • <span class="mono" style="color:{time_color}; font-weight:700; font-size:1.05em;">{tag} {pf["actual_time"]}</span>'
+                f'{punctuality_html}'
             )
 
         zoom_src = photo_url if has_photo else pf["logo_url"]
@@ -2598,7 +2640,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.64</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.65</div>",
         unsafe_allow_html=True,
     )
 
