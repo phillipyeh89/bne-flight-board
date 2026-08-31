@@ -70,10 +70,6 @@ DEP_DAILY_BUDGET         = 60
 #    not finalised yet — and that wrong reg then sticks for the whole day. Asking
 #    close to arrival gets the settled answer.
 DEP_LOOKUP_WINDOW_MINS   = 180
-# Same reasoning for the aircraft-detail lookup: prefetch only for flights still
-# inbound (their reg feeds freighter-aware surge weighting). Already-landed and
-# far-out flights are skipped; the photo-zoom modal fetches on demand if opened.
-AC_PREFETCH_WINDOW_MINS  = 240
 DEP_FAIL_TTL_SEC         = 180
 # Arrivals within this many minutes of schedule read as on time rather than
 # showing a noisy "1m early" / "2m late" badge.
@@ -1465,7 +1461,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.69-diag)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.70-diag)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1524,7 +1520,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.69-diag — a broken
+    # never prevent the flight list below from rendering (V12.70-diag — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -2013,7 +2009,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.69-diag fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.70-diag fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2104,21 +2100,15 @@ def _live_dashboard_impl():
     # Only radar-tracked inbound flights: they have genuinely departed, the data
     # exists, and they're the ones staff are actively tracking. Sch-only flights
     # haven't left (nothing to fetch); landed flights no longer need it.
-    # Aircraft details (age / seats / freighter) cost 1 unit each, so prefetch
-    # only for flights still inbound and reasonably near — that is what the
-    # freighter-aware surge weighting needs. The modal fetches on demand.
-    if AIRCRAFT_INFO_ENABLED:
-        for p in processed:
-            if p.get("is_gap") or p.get("is_surge") or p.get("is_landed"):
-                continue
-            _r = p.get("reg", "")
-            if not _r:
-                continue
-            _dt = p.get("dt")
-            if _dt is not None:
-                if (_dt - now_aest).total_seconds() / 60 > AC_PREFETCH_WINDOW_MINS:
-                    continue
-            get_aircraft_info(_r)
+    # PREFETCH REMOVED 2026-08-28. Aircraft details were pre-warmed for every
+    # inbound flight on every run, which is cheap in a long-lived process but not
+    # here: logs show the process identity changing every ~17 minutes, and each
+    # fresh instance re-fetched the whole set. That accounted for roughly 89 of
+    # the 91 API calls/hour measured after the FIDS fix. The modal still calls
+    # get_aircraft_info on demand, so age/seats appear when a photo is actually
+    # opened — a handful of times a day instead of continuously. The only thing
+    # lost is freighter-aware surge weighting, which falls back to the existing
+    # string-based aircraft weight.
 
     if DEP_INFO_ENABLED:
         for p in processed:
@@ -2705,7 +2695,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.69-diag</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.70-diag</div>",
         unsafe_allow_html=True,
     )
 
