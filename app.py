@@ -41,6 +41,15 @@ API_LAG_MINS             = 10   # AeroDataBox lag observed in practice — typic
 # redeploys. The old 150 was pure redeploy-churn headroom.
 # Worst case AC_DAILY_BUDGET × 1 unit × 31 days = 1,860 units/month.
 AIRCRAFT_INFO_ENABLED    = True
+# The photo-zoom caption is built inline in every flight card (it is a CSS
+# lightbox, not a server round-trip), so its aircraft lookup ran for EVERY card
+# on EVERY render. With the process recycling roughly every 30 minutes the cache
+# was almost always cold, so this alone was ~950 of the ~1,030 API calls/day
+# measured on 2026-09-04 — 95% of all usage, spent on an age/seats line most
+# people never open. With this False the caption reads the cache only and never
+# triggers a fetch: the detail still appears whenever the data happens to be
+# cached, and costs nothing when it is not. Set True to restore eager lookups.
+AC_LOOKUP_ON_RENDER      = False
 AC_DAILY_BUDGET          = 30   # halved: per-process budget, and the process
                                 # churns, so the effective daily total is this
                                 # number times however many instances run.
@@ -1461,7 +1470,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.70-diag)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.71-diag)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1520,7 +1529,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.70-diag — a broken
+    # never prevent the flight list below from rendering (V12.71-diag — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -2009,7 +2018,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.70-diag fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.71-diag fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2556,7 +2565,14 @@ def _live_dashboard_impl():
 
         # Aircraft extras (age / seats / freighter) from the background Tier-1 cache.
         bits = []
-        _ai = get_aircraft_info(display_reg)
+        if AC_LOOKUP_ON_RENDER:
+            _ai = get_aircraft_info(display_reg)
+        else:
+            # Cache-only: show the detail if another code path already fetched
+            # this reg, but never spend an API call from the render loop.
+            with _ac_info_lock:
+                _cached_ai = _ac_info_cache.get(display_reg)
+            _ai = _cached_ai if isinstance(_cached_ai, dict) else None
         if _ai:
             if _ai.get("age"):
                 _age_val = _ai["age"]
@@ -2695,7 +2711,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.70-diag</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.71-diag</div>",
         unsafe_allow_html=True,
     )
 
