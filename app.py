@@ -435,7 +435,7 @@ AIRLINE_ICAO = {
 
 # FIX 5 — use constant in the fragment decorator (was hardcoded "60s")
 UI_REFRESH_SEC           = 60
-API_DATA_TTL_SEC         = 600  # 10 min cache — restored 2026-09-05, see below.
+API_DATA_TTL_SEC         = 300  # 5 min cache — restored 2026-09-07, see below.
 # MEASURED COST (from the 2026-08-11 quota exhaustion, not an estimate):
 # the FIDS airport-wide endpoint costs ~9.9 units per call — NOT the 2 units an
 # earlier comment here assumed. At the old 5-min TTL that was 264 calls/day ≈
@@ -460,9 +460,12 @@ API_DATA_TTL_SEC         = 600  # 10 min cache — restored 2026-09-05, see belo
 #   * the departure/leg lookup used for reg cross-validation  -> DEP_INFO_ENABLED
 #   * the aircraft age/seats lookup in the photo-zoom caption -> AC_LOOKUP_ON_RENDER
 # With both off, a full day of use measured 18 calls where the old build would
-# have made ~414. FIDS alone is now the entire cost: ~126 calls/day at this TTL,
-# about 10% of the monthly quota, so 10 min is comfortably affordable again.
-# 5 min (~252 calls/day, ~20% of quota) is also affordable if fresher is wanted.
+# have made ~414. FIDS alone is now the entire cost: ~252 calls/day at this TTL,
+# about 20% of the monthly quota, so 5 min is comfortably affordable. That 252
+# is the worst case (someone watching all 21 non-quiet hours); a day with about
+# 9 hours of use measured 18 calls. If usage ever needs cutting again, this
+# constant is the only lever that matters: 10 min halves it, 30 min cuts it to
+# a sixth. Nothing else on the board makes a per-render API call any more.
 OPENSKY_TTL_SEC          = 60   # free source — refresh every fragment cycle for freshest radar positions
 
 # Quiet hours — skip API calls between these times to save units. BNE international
@@ -1478,7 +1481,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.72)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.73)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1537,7 +1540,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.72 — a broken
+    # never prevent the flight list below from rendering (V12.73 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -2026,7 +2029,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.72 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.73 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2719,7 +2722,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.72</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.73</div>",
         unsafe_allow_html=True,
     )
 
