@@ -34,6 +34,11 @@ HEAVY_DELAY_HOURS        = 3    # orange warning threshold
 SEVERE_DELAY_HOURS       = 12   # red critical threshold
 IMMINENT_MINS            = 25   # red "hot" threshold — flight arriving within 25 min
 API_LAG_MINS             = 10   # AeroDataBox lag observed in practice — typical 5-15 min range
+# How long past the estimate before an UNCONFIRMED arrival is treated as landed.
+# Must comfortably exceed API_LAG_MINS: at API_LAG_MINS the estimate has merely
+# expired, which is not evidence of a landing. Before this point the card says
+# the flight should be down and to check the board.
+LANDED_INFER_MINS        = 30
 # Per-aircraft detail lookup (age / seats / freighter), Tier 1 = 1 unit each.
 # Protected by a hard daily budget so redeploy-driven cache wipes cannot run
 # away. Sized to real demand: BNE sees ~45 international arrivals/day and each
@@ -124,6 +129,7 @@ TRANSLATIONS = {
         "in_time":       "In {x}",
         "on_ground":     "On Ground",
         "no_update":     "NO UPDATE",
+        "landing_unconf": "⚠️ Due down — check board",
         "canceled":      "CANCELED",
         "diverted":      "✈️ DIVERTED",
         "check_board":   "⚠️ Check Board",
@@ -194,6 +200,7 @@ TRANSLATIONS = {
         "in_time":       "還有 {x}",
         "on_ground":     "已落地滑行中",
         "no_update":     "無更新",
+        "landing_unconf": "⚠️ 應已抵達 — 請查看看板",
         "canceled":      "已取消",
         "diverted":      "✈️ 轉降他場",
         "check_board":   "⚠️ 請看機場看板",
@@ -264,6 +271,7 @@ TRANSLATIONS = {
         "in_time":       "{x} 후",
         "on_ground":     "지상 이동 중",
         "no_update":     "업데이트 없음",
+        "landing_unconf": "⚠️ 도착 예정 시간 경과 — 안내판 확인",
         "canceled":      "취소됨",
         "diverted":      "✈️ 회항",
         "check_board":   "⚠️ 안내판 확인",
@@ -334,6 +342,7 @@ TRANSLATIONS = {
         "in_time":       "あと{x}",
         "on_ground":     "地上走行中",
         "no_update":     "更新なし",
+        "landing_unconf": "⚠️ 到着予定超過 — 案内板を確認",
         "canceled":      "欠航",
         "diverted":      "✈️ ダイバート",
         "check_board":   "⚠️ 案内板確認",
@@ -716,7 +725,8 @@ class FlightStyle:
 
 
 def classify_flight_status(*, is_canceled, is_diverted, is_landed, landed_mins,
-                            t_diff, t_type, delay_hours, s_dt, now, t: ThemeParams) -> FlightStyle:
+                            t_diff, t_type, delay_hours, s_dt, now, t: ThemeParams,
+                            landing_unconfirmed: bool = False) -> FlightStyle:
     if is_canceled:
         archived = (now - s_dt).total_seconds() / 60 > 15
         if archived:
@@ -741,6 +751,12 @@ def classify_flight_status(*, is_canceled, is_diverted, is_landed, landed_mins,
                                landed_label, "0.75", "grayscale(40%)")
         return FlightStyle(t.border_muted, t.text_muted, t.bg_main,
                            landed_label, "0.4", "grayscale(80%)")
+
+    # Past the estimate but with no confirmation of a landing. Say exactly that
+    # rather than guessing either way — the airport's own board is authoritative
+    # here, and staff can check it in seconds.
+    if landing_unconfirmed:
+        return FlightStyle(t.c_amber, t.c_amber, t.bg_card, L("landing_unconf"), "1.0", "none")
 
     m_left     = max(0, t_diff)
     delay_mins = max(0, int(round(delay_hours * 60)))
@@ -1481,7 +1497,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.73)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.74)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1540,7 +1556,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.73 — a broken
+    # never prevent the flight list below from rendering (V12.74 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1688,7 +1704,11 @@ def _live_dashboard_impl():
         return
 
     # ── Fetch ──────────────────────────────────────────────────────────────────
-    _epoch     = datetime(2000, 1, 1, tzinfo=aest)
+    # NOTE: must be aest.localize(...), NOT datetime(..., tzinfo=aest). Passing a
+    # pytz zone via tzinfo= yields Local Mean Time (+10:12:08 for Brisbane), not
+    # AEST (+10:00), which shifted every anchor bucket 12 minutes ahead of real
+    # time — visible in the logs as anchor=19:25 at 19:13.
+    _epoch     = aest.localize(datetime(2000, 1, 1))
 
     # Single quantised anchor — all cache keys and time windows derive from this
     # so the cache key is stable for the full API_DATA_TTL_SEC window.
@@ -2029,7 +2049,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.73 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.74 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2038,13 +2058,24 @@ def _live_dashboard_impl():
         # • "scheduled" (no radar) → could be delayed at origin (NZ 205 case:
         #   Sch 08:05 but actually departing 09:00) → require departure
         #   confirmation before assuming it landed.
+        # Landing is INFERRED, never confirmed, in this branch — the API has not
+        # said the flight is down. Waiting LANDED_INFER_MINS instead of the old
+        # API_LAG_MINS stops the board announcing a landing at the moment the
+        # estimate merely expires, which is what made QF16 (a 14-hour LAX leg
+        # whose estimate had not been refreshed) read as landed while it was
+        # still airborne. Between the two thresholds the card shows an explicit
+        # "should be down — check the board" state rather than a false claim.
+        landing_unconfirmed = False
         if (not is_lan
                 and not disruption_mode
                 and t_diff < -API_LAG_MINS
                 and status_raw not in AIRBORNE_STATUSES
                 and (t_type == "revised"
                      or (t_type == "scheduled" and has_departed))):
-            is_lan = True
+            if t_diff < -LANDED_INFER_MINS:
+                is_lan = True
+            else:
+                landing_unconfirmed = True
 
         is_lan = is_lan and not is_can and not is_div
 
@@ -2052,6 +2083,7 @@ def _live_dashboard_impl():
 
         style = classify_flight_status(
             is_canceled=is_can, is_diverted=is_div, is_landed=is_lan, landed_mins=landed_mins,
+            landing_unconfirmed=landing_unconfirmed,
             t_diff=t_diff, t_type=t_type, delay_hours=delay, s_dt=s_dt, now=now_aest, t=t,
         )
 
@@ -2722,7 +2754,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.73</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.74</div>",
         unsafe_allow_html=True,
     )
 
