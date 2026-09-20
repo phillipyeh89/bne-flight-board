@@ -1499,7 +1499,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.75)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.76)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1558,7 +1558,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.75 — a broken
+    # never prevent the flight list below from rendering (V12.76 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -2051,7 +2051,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.75 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.76 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2182,15 +2182,20 @@ def _live_dashboard_impl():
     # render (soonest first) — on top of the existing daily budget. Cached
     # flights cost nothing, so steady-state renders do no work here at all.
     if DEP_INFO_ENABLED and REG_VERIFY_MAX_PER_RUN > 0:
+        # Eligible window runs from RECENT_LANDED_MAX minutes in the PAST to
+        # REG_VERIFY_WINDOW_MINS ahead. Including just-landed flights matters:
+        # their passengers are still coming through, and a landed flight is when
+        # the airframe is most certain — excluding them left the freshly-landed
+        # cards showing whatever the airport feed had associated.
         _verify_pool = sorted(
             (p for p in processed
              if not p.get("is_gap") and not p.get("is_surge")
-             and p.get("time_type") == "revised"
-             and not p.get("is_landed")
+             and p.get("time_type") in ("revised", "actual")
              and not p.get("is_canceled") and not p.get("is_diverted")
              and p.get("dt") is not None and p.get("s_dt_iso")
-             and 0 <= (p["dt"] - now_aest).total_seconds() / 60 <= REG_VERIFY_WINDOW_MINS),
-            key=lambda p: p["dt"],
+             and -RECENT_LANDED_MAX <= (p["dt"] - now_aest).total_seconds() / 60
+                                    <= REG_VERIFY_WINDOW_MINS),
+            key=lambda p: abs((p["dt"] - now_aest).total_seconds()),
         )
         _spent = 0
         for p in _verify_pool:
@@ -2797,7 +2802,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.75</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.76</div>",
         unsafe_allow_html=True,
     )
 
