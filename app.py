@@ -85,6 +85,10 @@ DEP_INFO_ENABLED         = True
 DEP_DAILY_BUDGET         = 60
 REG_VERIFY_MAX_PER_RUN   = 3     # new lookups per render (soonest arrivals first)
 REG_VERIFY_WINDOW_MINS   = 120   # only verify flights arriving within this window
+REG_VERIFY_CACHE_TTL_SEC = 1800  # how long one flight's verified airframe is reused
+                                 # across ALL sessions. Long enough that reloads
+                                 # and extra viewers are free; short enough that a
+                                 # late aircraft swap is picked up the same day.
 DEP_FAIL_TTL_SEC         = 180
 # Arrivals within this many minutes of schedule read as on time rather than
 # showing a noisy "1m early" / "2m late" badge.
@@ -1123,6 +1127,29 @@ def _fetch_dep_time_http(flight_num: str, s_dt_iso: str, key: str):
             _dep_pending.discard(key)
 
 
+@st.cache_data(ttl=REG_VERIFY_CACHE_TTL_SEC, show_spinner=False)
+def _verify_leg_shared(flight_num: str, date_key: str, s_dt_iso: str):
+    """Leg lookup whose RESULT IS SHARED ACROSS SESSIONS.
+
+    This is the important part. Streamlit re-executes the whole script in a
+    fresh namespace on every full rerun, so module-level dicts like _dep_cache
+    are per-session-run, not global: every viewer, and every reload, started
+    verifying the same flights from scratch. Logs on 2026-09-20 showed six such
+    runs in 91 minutes, each spending ~35 lookups — about 2,240 units/day, or
+    112% of the monthly quota. (It is also why the old background-thread
+    version never corrected anything: its results went into state that was
+    about to be discarded.)
+
+    st.cache_data is genuinely shared and survives full reruns, so one lookup
+    per flight now serves every viewer for the whole TTL.
+    """
+    key = f"{flight_num}|{date_key}"
+    _fetch_dep_time_http(flight_num, s_dt_iso, key)
+    with _dep_lock:
+        val = _dep_cache.get(key)
+    return val if isinstance(val, dict) else None
+
+
 def get_flight_leg_info(flight_num: str, s_dt_iso: str):
     """NON-BLOCKING. Cached per-flight leg info dict
     {found, dep (HH:MM AEST), reg} or None while unknown. Kicks off one
@@ -1499,7 +1526,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.76)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.77)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1558,7 +1585,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.76 — a broken
+    # never prevent the flight list below from rendering (V12.77 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -2051,7 +2078,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.76 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.77 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2205,10 +2232,16 @@ def _live_dashboard_impl():
                 _recent_fail = (_k in _dep_fails and
                                 datetime.now().timestamp() - _dep_fails[_k] < DEP_FAIL_TTL_SEC)
             if _hit or _recent_fail:
-                continue               # already known, or backing off — free
+                continue               # already in this run's cache — free
             if _spent >= REG_VERIFY_MAX_PER_RUN:
                 break                  # cap this render; the rest resolve later
-            _fetch_dep_time_http(p.get("num", ""), p.get("s_dt_iso") or "", _k)
+            # Shared cache: costs an API call only if no session has looked this
+            # flight up recently. A cross-session hit returns immediately.
+            _res = _verify_leg_shared(p.get("num", ""), _k.split("|")[-1],
+                                      p.get("s_dt_iso") or "")
+            if _res is not None:
+                with _dep_lock:
+                    _dep_cache[_k] = _res      # seed this run's cache for render
             _spent += 1
 
     # ── Gap Detection ─────────────────────────────────────────────────────────
@@ -2802,7 +2835,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.76</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.77</div>",
         unsafe_allow_html=True,
     )
 
