@@ -67,23 +67,24 @@ AC_DAILY_BUDGET          = 30   # halved: per-process budget, and the process
 # (today's airframe vs the stale previous-rotation reg that FIDS often carries).
 # The departure TIME it also returns is intentionally not displayed — see render.
 # DISABLED 2026-08-28. This lookup existed solely to cross-validate the FIDS
-# registration, and diagnostics never showed it working — the leg lookup kept
-# returning None at render time. Meanwhile it is expensive: the daily budget is
-# per-process, and logs show the process identity changing every ~17 minutes
-# (proc 07b3 -> 6c8f with no redeploy), so each new instance starts the budget
-# again. Roughly 23 dep calls accumulated in 17 minutes on a single instance.
-# Turning it off removes that cost and loses a feature that never demonstrably
-# worked. Set back to True only alongside evidence it actually corrects a reg.
-DEP_INFO_ENABLED         = False
+# registration shown on each card — FIDS keeps reporting the previous rotation's
+# airframe until the airline assigns today's.
+#
+# Disabled 2026-08-28 during the quota incident, because as a background thread
+# it spent calls without ever correcting a card (see the verification block in
+# the render path for why). Re-enabled 2026-09-20 as a SYNCHRONOUS, capped
+# lookup, which is what makes it actually work.
+#
+# Cost at the measured usage (~95 calls/day total, ~8% of the monthly quota):
+# at most REG_VERIFY_MAX_PER_RUN new lookups per render, each 2 units, and only
+# for flights inside REG_VERIFY_WINDOW_MINS. A cache hit is free, so a steady
+# board costs nothing; the spend happens after the process recycles. Measured
+# headroom is large, but if usage climbs, REG_VERIFY_MAX_PER_RUN is the dial —
+# set it to 0 to stop the lookups entirely while leaving the code in place.
+DEP_INFO_ENABLED         = True
 DEP_DAILY_BUDGET         = 60
-# Only look up flights arriving within this window. Two reasons, both important:
-#  * QUOTA: the old code looked up every radar-tracked flight in the whole
-#    LOOKAHEAD_HOURS window, most of which nobody is looking at yet.
-#  * CORRECTNESS: the result is cached per "NUM|DATE" for the rest of the day, so
-#    querying a flight hours before arrival can cache an airframe the airline has
-#    not finalised yet — and that wrong reg then sticks for the whole day. Asking
-#    close to arrival gets the settled answer.
-DEP_LOOKUP_WINDOW_MINS   = 180
+REG_VERIFY_MAX_PER_RUN   = 3     # new lookups per render (soonest arrivals first)
+REG_VERIFY_WINDOW_MINS   = 120   # only verify flights arriving within this window
 DEP_FAIL_TTL_SEC         = 180
 # Arrivals within this many minutes of schedule read as on time rather than
 # showing a noisy "1m early" / "2m late" badge.
@@ -1058,7 +1059,8 @@ def _fetch_dep_time_http(flight_num: str, s_dt_iso: str, key: str):
                 diff = 0
             if best is None or diff < best_diff:
                 best, best_diff = leg, diff
-        result = {"found": False, "dep": None, "dep_actual": False, "reg": None}
+        result = {"found": False, "dep": None, "dep_actual": False,
+                  "reg": None, "model": None}
         if best:
             result["found"] = True
             # NOTE: this endpoint's leg object has NO codeshare detail — the only
@@ -1072,6 +1074,13 @@ def _fetch_dep_time_http(flight_num: str, s_dt_iso: str, key: str):
             _leg_reg = _lac.get("reg") or _lac.get("registration")
             if _leg_reg:
                 result["reg"] = str(_leg_reg).strip().upper()
+            # The model comes back in the same payload, so correcting the
+            # aircraft TYPE alongside the reg costs no extra API units. Without
+            # it a stale FIDS record could have its tail number corrected while
+            # still naming yesterday's aircraft type.
+            _leg_model = _lac.get("model")
+            if _leg_model:
+                result["model"] = str(_leg_model).strip()
             dep = best.get("departure") or {}
             def _extract(k):
                 node = dep.get(k)
@@ -1137,13 +1146,6 @@ def get_flight_leg_info(flight_num: str, s_dt_iso: str):
         threading.Thread(target=_fetch_dep_time_http,
                          args=(flight_num, s_dt_iso, key), daemon=True).start()
     return None
-
-
-def get_dep_time(flight_num: str, s_dt_iso: str):
-    info = get_flight_leg_info(flight_num, s_dt_iso)
-    if info and info.get("dep"):
-        return (info["dep"], info.get("dep_actual", False))
-    return (None, False)
 
 
 def get_photo_from_api(reg: str) -> str:
@@ -1497,7 +1499,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.74)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.75)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1556,7 +1558,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.74 — a broken
+    # never prevent the flight list below from rendering (V12.75 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -2049,7 +2051,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.74 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.75 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2162,21 +2164,47 @@ def _live_dashboard_impl():
     # lost is freighter-aware surge weighting, which falls back to the existing
     # string-based aircraft weight.
 
-    if DEP_INFO_ENABLED:
-        for p in processed:
-            if (not p.get("is_gap") and not p.get("is_surge")
-                    and p.get("time_type") == "revised"
-                    and not p.get("is_landed")
-                    and not p.get("is_canceled") and not p.get("is_diverted")):
-                # Imminence gate — see DEP_LOOKUP_WINDOW_MINS. Skip flights that
-                # are still hours out: it wastes quota, and a reg fetched before
-                # the airline finalises the airframe gets cached wrong all day.
-                _dt = p.get("dt")
-                if _dt is not None:
-                    _mins_out = (_dt - now_aest).total_seconds() / 60
-                    if _mins_out > DEP_LOOKUP_WINDOW_MINS:
-                        continue
-                get_dep_time(p.get("num", ""), p.get("s_dt_iso") or "")
+    # ── Registration verification (synchronous, strictly capped) ─────────────
+    # FIDS routinely reports the PREVIOUS rotation's airframe until the airline
+    # assigns today's, so the reg (and therefore the aircraft type and the photo
+    # derived from it) can be yesterday's aircraft.
+    #
+    # This ran as a background thread until now, and that never worked: the
+    # first render always returned None and the result landed in a module-level
+    # cache that the Streamlit process wiped when it recycled — which logs show
+    # happens every 30-60 minutes. The lookup therefore spent quota without ever
+    # correcting a single card.
+    #
+    # Doing it synchronously removes the timing dependence entirely: whatever we
+    # verify is available to this very render. The cost is bounded three ways —
+    # only radar-tracked inbound flights, only those arriving within
+    # REG_VERIFY_WINDOW_MINS, and at most REG_VERIFY_MAX_PER_RUN cache misses per
+    # render (soonest first) — on top of the existing daily budget. Cached
+    # flights cost nothing, so steady-state renders do no work here at all.
+    if DEP_INFO_ENABLED and REG_VERIFY_MAX_PER_RUN > 0:
+        _verify_pool = sorted(
+            (p for p in processed
+             if not p.get("is_gap") and not p.get("is_surge")
+             and p.get("time_type") == "revised"
+             and not p.get("is_landed")
+             and not p.get("is_canceled") and not p.get("is_diverted")
+             and p.get("dt") is not None and p.get("s_dt_iso")
+             and 0 <= (p["dt"] - now_aest).total_seconds() / 60 <= REG_VERIFY_WINDOW_MINS),
+            key=lambda p: p["dt"],
+        )
+        _spent = 0
+        for p in _verify_pool:
+            _k = f'{p.get("num", "")}|{(p.get("s_dt_iso") or "")[:10]}'
+            with _dep_lock:
+                _hit = _k in _dep_cache
+                _recent_fail = (_k in _dep_fails and
+                                datetime.now().timestamp() - _dep_fails[_k] < DEP_FAIL_TTL_SEC)
+            if _hit or _recent_fail:
+                continue               # already known, or backing off — free
+            if _spent >= REG_VERIFY_MAX_PER_RUN:
+                break                  # cap this render; the rest resolve later
+            _fetch_dep_time_http(p.get("num", ""), p.get("s_dt_iso") or "", _k)
+            _spent += 1
 
     # ── Gap Detection ─────────────────────────────────────────────────────────
     gap_candidates = sorted(
@@ -2438,19 +2466,27 @@ def _live_dashboard_impl():
                 f'<div style="margin-top:4px; font-size:0.72em; opacity:0.9;">'
                 f'<span style="opacity:0.6;">{L("wx_next3h")}</span> &nbsp;{_fc_html}</div>'
             )
-        st.markdown(f"""
-        <div style="text-align:center; font-size:0.78em; color:{t.text_muted};
-                    background:{t.bg_card}; border:1px solid {t.border_muted};
-                    border-radius:8px; padding:6px 12px; margin-bottom:8px;">
-            {_cond_html}
-            <span style="opacity:0.45; margin:0 8px;">|</span>
-            <span style="color:{t.text_main}; font-weight:700;">{_temp_txt}</span>
-            <span style="opacity:0.45; margin:0 8px;">|</span>
-            <span style="color:{t.text_main};">{_wind_html}</span>
-            {_vis_html}
-            {_fc_row}
-        </div>
-        """, unsafe_allow_html=True)
+        # Assembled as a SINGLE line on purpose — do not reformat into a
+        # multi-line template. In a multi-line one, an empty piece (_vis_html
+        # when METAR reports no visibility, _fc_row when there is no forecast)
+        # leaves a whitespace-only line. Markdown reads that as a blank line,
+        # which ends the HTML block, and the next indented line is then parsed
+        # as an indented code block — dumping the raw <div ...> markup on screen
+        # in a grey box. That was the "garbled text" seen on 2026-09-20; it
+        # appeared exactly on the refreshes where visibility was missing.
+        _wx_sep   = '<span style="opacity:0.45; margin:0 8px;">|</span>'
+        _wx_inner = (
+            f'{_cond_html}{_wx_sep}'
+            f'<span style="color:{t.text_main}; font-weight:700;">{_temp_txt}</span>{_wx_sep}'
+            f'<span style="color:{t.text_main};">{_wind_html}</span>'
+            f'{_vis_html}{_fc_row}'
+        )
+        st.markdown(
+            f'<div style="text-align:center; font-size:0.78em; color:{t.text_muted}; '
+            f'background:{t.bg_card}; border:1px solid {t.border_muted}; '
+            f'border-radius:8px; padding:6px 12px; margin-bottom:8px;">{_wx_inner}</div>',
+            unsafe_allow_html=True,
+        )
     else:
         # Cold-start / fetch miss — show a quiet placeholder instead of vanishing,
         # so the strip's absence is never mistaken for "no weather data ever".
@@ -2496,7 +2532,7 @@ def _live_dashboard_impl():
                 f"<div style='flex:1; height:1px; background:{t.border_muted};'></div>"
                 f"<span style='font-size:0.72em; color:{t.text_muted}; font-weight:700; "
                 f"white-space:nowrap; letter-spacing:1px; text-transform:uppercase;'>"
-                f"{L("earlier")}</span>"
+                f"{L('earlier')}</span>"
                 f"<div style='flex:1; height:1px; background:{t.border_muted};'></div>"
                 f"</div>",
                 unsafe_allow_html=True,
@@ -2517,11 +2553,18 @@ def _live_dashboard_impl():
         _leg = get_flight_leg_info(pf.get("num", ""), pf.get("s_dt_iso") or "")
         if _leg and _leg.get("found"):
             if _leg.get("reg"):
-                if display_reg and _leg["reg"] != display_reg:
-                    _ac_text_show = _ac_text_show.replace(display_reg, _leg["reg"])
-                    display_reg   = _leg["reg"]
+                _v_reg   = _leg["reg"]
+                _v_model = _leg.get("model")
+                if _v_model:
+                    # Rebuild the whole line from the verified leg so the TYPE is
+                    # corrected too, not just the tail number.
+                    _ac_text_show = f"{_v_model} ({_v_reg})"
+                    display_reg   = _v_reg
+                elif display_reg and _v_reg != display_reg:
+                    _ac_text_show = _ac_text_show.replace(display_reg, _v_reg)
+                    display_reg   = _v_reg
                 elif not display_reg:
-                    display_reg   = _leg["reg"]
+                    display_reg   = _v_reg
                     _ac_text_show = (f"{_ac_text_show} ({display_reg})"
                                      if _ac_text_show else display_reg)
             else:
@@ -2708,7 +2751,7 @@ def _live_dashboard_impl():
     if divs:
         st.markdown(
             f"<hr style='margin:15px 0 8px 0; opacity:0.2;'>"
-            f"<div style='color:{t.c_purple}; font-size:0.85em; font-weight:700; margin-bottom:5px;'>{L("diverted_hdr")}</div>",
+            f"<div style='color:{t.c_purple}; font-size:0.85em; font-weight:700; margin-bottom:5px;'>{L('diverted_hdr')}</div>",
             unsafe_allow_html=True,
         )
         for pf in divs:
@@ -2733,7 +2776,7 @@ def _live_dashboard_impl():
     if cans:
         st.markdown(
             f"<hr style='margin:15px 0 8px 0; opacity:0.2;'>"
-            f"<div style='color:{t.c_red}; font-size:0.85em; font-weight:700; margin-bottom:5px;'>{L("canceled_hdr")}</div>",
+            f"<div style='color:{t.c_red}; font-size:0.85em; font-weight:700; margin-bottom:5px;'>{L('canceled_hdr')}</div>",
             unsafe_allow_html=True,
         )
         for pf in cans:
@@ -2754,7 +2797,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.74</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.75</div>",
         unsafe_allow_html=True,
     )
 
