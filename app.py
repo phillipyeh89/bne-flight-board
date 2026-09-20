@@ -39,6 +39,14 @@ API_LAG_MINS             = 10   # AeroDataBox lag observed in practice — typic
 # expired, which is not evidence of a landing. Before this point the card says
 # the flight should be down and to check the board.
 LANDED_INFER_MINS        = 30
+# METAR visibility at or below this puts the board into disruption mode. Around
+# and below this figure aircraft hold, go around and divert, so every "it must
+# have landed by now" inference stops being safe.
+LOW_VIS_DISRUPTION_KM    = 1.5
+# How recent a confirmed landing has to be to clear the confirmation-drought
+# signal. This was an hour, which let a landing from before the weather turned
+# mask an active disruption.
+DROUGHT_CLEAR_SEC        = 1200
 # Per-aircraft detail lookup (age / seats / freighter), Tier 1 = 1 unit each.
 # Protected by a hard daily budget so redeploy-driven cache wipes cannot run
 # away. Sized to real demand: BNE sees ~45 international arrivals/day and each
@@ -1526,7 +1534,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.77)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.78)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1585,7 +1593,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.77 — a broken
+    # never prevent the flight list below from rendering (V12.78 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1912,12 +1920,27 @@ def _live_dashboard_impl():
         _bd, _tt = extract_best_time(_f.get("arrival") or {}, aest)
         if _bd is None:
             continue
-        if _tt == "actual" and (now_aest - _bd).total_seconds() < 3600:
+        if _tt == "actual" and (now_aest - _bd).total_seconds() < DROUGHT_CLEAR_SEC:
             _stuck_count = 0
-            break          # a recent confirmed landing = no drought
+            break          # a genuinely recent landing = no drought
         if _tt == "revised" and (now_aest - _bd).total_seconds() > 15 * 60:
             _stuck_count += 1
-    disruption_mode = (_divert_count >= 2) or (_stuck_count >= 3)
+    # Third trigger — the airport's own weather. METAR visibility is measured at
+    # YBBN in real time and costs no AeroDataBox quota, which makes it the most
+    # reliable disruption signal we have: it is true the moment the fog rolls in,
+    # before any flight has been re-flagged. The other two triggers are lagging
+    # indicators and on 2026-09-21 both missed a real fog event — visibility was
+    # 0.1 km with aircraft holding and two flights diverted to Sydney, while the
+    # feed still showed them inbound and the board claimed one was "On Ground".
+    _low_vis = False
+    try:
+        _m_now = fetch_metar(anchor)
+        _v_now = (_m_now or {}).get("vis_km")
+        if _v_now is not None and _v_now <= LOW_VIS_DISRUPTION_KM:
+            _low_vis = True
+    except Exception as e:
+        log.warning("Low-visibility check failed: %s", e)
+    disruption_mode = (_divert_count >= 2) or (_stuck_count >= 3) or _low_vis
 
     # Drop codeshare marketing duplicates — keep only the operating carrier's
     # record. AeroDataBox tags each with codeshareStatus: "IsOperator" (the real
@@ -2078,7 +2101,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.77 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.78 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2095,15 +2118,21 @@ def _live_dashboard_impl():
         # still airborne. Between the two thresholds the card shows an explicit
         # "should be down — check the board" state rather than a false claim.
         landing_unconfirmed = False
+        _still_airborne = status_raw in AIRBORNE_STATUSES
         if (not is_lan
-                and not disruption_mode
-                and t_diff < -API_LAG_MINS
-                and status_raw not in AIRBORNE_STATUSES
+                and t_diff <= 0
                 and (t_type == "revised"
                      or (t_type == "scheduled" and has_departed))):
-            if t_diff < -LANDED_INFER_MINS:
+            if _still_airborne or disruption_mode:
+                # Either the feed still has this aircraft flying, or conditions
+                # mean aircraft are holding and diverting. In both cases an
+                # expired estimate is no evidence of a landing, so say so rather
+                # than inferring one — and in particular never print "On Ground"
+                # for an aircraft that is in a holding pattern.
+                landing_unconfirmed = True
+            elif t_diff < -LANDED_INFER_MINS:
                 is_lan = True
-            else:
+            elif t_diff < -API_LAG_MINS:
                 landing_unconfirmed = True
 
         is_lan = is_lan and not is_can and not is_div
@@ -2835,7 +2864,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.77</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.78</div>",
         unsafe_allow_html=True,
     )
 
