@@ -43,6 +43,10 @@ LANDED_INFER_MINS        = 30
 # and below this figure aircraft hold, go around and divert, so every "it must
 # have landed by now" inference stops being safe.
 LOW_VIS_DISRUPTION_KM    = 1.5
+# How long an "enroute"/"approaching" status is still believed once the estimate
+# has passed. Beyond this the feed has simply not been updated, and treating the
+# flight as landed is more useful than pinning it to the board indefinitely.
+STALE_AIRBORNE_MINS      = 90
 # How recent a confirmed landing has to be to clear the confirmation-drought
 # signal. This was an hour, which let a landing from before the weather turned
 # mask an active disruption.
@@ -90,13 +94,19 @@ AC_DAILY_BUDGET          = 30   # halved: per-process budget, and the process
 # headroom is large, but if usage climbs, REG_VERIFY_MAX_PER_RUN is the dial —
 # set it to 0 to stop the lookups entirely while leaving the code in place.
 DEP_INFO_ENABLED         = True
-DEP_DAILY_BUDGET         = 60
+# NOTE: this only became a real cap once the counter moved into shared state.
+# While it was a per-session dict it reset for every viewer and never bound, so
+# 60 looked adequate; against genuine daily usage it would have cut verification
+# off by mid-afternoon. Sized against demand: ~22 arrivals/day, each re-verified
+# once per REG_VERIFY_CACHE_TTL_SEC while inside the verification window.
+DEP_DAILY_BUDGET         = 150
 REG_VERIFY_MAX_PER_RUN   = 3     # new lookups per render (soonest arrivals first)
 REG_VERIFY_WINDOW_MINS   = 120   # only verify flights arriving within this window
-REG_VERIFY_CACHE_TTL_SEC = 1800  # how long one flight's verified airframe is reused
-                                 # across ALL sessions. Long enough that reloads
-                                 # and extra viewers are free; short enough that a
-                                 # late aircraft swap is picked up the same day.
+REG_VERIFY_CACHE_TTL_SEC = 3600  # how long one flight's verified airframe is reused
+                                 # across ALL sessions. An hour: the airframe is
+                                 # settled well before arrival and rarely changes
+                                 # once assigned, so re-asking more often buys
+                                 # little and trebles the cost of the feature.
 DEP_FAIL_TTL_SEC         = 180
 # Arrivals within this many minutes of schedule read as on time rather than
 # showing a noisy "1m early" / "2m late" badge.
@@ -503,36 +513,90 @@ QUIET_HOURS_END_H        = 3    # 03:00 AEST
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("bne-board")
 
-# Photo caches (module-level, thread-safe via single lock):
+# ── Process-wide shared state ────────────────────────────────────────────────
+# IMPORTANT, and the source of several past bugs: Streamlit re-executes this
+# script in a FRESH namespace on every full rerun (new session, page reload,
+# widget interaction). Plain module-level dicts are therefore per-session-run,
+# not global — every viewer and every reload starts with empty caches, empty
+# budgets and an unsynchronised rate limiter. That is why the daily budgets
+# never actually capped daily usage, why gate-change badges rarely appeared,
+# and why the 1.1s AeroDataBox spacing did not hold when two people had the
+# board open (each session had its own "last request" clock).
+#
+# st.cache_resource is the one primitive whose OBJECT is shared across all
+# sessions and reruns in the process, so anything that must be genuinely global
+# — locks, rate-limiter clocks, budget counters, cross-viewer caches — is
+# created here and bound to the familiar names below.
+@st.cache_resource(show_spinner=False)
+def _process_shared():
+    return {
+        "photo_url_cache":   {},
+        "photo_fails":       {},
+        "photo_pending":     set(),
+        "photo_lock":        threading.Lock(),
+        "photo_throttle":    threading.Lock(),
+        "photo_last":        [0.0],
+        "photo_semaphore":   threading.Semaphore(IMAGE_WORKERS),
+        "ac_info_cache":     {},
+        "ac_info_pending":   set(),
+        "ac_info_lock":      threading.Lock(),
+        "ac_budget":         {"date": "", "n": 0},
+        "dep_budget":        {"date": "", "n": 0},
+        "gate_state":        {},
+        "gate_changed":      {},
+        "gate_lock":         threading.Lock(),
+        "adb_throttle":      threading.Lock(),
+        "adb_last":          [0.0],
+    }
+
+
+try:
+    _SHARED = _process_shared()
+except Exception as _e:                      # never let this stop the app booting
+    logging.getLogger("bne-board").warning("Shared state unavailable (%s) — "
+                                           "falling back to per-session state", _e)
+    _SHARED = {
+        "photo_url_cache": {}, "photo_fails": {}, "photo_pending": set(),
+        "photo_lock": threading.Lock(), "photo_throttle": threading.Lock(),
+        "photo_last": [0.0], "photo_semaphore": threading.Semaphore(IMAGE_WORKERS),
+        "ac_info_cache": {}, "ac_info_pending": set(),
+        "ac_info_lock": threading.Lock(), "ac_budget": {"date": "", "n": 0},
+        "dep_budget": {"date": "", "n": 0}, "gate_state": {}, "gate_changed": {},
+        "gate_lock": threading.Lock(), "adb_throttle": threading.Lock(),
+        "adb_last": [0.0],
+    }
+
+# Photo caches:
 #   _photo_url_cache : reg -> photo URL (success) or "NOT_FOUND" (genuine miss, don't retry)
 #   _photo_fails     : reg -> datetime of last TRANSIENT failure (retry after PHOTO_FAIL_TTL_SEC)
-_photo_url_cache: dict   = {}
-_photo_fails: dict       = {}
-_photo_pending: set      = set()   # regs currently being fetched in the background
+# Shared, so a photo fetched for one viewer is already there for the next.
+_photo_url_cache: dict   = _SHARED["photo_url_cache"]
+_photo_fails: dict       = _SHARED["photo_fails"]
+_photo_pending: set      = _SHARED["photo_pending"]
 # Aircraft details cache (Tier 1 endpoint, 1 unit/call). reg -> info dict, or
-# "NONE" when the API had nothing useful. Fetched lazily in background threads,
-# cached for the life of the process — age/seats/freighter status never change.
-_ac_info_cache: dict     = {}
-_ac_info_pending: set    = set()
-_ac_budget               = {"date": "", "n": 0}
-_ac_info_lock            = threading.Lock()
+# "NONE" when the API had nothing useful.
+_ac_info_cache: dict     = _SHARED["ac_info_cache"]
+_ac_info_pending: set    = _SHARED["ac_info_pending"]
+_ac_budget               = _SHARED["ac_budget"]
+_ac_info_lock            = _SHARED["ac_info_lock"]
 # Departure-time lookups: key = "FLIGHT|YYYY-MM-DD" (arrival sched date, AEST)
 _dep_cache: dict         = {}   # key -> "HH:MM" (AEST) or "NONE"
 _dep_pending: set        = set()
 _dep_fails: dict         = {}   # key -> fail timestamp (retry after DEP_FAIL_TTL_SEC)
-_dep_budget              = {"date": "", "n": 0}
+_dep_budget              = _SHARED["dep_budget"]
 _dep_lock                = threading.Lock()
 
-# Gate history — module-level so ALL users see the same change badges (was
-# session-scoped: each browser had its own memory). Changes expire after 60 min.
-_gate_state: dict        = {}   # flight_num -> last seen gate
-_gate_changed: dict      = {}   # flight_num -> (old_gate, detected_at)
-_gate_lock               = threading.Lock()
+# Gate history — genuinely shared, so every viewer sees the same change badges
+# and a badge survives a page reload. Changes expire after 60 min.
+_gate_state: dict        = _SHARED["gate_state"]
+_gate_changed: dict      = _SHARED["gate_changed"]
+_gate_lock               = _SHARED["gate_lock"]
 GATE_BADGE_TTL_SEC       = 3600
-# AeroDataBox enforces a per-second rate limit on the Pro plan — space aircraft
-# lookups to ~1 req/sec so they never trip it (nor collide with the FIDS call).
-_adb_throttle_lock       = threading.Lock()
-_adb_last_request        = [0.0]
+# AeroDataBox enforces a per-second rate limit — space calls ~1/sec so they
+# never trip it. This clock MUST be shared: with a per-session one, two viewers
+# could each fire a request in the same second and trip the plan's limit.
+_adb_throttle_lock       = _SHARED["adb_throttle"]
+_adb_last_request        = _SHARED["adb_last"]
 # FIDS failure backoff — after a failed fetch, don't hammer the API on every
 # 60s fragment rerun; wait this long before the next attempt.
 _fids_fail_until         = [0.0]
@@ -564,14 +628,15 @@ _fids_last_good          = [0.0, None]
 # and anything older is dropped rather than shown behind a contradictory banner.
 FIDS_STALE_MAX_SEC       = API_DATA_TTL_SEC * 2
 ADB_MIN_INTERVAL_SEC     = 1.1
-_photo_lock              = threading.Lock()
-# Throttle: enforce a minimum gap between outbound Planespotters requests across
-# all threads so we don't burst past the free API's rate limit (was getting 429s).
-_photo_throttle_lock     = threading.Lock()
-_photo_last_request      = [0.0]   # mutable holder for last-request timestamp
-# Cap concurrent background photo threads — without this, 30 cache-miss regs
-# would spawn 30 threads at once (harmless due to the throttle, but wasteful).
-_photo_semaphore         = threading.Semaphore(IMAGE_WORKERS)
+_photo_lock              = _SHARED["photo_lock"]
+# Throttle: minimum gap between outbound Planespotters requests. Shared across
+# sessions for the same reason as the AeroDataBox one — a per-session throttle
+# lets N viewers make N times the request rate, which is what produced the
+# earlier run of Planespotters 429s.
+_photo_throttle_lock     = _SHARED["photo_throttle"]
+_photo_last_request      = _SHARED["photo_last"]
+# Cap concurrent background photo threads, process-wide.
+_photo_semaphore         = _SHARED["photo_semaphore"]
 PHOTO_MIN_INTERVAL_SEC   = 0.4     # ~2.5 requests/sec max
 
 # ─────────────────────────────────────────────
@@ -1534,7 +1599,7 @@ def opensky_estimate_eta(flight_number: str, opensky_data: dict, now: datetime):
 
 
 # ─────────────────────────────────────────────
-#  4. UI SETUP & FRAGMENT EXECUTION (V12.78)
+#  4. UI SETUP & FRAGMENT EXECUTION (V12.79)
 # ─────────────────────────────────────────────
 st.set_page_config(page_title="BNE Pro Arrivals", page_icon="✈️", layout="centered")
 if "api_last_hit" not in st.session_state: st.session_state.api_last_hit = None
@@ -1593,7 +1658,7 @@ def _live_dashboard_impl():
     # Use a single Streamlit selectbox in the sidebar-style menu instead,
     # OR collapse all controls into one popover button.
     # Header is wrapped defensively: a failure while building the controls must
-    # never prevent the flight list below from rendering (V12.78 — a broken
+    # never prevent the flight list below from rendering (V12.79 — a broken
     # header previously left the ⚙️ button full-width and no flights at all).
     # Whole-number weights only — fractional widths (e.g. 1.2) make Streamlit's
     # flexbox wrap the columns into separate rows on narrow phones, which is why
@@ -1657,7 +1722,7 @@ def _live_dashboard_impl():
 
             **點擊操作**：航班號 → Flightradar24（在飛顯示即時地圖）· 飛機照片 → 放大＋機型機齡座位＋更多照片連結
 
-            **頂部**：更新時間 ·（+約10分延遲）AeroDataBox本身延遲 · 下次更新倒數（每5分鐘）· 休眠時段 01:00–03:00 AEST
+            **頂部**：更新時間 ·（+約10分延遲）AeroDataBox本身延遲 · 下次更新倒數（每5分鐘）· 休眠時段 {QUIET_HOURS_START_H:02d}:00–{QUIET_HOURS_END_H:02d}:00 AEST
 
             **設定 ⚙️**：字體大小、深淺色、語言（EN/繁中/한국어/日本語）
 
@@ -1677,7 +1742,7 @@ def _live_dashboard_impl():
 
             **클릭**：항공편 번호 → Flightradar24(비행 중 실시간 지도) · 항공기 사진 → 확대＋기종·기령·좌석＋추가 사진 링크
 
-            **상단**：업데이트 시간 ·(+약10분 지연) · 다음 새로고침(5분마다) · 대기 시간 01:00–03:00 AEST
+            **상단**：업데이트 시간 ·(+약10분 지연) · 다음 새로고침(5분마다) · 대기 시간 {QUIET_HOURS_START_H:02d}:00–{QUIET_HOURS_END_H:02d}:00 AEST
 
             **설정 ⚙️**：글자 크기, 테마, 언어
 
@@ -1697,7 +1762,7 @@ def _live_dashboard_impl():
 
             **クリック**：便名 → Flightradar24(飛行中はリアルタイム地図) · 機体写真 → 拡大＋機種・機齢・座席＋追加写真リンク
 
-            **ヘッダー**：更新時刻 ·(+約10分遅延) · 次の更新(5分ごと) · スリープ 01:00–03:00 AEST
+            **ヘッダー**：更新時刻 ·(+約10分遅延) · 次の更新(5分ごと) · スリープ {QUIET_HOURS_START_H:02d}:00–{QUIET_HOURS_END_H:02d}:00 AEST
 
             **設定 ⚙️**：文字サイズ、テーマ、言語
 
@@ -1717,7 +1782,7 @@ def _live_dashboard_impl():
 
             **Tap**: flight number → Flightradar24 (live map when airborne) · aircraft photo → enlarge + type/age/seats + more-photos link
 
-            **Header**: update time · (+~10m lag) AeroDataBox's own lag · next-refresh countdown (every 5 min) · quiet hours 01:00–03:00 AEST
+            **Header**: update time · (+~10m lag) AeroDataBox's own lag · next-refresh countdown (every 5 min) · quiet hours {QUIET_HOURS_START_H:02d}:00–{QUIET_HOURS_END_H:02d}:00 AEST
 
             **Settings ⚙️**: text size, theme, language (EN / 繁中 / 한국어 / 日本語)
 
@@ -2101,7 +2166,7 @@ def _live_dashboard_impl():
         # b) Revised (radar) flights whose ETA has expired past the lag window
         #    but AeroDataBox hasn't confirmed landing yet → prevents "In 00m"
         #    stuck cards (e.g. KE407 showing Est 07:06 at 07:22).
-        # Split by data quality (V12.78 fix for the stuck-"On Ground" bug):
+        # Split by data quality (V12.79 fix for the stuck-"On Ground" bug):
         # • "revised" (radar Est exists) → the flight is genuinely being tracked
         #   and flew. AeroDataBox frequently NEVER fills departure actualTime nor
         #   flips status to airborne, so requiring has_departed left genuinely
@@ -2123,12 +2188,17 @@ def _live_dashboard_impl():
                 and t_diff <= 0
                 and (t_type == "revised"
                      or (t_type == "scheduled" and has_departed))):
-            if _still_airborne or disruption_mode:
-                # Either the feed still has this aircraft flying, or conditions
-                # mean aircraft are holding and diverting. In both cases an
-                # expired estimate is no evidence of a landing, so say so rather
-                # than inferring one — and in particular never print "On Ground"
-                # for an aircraft that is in a holding pattern.
+            if disruption_mode:
+                # Aircraft are holding or diverting: an expired estimate is no
+                # evidence of a landing, so say so rather than inferring one.
+                landing_unconfirmed = True
+            elif _still_airborne and t_diff > -STALE_AIRBORNE_MINS:
+                # The feed still has it flying, so never print "On Ground" for
+                # what may be a holding aircraft. Bounded by STALE_AIRBORNE_MINS
+                # because AeroDataBox sometimes just never clears an "enroute"
+                # status: past that point the status is stale, not informative,
+                # and leaving the card pinned to the top of the board for hours
+                # would be worse than falling through to the landed inference.
                 landing_unconfirmed = True
             elif t_diff < -LANDED_INFER_MINS:
                 is_lan = True
@@ -2276,7 +2346,8 @@ def _live_dashboard_impl():
     # ── Gap Detection ─────────────────────────────────────────────────────────
     gap_candidates = sorted(
         [p for p in processed
-         if not p["is_canceled"] and not p["is_diverted"]
+         if not p.get("is_gap") and not p.get("is_surge")
+         and not p["is_canceled"] and not p["is_diverted"]
          and not (p["is_landed"] and p["landed_mins"] > RECENT_LANDED_MAX)],
         key=lambda x: x["dt"],
     )
@@ -2373,8 +2444,13 @@ def _live_dashboard_impl():
         })
 
     # ── Surge Detection (chain-based) ─────────────────────────────────────────
+    # Guard on BOTH pseudo-entry kinds. Today this is safe either way because
+    # surge banners are appended after this list is built, but relying on that
+    # ordering means any future reshuffle fails with a KeyError on a gap or
+    # surge dict, which carries none of the flight keys.
     future_flights = sorted(
-        [p for p in processed if not p.get("is_gap")
+        [p for p in processed
+         if not p.get("is_gap") and not p.get("is_surge")
          and not p["is_canceled"] and not p["is_diverted"] and not p["is_landed"]],
         key=lambda x: x["dt"],
     )
@@ -2864,7 +2940,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.78</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.79</div>",
         unsafe_allow_html=True,
     )
 
