@@ -108,6 +108,33 @@ REG_VERIFY_CACHE_TTL_SEC = 3600  # how long one flight's verified airframe is re
                                  # once assigned, so re-asking more often buys
                                  # little and trebles the cost of the feature.
 DEP_FAIL_TTL_SEC         = 180
+
+# ── Registration plausibility check (free, offline) ──────────────────────────
+# The FIDS registration is a JOIN the data provider makes between an airframe
+# and a schedule, and it mis-joins: on 2026-09-21 CI53 (China Airlines) was
+# reported as B-16402, which is an EVA Air 747 freighter. Arrival times don't
+# suffer this because they are observed directly against the flight number.
+#
+# This is the free half of the defence. Every airline registers its aircraft
+# under its own country's prefix (VH- Australia, ZK- New Zealand, 9V- Singapore,
+# A6- UAE ...); those allocations are ICAO-level and stable for decades, so a
+# tail that cannot belong to the operating airline's country is not that
+# airline's aircraft. We hide it rather than show the wrong one — for a
+# click-and-collect desk, "no data" is safer than "wrong data".
+#
+# What it does NOT catch: a mis-join WITHIN one country. B-16402 on CI53 is
+# exactly that — EVA and China Airlines both register B-##### in Taiwan — and so
+# is any QF/JQ/VA/ON swap, since all four are VH-. Only the paid per-flight leg
+# lookup (DEP_INFO_ENABLED) resolves those. Catching them here would mean
+# hard-coding each airline's numeric block; no authoritative public source
+# publishes those, and they go stale as fleets renew. A wrong block would hide a
+# CORRECT registration, which is worse than the occasional wrong one, so the
+# check deliberately stops at the country level.
+#
+# Fails OPEN in every uncertain case: airline not in the map, registration
+# format we don't recognise, or a registration already corroborated by the leg
+# lookup. Set to False to disable the check entirely.
+REG_PLAUSIBILITY_ENABLED = True
 # Arrivals within this many minutes of schedule read as on time rather than
 # showing a noisy "1m early" / "2m late" badge.
 PUNCTUALITY_TOLERANCE_MINS = 3
@@ -464,6 +491,125 @@ AIRLINE_ICAO = {
     "UA": "UAL", "DL": "DAL", "AA": "AAL", "AC": "ACA", "BA": "BAW",
     "AF": "AFR", "KL": "KLM", "LH": "DLH", "SV": "SVA",
 }
+
+# ── Registration prefix allocations (see REG_PLAUSIBILITY_ENABLED) ───────────
+# Country-level civil registration formats, matched against the registration
+# with punctuation stripped and upper-cased ("VH-OEI" -> "VHOEI"), so a feed
+# that omits the hyphen still matches. Sources: ICAO allocations as published in
+# Wikipedia's "List of aircraft registration prefixes", plus the B- prefix
+# breakdown (mainland China four characters, Hong Kong B-H/B-K/B-L, Macau B-M,
+# Taiwan five digits) — which is why B-18920 (Taiwan) and B-5902 (mainland) are
+# told apart by LENGTH, not by the leading digit.
+_REG_FORMATS = {
+    "Australia":   r"VH[A-Z0-9]{3}",
+    "NewZealand":  r"Z[KLM][A-Z]{3}",
+    "Taiwan":      r"B[0-9]{5}",
+    "China":       r"B[0-9][A-Z0-9]{3}",
+    "HongKong":    r"B[HKL][A-Z]{2}",
+    "Singapore":   r"9V[A-Z]{3}",
+    "UAE":         r"A6[A-Z]{3}",
+    "Qatar":       r"A7[A-Z]{3}",
+    "Philippines": r"RPC[0-9]{3,4}",
+    "PNG":         r"P2[A-Z]{3}",
+    "Canada":      r"C[FGI][A-Z]{3}",
+    "Fiji":        r"DQ[A-Z]{3}",
+    "Solomons":    r"H4[A-Z]{3}",
+    "Japan":       r"JA[A-Z0-9]{4}",
+    "Korea":       r"HL[A-Z0-9]{4}",
+    "Malaysia":    r"9M[A-Z]{3}",
+    "Indonesia":   r"PK[A-Z]{3}",
+    "Vietnam":     r"VN[A-Z0-9]{4}",
+    "Thailand":    r"HS[A-Z]{3}",
+    "Brunei":      r"V8[A-Z0-9]{3}",
+    "France":      r"F[A-Z]{4}",     # covers F-O… (New Caledonia — Aircalin)
+    "India":       r"VT[A-Z]{3}",
+    "USA":         r"N[0-9]{1,5}[A-Z]{0,2}",
+    "UK":          r"G[A-Z]{4}",
+    "Netherlands": r"PH[A-Z]{3}",
+    "Germany":     r"D[A-Z]{4}",
+    "Saudi":       r"HZ[A-Z][A-Z0-9]{2,3}",   # HZ-AAA and HZ-AK11 both exist
+    "Nauru":       r"C2[A-Z]{3}",
+}
+
+# Operating airline -> the registration format(s) its aircraft may legitimately
+# carry. An airline that is NOT listed here is never judged, which is why
+# carriers that habitually fly on borrowed metal are left out entirely (NF Air
+# Vanuatu). The second entries below are deliberate allowances, not mistakes:
+# Nauru Airlines registers its fleet in Australia (VH-PNI), Virgin Australia's
+# Doha flights operate on Qatar Airways metal, and the Pacific carriers
+# wet-lease Australian aircraft often enough to be worth permitting.
+AIRLINE_REG_HOME = {
+    "QF": ("Australia",),            "JQ": ("Australia",),
+    "VA": ("Australia", "Qatar"),    "ON": ("Australia", "Nauru"),
+    "NZ": ("NewZealand",),           "FJ": ("Fiji", "Australia"),
+    "IE": ("Solomons", "Australia"), "PX": ("PNG", "Australia"),
+    "SB": ("France",),
+    "CI": ("Taiwan",),               "BR": ("Taiwan",),
+    "IT": ("Taiwan",),
+    "CA": ("China",),                "CZ": ("China",),
+    "MU": ("China",),
+    "CX": ("HongKong",),             "HX": ("HongKong",),
+    "UO": ("HongKong",),
+    "SQ": ("Singapore",),            "TR": ("Singapore",),
+    "3K": ("Singapore",),
+    "TG": ("Thailand",),             "PG": ("Thailand",),
+    "VN": ("Vietnam",),              "VJ": ("Vietnam",),
+    "MH": ("Malaysia",),             "AK": ("Malaysia",),
+    "OD": ("Malaysia",),             "GA": ("Indonesia",),
+    "PR": ("Philippines",),          "5J": ("Philippines",),
+    "KE": ("Korea",),                "OZ": ("Korea",),
+    "TW": ("Korea",),
+    "JL": ("Japan",),                "NH": ("Japan",),
+    "MM": ("Japan",),                "BI": ("Brunei",),
+    "EK": ("UAE",),                  "EY": ("UAE",),
+    "QR": ("Qatar",),                "AI": ("India",),
+    "SV": ("Saudi",),                "AC": ("Canada",),
+    "UA": ("USA",),                  "DL": ("USA",),
+    "AA": ("USA",),                  "BA": ("UK",),
+    "AF": ("France",),               "KL": ("Netherlands",),
+    "LH": ("Germany",),
+}
+
+_REG_FORMAT_RE = {k: re.compile(f"^{v}$") for k, v in _REG_FORMATS.items()}
+
+# A country name in AIRLINE_REG_HOME with no matching entry in _REG_FORMATS
+# would silently make _reg_plausible() reject EVERY tail for that airline, so
+# surface a typo at import rather than letting it hide correct registrations.
+for _al, _homes in AIRLINE_REG_HOME.items():
+    _missing = [h for h in _homes if h not in _REG_FORMAT_RE]
+    if _missing:
+        logging.getLogger("bne-board").error(
+            "AIRLINE_REG_HOME[%s] names unknown format(s) %s — check disabled for it",
+            _al, _missing)
+
+
+def _airline_code(flight_num: str) -> str:
+    """IATA airline code from a flight number, or "" if it doesn't parse.
+    Written as a regex rather than a letters-only scan so digit-leading codes
+    (3K, 5J) survive — a letters-only scan turns "3K123" into "K"."""
+    m = re.match(r"^([A-Z0-9]{2})\s*[0-9]", (flight_num or "").strip().upper())
+    return m.group(1) if m else ""
+
+
+def _reg_plausible(flight_num: str, reg: str) -> bool:
+    """Could `reg` belong to the airline operating `flight_num`?
+
+    Deliberately fails OPEN — returns True whenever we are not certain: nothing
+    to check, an airline we hold no allocation for, or a misconfigured entry.
+    It returns False only when the airline IS known and the tail clearly belongs
+    to another country."""
+    if not REG_PLAUSIBILITY_ENABLED or not reg:
+        return True
+    homes = AIRLINE_REG_HOME.get(_airline_code(flight_num))
+    if not homes:
+        return True                      # airline not in the map — never judge
+    norm = re.sub(r"[^A-Z0-9]", "", reg.upper())
+    if not norm:
+        return True
+    pats = [_REG_FORMAT_RE[h] for h in homes if h in _REG_FORMAT_RE]
+    if not pats:
+        return True                      # misconfigured — never judge
+    return any(p.match(norm) for p in pats)
 
 # FIX 5 — use constant in the fragment decorator (was hardcoded "60s")
 UI_REFRESH_SEC           = 60
@@ -2220,14 +2366,27 @@ def _live_dashboard_impl():
             dep_ap.get("municipalityName") or dep_ap.get("name") or "Unknown",
         )
 
+        # Registration plausibility (free, offline — see REG_PLAUSIBILITY_ENABLED).
+        # Applied to the DISPLAY fields only. ac_r itself must stay untouched:
+        # the strictly-international filter and the not-operating-today filter
+        # above both read it, and blanking it there would drop real flights off
+        # the board entirely. Hiding the tail also suppresses the photo, which is
+        # the most misleading element when the airframe is wrong.
+        ac_r_show = ac_r
+        if ac_r and not _reg_plausible(flight_num, ac_r):
+            log.warning("Reg %s cannot belong to %s — hiding tail and photo",
+                        ac_r, flight_num)
+            ac_r_show = ""
+
         processed.append({
             "num":          flight_num,
             "prev_gate":    None,  # populated below if a gate change is detected
             "origin":       city,
             "iata":         origin_iata,
             "gate":         arr.get("gate") or "TBA",
-            "ac_text":      f"{ac_m} ({ac_r})" if ac_m and ac_r else ac_m or ac_r,
-            "reg":          ac_r,
+            "ac_text":      (f"{ac_m} ({ac_r_show})" if ac_m and ac_r_show
+                             else ac_m or ac_r_show),
+            "reg":          ac_r_show,
             "s_dt_iso":     s_dt.isoformat() if s_dt is not None else None,
             "actual_time":  best_dt.strftime("%H:%M"),
             "sch_time":     s_dt.strftime("%H:%M"),
@@ -2238,7 +2397,7 @@ def _live_dashboard_impl():
             "s_dt_val":     s_dt,
             "time_type":    t_type,
             "logo_url":     get_airline_logo_url(flight_num),
-            "photo_url":    get_photo_from_api(ac_r),
+            "photo_url":    get_photo_from_api(ac_r_show),
             "border_color": style.border_color,
             "status_color": style.status_color,
             "status_text":  style.status_text,
@@ -2725,7 +2884,7 @@ def _live_dashboard_impl():
             f'<div class="img-fallback" style="border-color:{pf["border_color"]};">{al_code}</div>'
             f'<label for="{mid}" style="cursor:pointer; display:block; width:100%; height:100%;">'
             f'<img src="{pf["logo_url"]}" class="flip-img logo-layer" style="border-color:{pf["border_color"]};"/>'
-            f'<img src="{pf["photo_url"]}" class="flip-img photo-layer" style="border-color:{pf["border_color"]};"/>'
+            f'<img src="{photo_url}" class="flip-img photo-layer" style="border-color:{pf["border_color"]};"/>'
             f'</label></div>'
             if has_photo else
             f'<div class="flip-container" style="filter:{pf["img_filter"]};">'
@@ -2940,7 +3099,7 @@ def _live_dashboard_impl():
             </div>""", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.79</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.80</div>",
         unsafe_allow_html=True,
     )
 
