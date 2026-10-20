@@ -6,6 +6,8 @@ import logging
 import math
 import threading
 import re
+import time
+import calendar
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import pytz
@@ -102,6 +104,8 @@ DEP_INFO_ENABLED         = True
 DEP_DAILY_BUDGET         = 150
 REG_VERIFY_MAX_PER_RUN   = 3     # new lookups per render (soonest arrivals first)
 REG_VERIFY_WINDOW_MINS   = 120   # only verify flights arriving within this window
+# V12.81: the three values above are the STANDARD-mode settings. The quota
+# governor (QUOTA_MODES) widens or disables them by mode at runtime.
 REG_VERIFY_CACHE_TTL_SEC = 3600  # how long one flight's verified airframe is reused
                                  # across ALL sessions. An hour: the airframe is
                                  # settled well before arrival and rarely changes
@@ -613,7 +617,7 @@ def _reg_plausible(flight_num: str, reg: str) -> bool:
 
 # FIX 5 — use constant in the fragment decorator (was hardcoded "60s")
 UI_REFRESH_SEC           = 60
-API_DATA_TTL_SEC         = 300  # 5 min cache — restored 2026-09-07, see below.
+API_DATA_TTL_SEC         = 300  # STANDARD-mode FIDS bucket (see QUOTA_MODES); history below.
 # MEASURED COST (from the 2026-08-11 quota exhaustion, not an estimate):
 # the FIDS airport-wide endpoint costs ~9.9 units per call — NOT the 2 units an
 # earlier comment here assumed. At the old 5-min TTL that was 264 calls/day ≈
@@ -644,6 +648,53 @@ API_DATA_TTL_SEC         = 300  # 5 min cache — restored 2026-09-07, see below
 # 9 hours of use measured 18 calls. If usage ever needs cutting again, this
 # constant is the only lever that matters: 10 min halves it, 30 min cuts it to
 # a sixth. Nothing else on the board makes a per-render API call any more.
+# ── Quota governor (V12.81) ──────────────────────────────────────────────────
+# Measured over 22 Sep-21 Oct on V12.79/V12.80: ~220 calls/day, finishing the
+# month at ~45% of the 60,000-unit Ultra quota — over half of what is paid for
+# went unused. Target set 2026-10-20: spend the headroom, aiming for ~75%.
+#
+# Rather than tune a static setting by estimate — every cost estimate in this
+# file has been wrong at least once, one of them by 7x — the board reads its
+# REAL quota position from the RapidAPI response headers on every FIDS fetch
+# (x-ratelimit-<object>-limit / -remaining / -reset) and compares it against a
+# straight line from 0% at the start of the billing period to QUOTA_TARGET at
+# the end:
+#   boost    — below the line: 3-min FIDS, registration checked on every
+#              airborne inbound flight within 6 h, aircraft age/seats looked up
+#   standard — above the line: the V12.80 settings (5-min FIDS, 2-h checks)
+#   economy  — past QUOTA_BRAKE: 10-min FIDS and no extra lookups, so a busy
+#              month can never hit the hard limit and blank the board the way
+#              2026-08-11 did
+# Boost costs more than the target rate if held all month, on purpose: the
+# board drops to standard whenever it gets ahead of the line, so the month
+# averages out near QUOTA_TARGET instead of either wasting or overshooting it.
+#
+# Every uncertain case falls back to standard: no quota header found, an
+# unparseable value, a reading older than QUOTA_READING_MAX_AGE_SEC, or any
+# exception in this code. A fault here can only ever leave the board on its
+# pre-V12.81 settings — it can never make it spend more.
+QUOTA_TARGET              = 0.75
+QUOTA_BRAKE               = 0.90
+QUOTA_PACE_HYSTERESIS     = 0.02   # boost drops to standard only this far above the line
+QUOTA_READING_MAX_AGE_SEC = 6 * 3600
+QUOTA_MODES = {
+    "boost":    {"fids_sec": 180, "verify_window": 360, "verify_per_run": 4,
+                 "dep_budget": 400, "ac_lookup": True,  "ac_budget": 80},
+    "standard": {"fids_sec": API_DATA_TTL_SEC, "verify_window": REG_VERIFY_WINDOW_MINS,
+                 "verify_per_run": REG_VERIFY_MAX_PER_RUN, "dep_budget": DEP_DAILY_BUDGET,
+                 "ac_lookup": AC_LOOKUP_ON_RENDER, "ac_budget": AC_DAILY_BUDGET},
+    "economy":  {"fids_sec": 600, "verify_window": 0, "verify_per_run": 0,
+                 "dep_budget": 0, "ac_lookup": False, "ac_budget": 0},
+}
+# The FIDS cache must outlive the LONGEST bucket: if it expired mid-bucket in
+# economy mode, every new session would refetch the same anchor.
+FIDS_TTL_MAX_SEC          = max(m["fids_sec"] for m in QUOTA_MODES.values())
+# Weather buckets are fixed, NOT tied to the FIDS bucket. Open-Meteo shares a
+# rate-limited IP on Streamlit Cloud, and until V12.81 it was keyed on the FIDS
+# anchor — so its "30 min" cache was really refetched every 5 min, and at 3 min
+# it would be worse. METAR stays at 5 min so fog detection keeps its cadence.
+WEATHER_BUCKET_SEC        = 1800
+METAR_BUCKET_SEC          = 300
 OPENSKY_TTL_SEC          = 60   # free source — refresh every fragment cycle for freshest radar positions
 
 # Quiet hours — skip API calls between these times to save units. BNE international
@@ -693,6 +744,8 @@ def _process_shared():
         "gate_lock":         threading.Lock(),
         "adb_throttle":      threading.Lock(),
         "adb_last":          [0.0],
+        "quota":             {"lock": threading.Lock(), "used": None, "reset_at": None,
+                              "ts": 0.0, "obj": "", "mode": "standard", "logged": False},
     }
 
 
@@ -710,6 +763,8 @@ except Exception as _e:                      # never let this stop the app booti
         "dep_budget": {"date": "", "n": 0}, "gate_state": {}, "gate_changed": {},
         "gate_lock": threading.Lock(), "adb_throttle": threading.Lock(),
         "adb_last": [0.0],
+        "quota": {"lock": threading.Lock(), "used": None, "reset_at": None,
+                  "ts": 0.0, "obj": "", "mode": "standard", "logged": False},
     }
 
 # Photo caches:
@@ -727,7 +782,6 @@ _ac_budget               = _SHARED["ac_budget"]
 _ac_info_lock            = _SHARED["ac_info_lock"]
 # Departure-time lookups: key = "FLIGHT|YYYY-MM-DD" (arrival sched date, AEST)
 _dep_cache: dict         = {}   # key -> "HH:MM" (AEST) or "NONE"
-_dep_pending: set        = set()
 _dep_fails: dict         = {}   # key -> fail timestamp (retry after DEP_FAIL_TTL_SEC)
 _dep_budget              = _SHARED["dep_budget"]
 _dep_lock                = threading.Lock()
@@ -743,6 +797,96 @@ GATE_BADGE_TTL_SEC       = 3600
 # could each fire a request in the same second and trip the plan's limit.
 _adb_throttle_lock       = _SHARED["adb_throttle"]
 _adb_last_request        = _SHARED["adb_last"]
+
+# ── Quota governor state and logic (see QUOTA_TARGET) ────────────────────────
+_quota                   = _SHARED["quota"]
+
+
+def _record_quota(headers) -> None:
+    """Store the real quota position from a RapidAPI response. Never raises."""
+    try:
+        found = {}
+        for k, v in headers.items():
+            m = re.match(r"^x-ratelimit-(.+)-(limit|remaining|reset)$", str(k).lower())
+            if m:
+                found.setdefault(m.group(1), {})[m.group(2)] = v
+        with _quota["lock"]:
+            first = not _quota["logged"]
+            _quota["logged"] = True
+        if first:
+            # Once per process, so the real header names are visible in the
+            # logs: RapidAPI derives them from the provider's billing-object
+            # name, which is not published for AeroDataBox.
+            log.warning("QUOTA headers seen: %s",
+                        {o: sorted(f) for o, f in found.items()} or "none")
+        obj = next((o for o, f in found.items()
+                    if "unit" in o and "limit" in f and "remaining" in f), None)
+        if obj is None:
+            return
+        limit     = float(found[obj]["limit"])
+        remaining = float(found[obj]["remaining"])
+        if limit <= 0:
+            return
+        reset = found[obj].get("reset") or found.get("requests", {}).get("reset")
+        now   = time.time()
+        with _quota["lock"]:
+            _quota["used"]     = min(1.0, max(0.0, 1.0 - remaining / limit))
+            _quota["reset_at"] = now + float(reset) if reset not in (None, "") else None
+            _quota["ts"]       = now
+            _quota["obj"]      = obj
+    except Exception as e:
+        log.warning("Quota header parse failed: %s", e)
+
+
+def _period_elapsed(reset_at: float, now: float):
+    """Fraction of the current billing period elapsed, or None. The period runs
+    one calendar month back from the reset (RapidAPI bills monthly from the
+    subscription day — the 22nd here)."""
+    end = datetime.fromtimestamp(reset_at, tz=pytz.utc)
+    y, m = (end.year, end.month - 1) if end.month > 1 else (end.year - 1, 12)
+    start = end.replace(year=y, month=m, day=min(end.day, calendar.monthrange(y, m)[1]))
+    span = (end - start).total_seconds()
+    if span <= 0:
+        return None
+    return min(1.0, max(0.0, (now - start.timestamp()) / span))
+
+
+def _quota_mode() -> str:
+    """boost / standard / economy from the latest real quota reading."""
+    try:
+        now = time.time()
+        with _quota["lock"]:
+            used, reset_at = _quota["used"], _quota["reset_at"]
+            ts, current    = _quota["ts"], _quota["mode"]
+        if used is None or now - ts > QUOTA_READING_MAX_AGE_SEC:
+            mode = "standard"
+        elif reset_at is not None and now >= reset_at:
+            mode = "standard"         # reading predates the reset; next fetch refreshes it
+        elif used >= QUOTA_BRAKE:
+            mode = "economy"
+        else:
+            elapsed = _period_elapsed(reset_at, now) if reset_at else None
+            if elapsed is None:
+                mode = "standard"
+            else:
+                pace = QUOTA_TARGET * elapsed
+                if current == "boost":
+                    mode = "standard" if used > pace + QUOTA_PACE_HYSTERESIS else "boost"
+                else:
+                    mode = "boost" if used < pace else "standard"
+        if mode != current:
+            with _quota["lock"]:
+                _quota["mode"] = mode
+            log.warning("QUOTA mode %s -> %s (used=%s)", current, mode,
+                        f"{used:.1%}" if used is not None else "unknown")
+        return mode
+    except Exception as e:
+        log.warning("Quota mode failed (%s) — using standard", e)
+        return "standard"
+
+
+def _mode_cfg() -> dict:
+    return QUOTA_MODES[_quota_mode()]
 # FIDS failure backoff — after a failed fetch, don't hammer the API on every
 # 60s fragment rerun; wait this long before the next attempt.
 _fids_fail_until         = [0.0]
@@ -769,10 +913,9 @@ _fids_fetch_count        = [0]
 _fids_snap_lock          = threading.Lock()
 _fids_snap               = {"anchor": None, "data": None, "fetching": False}
 _fids_last_good          = [0.0, None]
-# Derived from the cache TTL so the two can never collide: the red "data is
-# stale" banner fires at TTL × 2, so last-good is served only up to TTL × 2,
-# and anything older is dropped rather than shown behind a contradictory banner.
-FIDS_STALE_MAX_SEC       = API_DATA_TTL_SEC * 2
+# Last-good is served only up to 2 × the CURRENT FIDS bucket — the same multiple
+# the red "data is stale" banner uses, so the two never contradict. Computed at
+# the call site because the bucket now changes with the quota mode (V12.81).
 ADB_MIN_INTERVAL_SEC     = 1.1
 _photo_lock              = _SHARED["photo_lock"]
 # Throttle: minimum gap between outbound Planespotters requests. Shared across
@@ -1159,11 +1302,12 @@ def _fetch_aircraft_info_http(reg: str):
 def _background_fetch_aircraft_info(reg: str):
     # Daily budget gate — the July lesson: without this, redeploy cache wipes
     # turn "one lookup per aircraft" into thousands of calls a month.
-    _today = datetime.now(pytz.timezone(TIMEZONE)).strftime("%Y-%m-%d")
+    _today  = datetime.now(pytz.timezone(TIMEZONE)).strftime("%Y-%m-%d")
+    _budget = _mode_cfg()["ac_budget"]
     with _ac_info_lock:
         if _ac_budget["date"] != _today:
             _ac_budget["date"], _ac_budget["n"] = _today, 0
-        if _ac_budget["n"] >= AC_DAILY_BUDGET:
+        if _ac_budget["n"] >= _budget:
             _ac_info_pending.discard(reg)
             return
         _ac_budget["n"] += 1
@@ -1194,12 +1338,13 @@ def get_aircraft_info(reg: str):
 
 def _dep_budget_take() -> bool:
     """Consume one unit of today's departure-lookup budget. False = exhausted."""
-    today = datetime.now(pytz.timezone(TIMEZONE)).strftime("%Y-%m-%d")
+    today  = datetime.now(pytz.timezone(TIMEZONE)).strftime("%Y-%m-%d")
+    budget = _mode_cfg()["dep_budget"]
     with _dep_lock:
         if _dep_budget["date"] != today:
             _dep_budget["date"] = today
             _dep_budget["n"] = 0
-        if _dep_budget["n"] >= DEP_DAILY_BUDGET:
+        if _dep_budget["n"] >= budget:
             return False
         _dep_budget["n"] += 1
         return True
@@ -1341,9 +1486,6 @@ def _fetch_dep_time_http(flight_num: str, s_dt_iso: str, key: str):
         log.warning("Dep time fetch failed for %s: %s", flight_num, e)
         with _dep_lock:
             _dep_fails[key] = datetime.now().timestamp()
-    finally:
-        with _dep_lock:
-            _dep_pending.discard(key)
 
 
 @st.cache_data(ttl=REG_VERIFY_CACHE_TTL_SEC, show_spinner=False)
@@ -1370,28 +1512,20 @@ def _verify_leg_shared(flight_num: str, date_key: str, s_dt_iso: str):
 
 
 def get_flight_leg_info(flight_num: str, s_dt_iso: str):
-    """NON-BLOCKING. Cached per-flight leg info dict
-    {found, dep (HH:MM AEST), reg} or None while unknown. Kicks off one
-    budgeted background lookup on first miss."""
+    """READ-ONLY. The verified leg for this flight if the verification pass has
+    already fetched it, else None. Never makes an API call.
+
+    Until V12.81 a miss here started a background lookup — and this is called
+    for EVERY card on EVERY render, including flights 10+ hours out whose
+    airframe isn't assigned yet. Those lookups weren't shared across sessions,
+    so each new viewer repeated them, and they drained the daily budget that
+    the capped verification pass (the one that actually targets arriving
+    flights) depends on. All fetching now goes through that pass alone."""
     if not DEP_INFO_ENABLED or not flight_num or not s_dt_iso:
         return None
-    key = f"{flight_num}|{s_dt_iso[:10]}"
     with _dep_lock:
-        cached = _dep_cache.get(key)
-        fail_ts = _dep_fails.get(key)
-        already = key in _dep_pending
-        if cached is None and not already:
-            _dep_pending.add(key)
-    if cached is not None:
-        return cached if isinstance(cached, dict) else None
-    if fail_ts and (datetime.now().timestamp() - fail_ts) < DEP_FAIL_TTL_SEC:
-        with _dep_lock:
-            _dep_pending.discard(key)
-        return None
-    if not already:
-        threading.Thread(target=_fetch_dep_time_http,
-                         args=(flight_num, s_dt_iso, key), daemon=True).start()
-    return None
+        cached = _dep_cache.get(f"{flight_num}|{s_dt_iso[:10]}")
+    return cached if isinstance(cached, dict) else None
 
 
 def get_photo_from_api(reg: str) -> str:
@@ -1594,7 +1728,7 @@ def _wx_forecast_3h(wx, now_aest, t):
         return ""
 
 
-@st.cache_data(ttl=API_DATA_TTL_SEC, show_spinner=False)
+@st.cache_data(ttl=FIDS_TTL_MAX_SEC, show_spinner=False)
 def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
     url = f"https://aerodatabox.p.rapidapi.com/flights/airports/icao/{AIRPORT_ICAO}/{from_time}/{to_time}"
     headers = {
@@ -1617,11 +1751,13 @@ def fetch_flight_data(anchor: str, from_time: str, to_time: str) -> list:
                     _time.sleep(ADB_MIN_INTERVAL_SEC - _el)
                 _adb_last_request[0] = _time.time()
             r = requests.get(url, headers=headers, params=params, timeout=15)
+            _record_quota(r.headers)      # also on errors — a 429 still carries them
             r.raise_for_status()
             _fids_fetch_count[0] += 1
-            log.warning("FIDSHIT proc=%s n=%d dep=%d ac=%d anchor=%s", _PROC_ID,
-                        _fids_fetch_count[0], _dep_budget["n"], _ac_budget["n"],
-                        anchor)
+            log.warning("FIDSHIT proc=%s n=%d dep=%d ac=%d anchor=%s mode=%s used=%s",
+                        _PROC_ID, _fids_fetch_count[0], _dep_budget["n"],
+                        _ac_budget["n"], anchor, _quota["mode"],
+                        f"{_quota['used']:.1%}" if _quota["used"] is not None else "?")
             st.session_state.api_last_hit = datetime.now(pytz.timezone(TIMEZONE))
             _arrivals = r.json().get("arrivals", [])
             import time as _t2
@@ -1793,6 +1929,10 @@ def _live_dashboard_impl():
     aest     = pytz.timezone(TIMEZONE)
     now_aest = datetime.now(aest)
     t        = get_theme(st.session_state.theme_light)
+    # One quota-mode decision per render, so the guide text, the fetch bucket,
+    # the countdown and the verification pass can never disagree mid-render.
+    _cfg      = _mode_cfg()
+    _fids_sec = _cfg["fids_sec"]
 
     # Inject dynamic CSS first so header styling is correct
     st.markdown(get_dynamic_css(t, st.session_state.font_size), unsafe_allow_html=True)
@@ -1868,7 +2008,7 @@ def _live_dashboard_impl():
 
             **點擊操作**：航班號 → Flightradar24（在飛顯示即時地圖）· 飛機照片 → 放大＋機型機齡座位＋更多照片連結
 
-            **頂部**：更新時間 ·（+約10分延遲）AeroDataBox本身延遲 · 下次更新倒數（每5分鐘）· 休眠時段 {QUIET_HOURS_START_H:02d}:00–{QUIET_HOURS_END_H:02d}:00 AEST
+            **頂部**：更新時間 ·（+約10分延遲）AeroDataBox本身延遲 · 下次更新倒數（目前每{_fids_sec // 60}分鐘，依額度自動調整）· 休眠時段 {QUIET_HOURS_START_H:02d}:00–{QUIET_HOURS_END_H:02d}:00 AEST
 
             **設定 ⚙️**：字體大小、深淺色、語言（EN/繁中/한국어/日本語）
 
@@ -1888,7 +2028,7 @@ def _live_dashboard_impl():
 
             **클릭**：항공편 번호 → Flightradar24(비행 중 실시간 지도) · 항공기 사진 → 확대＋기종·기령·좌석＋추가 사진 링크
 
-            **상단**：업데이트 시간 ·(+약10분 지연) · 다음 새로고침(5분마다) · 대기 시간 {QUIET_HOURS_START_H:02d}:00–{QUIET_HOURS_END_H:02d}:00 AEST
+            **상단**：업데이트 시간 ·(+약10분 지연) · 다음 새로고침(현재 {_fids_sec // 60}분마다, 할당량에 따라 자동 조절) · 대기 시간 {QUIET_HOURS_START_H:02d}:00–{QUIET_HOURS_END_H:02d}:00 AEST
 
             **설정 ⚙️**：글자 크기, 테마, 언어
 
@@ -1908,7 +2048,7 @@ def _live_dashboard_impl():
 
             **クリック**：便名 → Flightradar24(飛行中はリアルタイム地図) · 機体写真 → 拡大＋機種・機齢・座席＋追加写真リンク
 
-            **ヘッダー**：更新時刻 ·(+約10分遅延) · 次の更新(5分ごと) · スリープ {QUIET_HOURS_START_H:02d}:00–{QUIET_HOURS_END_H:02d}:00 AEST
+            **ヘッダー**：更新時刻 ·(+約10分遅延) · 次の更新(現在{_fids_sec // 60}分ごと、残量に応じて自動調整) · スリープ {QUIET_HOURS_START_H:02d}:00–{QUIET_HOURS_END_H:02d}:00 AEST
 
             **設定 ⚙️**：文字サイズ、テーマ、言語
 
@@ -1928,7 +2068,7 @@ def _live_dashboard_impl():
 
             **Tap**: flight number → Flightradar24 (live map when airborne) · aircraft photo → enlarge + type/age/seats + more-photos link
 
-            **Header**: update time · (+~10m lag) AeroDataBox's own lag · next-refresh countdown (every 5 min) · quiet hours {QUIET_HOURS_START_H:02d}:00–{QUIET_HOURS_END_H:02d}:00 AEST
+            **Header**: update time · (+~10m lag) AeroDataBox's own lag · next-refresh countdown (currently every {_fids_sec // 60} min, auto-adjusted to quota) · quiet hours {QUIET_HOURS_START_H:02d}:00–{QUIET_HOURS_END_H:02d}:00 AEST
 
             **Settings ⚙️**: text size, theme, language (EN / 繁中 / 한국어 / 日本語)
 
@@ -1958,10 +2098,16 @@ def _live_dashboard_impl():
     # time — visible in the logs as anchor=19:25 at 19:13.
     _epoch     = aest.localize(datetime(2000, 1, 1))
 
-    # Single quantised anchor — all cache keys and time windows derive from this
-    # so the cache key is stable for the full API_DATA_TTL_SEC window.
-    anchor_dt  = _epoch + timedelta(seconds=(int((now_aest - _epoch).total_seconds()) // API_DATA_TTL_SEC) * API_DATA_TTL_SEC)
+    # Single quantised anchor — all FIDS cache keys and time windows derive from
+    # this so the cache key is stable for the whole bucket (_fids_sec, set by the
+    # quota mode). Weather uses its own fixed buckets — see WEATHER_BUCKET_SEC.
+    _since     = int((now_aest - _epoch).total_seconds())
+    anchor_dt  = _epoch + timedelta(seconds=(_since // _fids_sec) * _fids_sec)
     anchor     = anchor_dt.strftime("%Y-%m-%dT%H:%M")
+    _wx_anchor = (_epoch + timedelta(seconds=(_since // WEATHER_BUCKET_SEC)
+                                     * WEATHER_BUCKET_SEC)).strftime("%Y-%m-%dT%H:%M")
+    _mt_anchor = (_epoch + timedelta(seconds=(_since // METAR_BUCKET_SEC)
+                                     * METAR_BUCKET_SEC)).strftime("%Y-%m-%dT%H:%M")
     from_time  = (anchor_dt - timedelta(hours=LOOKBACK_HOURS)).strftime("%Y-%m-%dT%H:%M")
     to_time    = (anchor_dt + timedelta(hours=LOOKAHEAD_HOURS)).strftime("%Y-%m-%dT%H:%M")
     # Quiet hours: bail out before hitting the API at all — no FIDS call, no
@@ -1990,7 +2136,7 @@ def _live_dashboard_impl():
     _stale_age = None
     if not raw_flights and _fids_last_good[1]:
         _age = _t.time() - _fids_last_good[0]
-        if _age <= FIDS_STALE_MAX_SEC:
+        if _age <= _fids_sec * 2:
             raw_flights = _fids_last_good[1]
             _stale_age = int(_age // 60)   # minutes
     opensky_data = fetch_opensky_states(anchor)
@@ -2028,7 +2174,7 @@ def _live_dashboard_impl():
     # api_last_hit is always populated before the countdown renders.
     api_t = st.session_state.get("api_last_hit")
     if api_t:
-        next_refresh_dt  = api_t + timedelta(seconds=API_DATA_TTL_SEC)
+        next_refresh_dt  = api_t + timedelta(seconds=_fids_sec)
         secs_until       = max(0, int((next_refresh_dt - now_aest).total_seconds()))
         mins_until, secs = divmod(secs_until, 60)
         refresh_txt      = f'{mins_until}m {secs:02d}s' if mins_until else f'{secs}s'
@@ -2145,7 +2291,7 @@ def _live_dashboard_impl():
     # feed still showed them inbound and the board claimed one was "On Ground".
     _low_vis = False
     try:
-        _m_now = fetch_metar(anchor)
+        _m_now = fetch_metar(_mt_anchor)
         _v_now = (_m_now or {}).get("vis_km")
         if _v_now is not None and _v_now <= LOW_VIS_DISRUPTION_KM:
             _low_vis = True
@@ -2463,12 +2609,12 @@ def _live_dashboard_impl():
     # Doing it synchronously removes the timing dependence entirely: whatever we
     # verify is available to this very render. The cost is bounded three ways —
     # only radar-tracked inbound flights, only those arriving within
-    # REG_VERIFY_WINDOW_MINS, and at most REG_VERIFY_MAX_PER_RUN cache misses per
+    # the mode's verify_window, and at most its verify_per_run cache misses per
     # render (soonest first) — on top of the existing daily budget. Cached
     # flights cost nothing, so steady-state renders do no work here at all.
-    if DEP_INFO_ENABLED and REG_VERIFY_MAX_PER_RUN > 0:
+    if DEP_INFO_ENABLED and _cfg["verify_per_run"] > 0:
         # Eligible window runs from RECENT_LANDED_MAX minutes in the PAST to
-        # REG_VERIFY_WINDOW_MINS ahead. Including just-landed flights matters:
+        # the mode's verify_window ahead. Including just-landed flights matters:
         # their passengers are still coming through, and a landed flight is when
         # the airframe is most certain — excluding them left the freshly-landed
         # cards showing whatever the airport feed had associated.
@@ -2479,7 +2625,7 @@ def _live_dashboard_impl():
              and not p.get("is_canceled") and not p.get("is_diverted")
              and p.get("dt") is not None and p.get("s_dt_iso")
              and -RECENT_LANDED_MAX <= (p["dt"] - now_aest).total_seconds() / 60
-                                    <= REG_VERIFY_WINDOW_MINS),
+                                    <= _cfg["verify_window"]),
             key=lambda p: abs((p["dt"] - now_aest).total_seconds()),
         )
         _spent = 0
@@ -2491,16 +2637,22 @@ def _live_dashboard_impl():
                                 datetime.now().timestamp() - _dep_fails[_k] < DEP_FAIL_TTL_SEC)
             if _hit or _recent_fail:
                 continue               # already in this run's cache — free
-            if _spent >= REG_VERIFY_MAX_PER_RUN:
+            if _spent >= _cfg["verify_per_run"]:
                 break                  # cap this render; the rest resolve later
             # Shared cache: costs an API call only if no session has looked this
             # flight up recently. A cross-session hit returns immediately.
+            _n_before = _dep_budget["n"]
             _res = _verify_leg_shared(p.get("num", ""), _k.split("|")[-1],
                                       p.get("s_dt_iso") or "")
             if _res is not None:
                 with _dep_lock:
                     _dep_cache[_k] = _res      # seed this run's cache for render
-            _spent += 1
+            # Count only lookups that actually hit the API (they draw on the
+            # daily budget). Until V12.81 a free cross-session cache hit counted
+            # too, so on every new session the soonest few flights used up the
+            # per-render cap for nothing and later flights waited a turn.
+            if _dep_budget["n"] != _n_before:
+                _spent += 1
 
     # ── Gap Detection ─────────────────────────────────────────────────────────
     gap_candidates = sorted(
@@ -2695,7 +2847,7 @@ def _live_dashboard_impl():
     # without realising. Show a prominent red banner.
     if api_t:
         age_minutes = int((now_aest - api_t).total_seconds() / 60)
-        stale_threshold_min = int(API_DATA_TTL_SEC / 60 * 2)
+        stale_threshold_min = int(_fids_sec / 60 * 2)
         if age_minutes > stale_threshold_min:
             st.markdown(f"""
             <div style="background:{t.c_red}; color:white; padding:10px 14px;
@@ -2722,11 +2874,11 @@ def _live_dashboard_impl():
 
     # ── Weather strip (BNE current conditions) ────────────────────────────────
     try:
-        _om = fetch_weather(anchor)          # Open-Meteo: current + 3h forecast
+        _om = fetch_weather(_wx_anchor)      # Open-Meteo: current + 3h forecast
     except Exception:
         _om = None
     try:
-        _metar = fetch_metar(anchor)         # NOAA METAR: real airport observation
+        _metar = fetch_metar(_mt_anchor)     # NOAA METAR: real airport observation
     except Exception:
         _metar = None
     # Prefer METAR for CURRENT conditions (real observation, has visibility);
@@ -2953,7 +3105,7 @@ def _live_dashboard_impl():
 
         # Aircraft extras (age / seats / freighter) from the background Tier-1 cache.
         bits = []
-        if AC_LOOKUP_ON_RENDER:
+        if _cfg["ac_lookup"]:
             _ai = get_aircraft_info(display_reg)
         else:
             # Cache-only: show the detail if another code path already fetched
@@ -3098,8 +3250,16 @@ def _live_dashboard_impl():
                 </div>
             </div>""", unsafe_allow_html=True)
 
+    _q_txt = ""
+    try:
+        with _quota["lock"]:
+            _q_used, _q_mode = _quota["used"], _quota["mode"]
+        if _q_used is not None:
+            _q_txt = f" · API {_q_used:.0%} / {QUOTA_TARGET:.0%} · {_q_mode}"
+    except Exception:
+        pass
     st.markdown(
-        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.80</div>",
+        f"<div style='text-align:center; color:{t.text_muted}; font-size:0.65em; margin-top:20px;'>Dev: Phillip Yeh | V12.81{_q_txt}</div>",
         unsafe_allow_html=True,
     )
 
